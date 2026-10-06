@@ -15,5 +15,8 @@ for f in package.json apps/api/package.json apps/web/package.json; do
 done
 npm install --package-lock-only >/dev/null
 npm run typecheck && npm test
-git add -A && git commit -m "release: v$V" && git tag "v$V"
+git add -A
+# Bản đầu tiên version đã đúng sẵn → không có gì để commit, chỉ gắn tag.
+git diff --cached --quiet || git commit -m "release: v$V"
+git tag "v$V"
 echo "✓ Đã tạo tag v$V. Đẩy lên:  git push && git push --tags"
