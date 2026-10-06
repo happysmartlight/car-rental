@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Kiểm tra migration khớp lược đồ
+        run: |
+          cd apps/api && npx drizzle-kit generate --name ci-check
+          if [ -n "$(git status --porcelain drizzle)" ]; then
+            echo "::error::schema.ts đã đổi nhưng chưa chạy 'npm run db:generate'"; git status --porcelain drizzle; exit 1
+          fi
+      - name: Kiểm tra cú pháp shell
+        run: sh -n deploy/updater.sh && bash -n deploy/setup.sh && sh -n deploy/docker-entrypoint.sh

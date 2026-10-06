@@ -1,0 +1,23 @@
+{
+  "name": "car-rental",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "build": "npm run build -w apps/web && npm run build -w apps/api",
+    "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web",
+    "test": "npm test -w apps/api",
+    "db:generate": "npm run db:generate -w apps/api",
+    "release": "bash scripts/release.sh",
+    "seed:demo": "npm run seed:demo -w apps/api"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

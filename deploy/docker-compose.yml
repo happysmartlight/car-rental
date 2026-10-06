@@ -1,0 +1,80 @@
+# Car Rental — stack chạy trên Raspberry Pi 5, thư mục ~/car-rental
+#
+# Cài lần đầu bằng setup.sh (tạo .env, chown, tailscale serve). Sau đó mọi cập
+# nhật làm trong app: Cài đặt → Phiên bản & cập nhật. File này cũng được updater
+# thay bằng bản đi kèm mỗi phiên bản mới (giữ nguyên .env).
+# Muốn tùy biến riêng: tạo docker-compose.override.yml cạnh file này.
+
+name: car-rental
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  car-rental:
+    image: ghcr.io/happysmartlight/car-rental:${CAR_RENTAL_VERSION:-latest}
+    container_name: car-rental
+    restart: unless-stopped
+    # Bind 127.0.0.1 (cho Tailscale Serve) + IP LAN — KHÔNG 0.0.0.0: đụng cổng
+    # tailscaled đang nghe trên IP Tailscale cùng số cổng.
+    ports:
+      - '127.0.0.1:${PORT:-3002}:3000'
+      - '${LAN_IP:?Chưa đặt LAN_IP trong .env}:${PORT:-3002}:3000'
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      GOTENBERG_URL: http://gotenberg:3000
+      GITHUB_REPO: happysmartlight/car-rental
+      PUBLIC_URL: ${PUBLIC_URL:-}
+    volumes:
+      - ./data:/data
+    depends_on:
+      - gotenberg
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging: *logging
+
+  # Đổi .docx → PDF (LibreOffice). Chỉ trong mạng nội bộ của stack, không mở cổng.
+  # Tiến trình LibreOffice chỉ khởi động khi có yêu cầu đầu tiên.
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: car-rental-gotenberg
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    logging: *logging
+
+  # Nút "Cập nhật" trong app. Container này cầm docker socket (quyền ngang root)
+  # nên KHÔNG mở cổng mạng nào: chỉ đọc file yêu cầu trong data/update/.
+  updater:
+    image: docker:28-cli
+    container_name: car-rental-updater
+    restart: unless-stopped
+    init: true
+    entrypoint: ['/bin/sh', '${STACK_DIR:?Chưa đặt STACK_DIR trong .env}/updater/updater.sh']
+    environment:
+      STACK_DIR: ${STACK_DIR}
+      SERVICE: car-rental
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Đúng đường dẫn như trên host: docker compose gửi đường dẫn bind mount
+      # thẳng cho Docker daemon, daemon hiểu theo hệ thống file của host.
+      - ${STACK_DIR}:${STACK_DIR}
+    logging:
+      driver: json-file
+      options:
+        max-size: '2m'
+        max-file: '2'
