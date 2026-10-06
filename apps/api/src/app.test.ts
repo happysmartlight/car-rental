@@ -180,6 +180,9 @@ describe('luồng một lượt thuê', () => {
     expect(edge.json.matches[0].nearBoundary).toBe(true);
     const miss = await call('GET', `/api/fines/lookup?plate=51K12345&at=${at('2026-10-13T09:00')}`);
     expect(miss.json.verdict).toBe('idle');
+    const before = (await call('GET', '/api/system/audit?entity=vehicle&limit=200')).json.items.length;
+    await call('GET', `/api/fines/lookup?plate=51K12345&at=${at('2026-10-11T15:00')}&preview=1`);
+    expect((await call('GET', '/api/system/audit?entity=vehicle&limit=200')).json.items.length).toBe(before);
     const unknown = await call('GET', `/api/fines/lookup?plate=30A99999&at=${at('2026-10-13T09:00')}`);
     expect(unknown.json.verdict).toBe('unknown_vehicle');
   });

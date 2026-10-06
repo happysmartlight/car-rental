@@ -3,6 +3,13 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.1] - 2026-10-06
+
+### Cải tiến
+- **Ghi phạt nguội thủ công thông minh hơn**: chọn xe từ danh sách đội xe (vẫn có "Biển khác" để nhập tay). Vừa chọn giờ vi phạm là app tra ngược lịch sử thuê và hiện ngay người đang giữ xe lúc đó — tên, SĐT, CCCD, mã hợp đồng, giờ giao/nhận, lái phụ — và tự gắn hồ sơ vào khách đó khi lưu.
+- Vi phạm sát giờ giao/nhận xe có cảnh báo đối chiếu ảnh và biên bản. Xe ở bãi lúc đó thì gợi ý các lượt thuê kề trước/sau (trong 6 giờ) để chọn nếu giờ trên thông báo bị lệch. Lượt đặt chưa ghi giao xe, xe đang bảo dưỡng/sửa chữa cũng được báo rõ.
+- Bấm vào thẻ khách để gắn hoặc bỏ gắn; mở lại hồ sơ cũ không tự đổi khách đã gắn.
+
 ## [0.2.0] - 2026-10-06
 
 ### Mới

@@ -15,6 +15,7 @@ import { useAction } from '@/lib/hooks';
 import type { FineListItem, FineLookup, TrafficFine, VehicleWithStatus } from '@/lib/types';
 import { cn, errorMessage, telLink, zaloLink } from '@/lib/utils';
 import { BLOCK_KIND_LABEL, FINE_SOURCES, FINE_SOURCE_LABEL, FINE_STATUS, FINE_STATUSES, type FineSource, type FineStatus } from '@shared/constants';
+import { plateKey } from '@shared/text';
 import { fmtDateTime } from '@shared/time';
 
 interface FineForm {
@@ -286,17 +287,131 @@ export default function Fines() {
         </Card>
       </div>
 
-      <FineDialog form={form} onClose={() => setForm(null)} />
+      <FineDialog form={form} onClose={() => setForm(null)} vehicles={vehicles ?? []} />
     </Page>
   );
 }
 
-function FineDialog({ form, onClose }: { form: FineForm | null; onClose: () => void }) {
+const OTHER_PLATE = '__other';
+
+/**
+ * Tra ngược ngay khi có biển số + giờ vi phạm: ai đang giữ xe lúc đó.
+ * Một người → tự gắn. Không ai thuê → gợi ý các lượt kề trước/sau (lệch đồng hồ camera).
+ */
+function HolderPanel({ plate, at, rentalId, onPick, autoPick }: { plate: string; at: number; rentalId: number | null; onPick: (rentalId: number | null) => void; autoPick: boolean }) {
+  const key = plateKey(plate);
+  const { data: r, isFetching } = useQuery({
+    queryKey: ['fine-lookup-preview', key, at],
+    queryFn: () => api.get<FineLookup>(`/api/fines/lookup${qs({ plate: key, at, preview: 1 })}`),
+    placeholderData: (prev) => prev,
+  });
+  const fresh = r && r.plateKey === key && r.at === at;
+  // Chỉ tự gắn khi ghi mới hoặc vừa đổi xe/giờ — mở lại hồ sơ cũ thì giữ nguyên lượt đã gắn.
+  useEffect(() => {
+    if (!fresh || !autoPick) return;
+    onPick(r.matches.length === 1 ? r.matches[0].rental.id : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fresh, key, at]);
+
+  if (!r || !fresh) {
+    return (
+      <p className="flex items-center gap-2 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted">
+        <Spinner className="size-4" /> Đang tra lịch sử thuê…
+      </p>
+    );
+  }
+
+  const pickable = (id: number) =>
+    cn('w-full rounded-2xl border p-3 text-left transition-colors', rentalId === id ? 'border-brand bg-brand-soft ring-2 ring-brand/30' : 'border-border hover:bg-surface-2');
+
+  return (
+    <div className={cn('space-y-2', isFetching && 'opacity-70')}>
+      {r.matches.map((m) => (
+        <button key={m.segment.id} type="button" onClick={() => onPick(rentalId === m.rental.id ? null : m.rental.id)} className={pickable(m.rental.id)}>
+          <p className="text-xs font-medium tracking-wide text-muted uppercase">Người giữ xe lúc {fmtDateTime(at)}</p>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-lg font-semibold">
+            <UserRound className="size-5 text-brand" />
+            {m.customer.fullName}
+            {m.customer.blacklisted && <Badge tone="red">Danh sách đen</Badge>}
+            {rentalId === m.rental.id && <Badge tone="blue">Sẽ gắn hồ sơ vào khách này</Badge>}
+          </p>
+          <p className="mt-1 text-sm text-muted">
+            {[m.customer.phone, m.customer.idNumber && `CCCD ${m.customer.idNumber}`].filter(Boolean).join(' · ')}
+          </p>
+          <p className="text-sm text-muted">
+            {m.rental.code} · giao {fmtDateTime(m.segment.startAt)} → {m.segment.endAt ? `nhận ${fmtDateTime(m.segment.endAt)}` : 'đang thuê'}
+          </p>
+          {m.drivers.length > 0 && <p className="text-sm text-muted">Lái phụ: {m.drivers.map((d) => d.fullName).join(', ')}</p>}
+          {m.nearBoundary && (
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="size-3.5" /> Sát giờ giao/nhận xe — đối chiếu ảnh và biên bản trước khi báo khách.
+            </p>
+          )}
+        </button>
+      ))}
+
+      {r.verdict === 'blocked' &&
+        r.blocks.map((b) => (
+          <Notice key={b.id} tone="amber" icon={Wrench}>
+            Lúc đó xe đang <b>{BLOCK_KIND_LABEL[b.kind].toLowerCase()}</b>
+            {b.location && ` tại ${b.location}`} ({fmtDateTime(b.startAt)} → {b.endAt ? fmtDateTime(b.endAt) : 'chưa kết thúc'}).
+          </Notice>
+        ))}
+      {r.verdict === 'idle' && <Notice tone="blue" icon={Car}>Không có lượt thuê nào lúc {fmtDateTime(at)} — xe ở bãi theo dữ liệu đã ghi.</Notice>}
+      {r.verdict === 'unknown_vehicle' && <Notice tone="gray">Biển số này không thuộc đội xe — vẫn ghi được, chưa gắn khách.</Notice>}
+
+      {r.scheduledOnly.map((x) => (
+        <button key={`s${x.rental.id}`} type="button" onClick={() => onPick(rentalId === x.rental.id ? null : x.rental.id)} className={pickable(x.rental.id)}>
+          <p className="text-sm font-medium text-red-600">Lượt {x.rental.code} theo lịch trùng giờ này nhưng chưa ghi nhận giao xe</p>
+          <p className="text-sm">
+            {x.customer.fullName} · {fmtDateTime(x.rental.scheduledStart)} → {fmtDateTime(x.rental.scheduledEnd)}
+          </p>
+          <p className="text-xs text-muted">{rentalId === x.rental.id ? 'Sẽ gắn hồ sơ vào lượt này' : 'Bấm để gắn vào lượt này'}</p>
+        </button>
+      ))}
+
+      {!r.matches.length && r.nearby.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted">Lượt thuê kề trước/sau (trong 6 giờ) — chọn nếu giờ trên thông báo lệch với giờ giao/nhận:</p>
+          {r.nearby.map((n) => (
+            <button key={`n${n.segment.id}`} type="button" onClick={() => onPick(rentalId === n.rental.id ? null : n.rental.id)} className={pickable(n.rental.id)}>
+              <p className="text-sm font-medium">
+                {n.customer.fullName} · {n.rental.code}
+              </p>
+              <p className="text-xs text-muted">
+                giao {fmtDateTime(n.segment.startAt)} → {n.segment.endAt ? `nhận ${fmtDateTime(n.segment.endAt)}` : 'đang thuê'}
+                {rentalId === n.rental.id && ' · sẽ gắn hồ sơ vào lượt này'}
+              </p>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FineDialog({ form, onClose, vehicles }: { form: FineForm | null; onClose: () => void; vehicles: VehicleWithStatus[] }) {
   const [f, setF] = useState<FineForm | null>(form);
-  useEffect(() => setF(form), [form]);
+  const [otherPlate, setOtherPlate] = useState(false);
+  const [touched, setTouched] = useState(false);
+  const inFleet = (plate: string) => vehicles.find((v) => plateKey(v.plate) === plateKey(plate));
+  useEffect(() => {
+    setF(form);
+    setTouched(false);
+    setOtherPlate(!!form?.plate && !inFleet(form.plate));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form]);
   const save = useAction(
     () => {
-      const body = { ...f!, location: f!.location || null, violation: f!.violation || null, notes: f!.notes || null };
+      const body = {
+        ...f!,
+        location: f!.location || null,
+        violation: f!.violation || null,
+        notes: f!.notes || null,
+        rentalId: f!.rentalId,
+        // Bỏ gắn lượt thuê → bỏ luôn khách; có lượt thì máy chủ tự lấy khách của lượt đó.
+        ...(f!.rentalId ? {} : { customerId: null }),
+      };
       return f!.id ? api.patch<TrafficFine>(`/api/fines/${f!.id}`, body) : api.post<TrafficFine>('/api/fines', body);
     },
     {
@@ -306,53 +421,97 @@ function FineDialog({ form, onClose }: { form: FineForm | null; onClose: () => v
     },
   );
   if (!f) return null;
-  const set = <K extends keyof FineForm>(k: K, v: FineForm[K]) => setF({ ...f, [k]: v });
+  const set = <K extends keyof FineForm>(k: K, v: FineForm[K]) => setF((cur) => (cur ? { ...cur, [k]: v } : cur));
+  const plateOk = plateKey(f.plate).length >= 5;
+  const fleetValue = otherPlate ? OTHER_PLATE : (inFleet(f.plate)?.plate ?? '');
+
   return (
     <Dialog
       open={!!form}
       onOpenChange={(o) => !o && onClose()}
       title={f.id ? 'Vi phạm' : 'Ghi phạt nguội'}
-      description={!f.id ? 'App tự gắn với lượt thuê đang giữ xe lúc vi phạm' : undefined}
-      footer={<Button onClick={() => save.mutate()} loading={save.isPending} disabled={!f.plate || !f.violatedAt}>Lưu</Button>}
+      description={!f.id ? 'Chọn xe và giờ vi phạm — app tra ngay ai đang giữ xe lúc đó' : undefined}
+      size="lg"
+      footer={
+        <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!plateOk || !f.violatedAt}>
+          Lưu
+        </Button>
+      }
     >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Biển số" required>
-          <Input value={f.plate} onChange={(e) => set('plate', e.target.value)} />
-        </Field>
-        <Field label="Thời điểm vi phạm" required>
-          <DateTimeInput value={f.violatedAt} onChange={(v) => set('violatedAt', v)} />
-        </Field>
-        <Field label="Lỗi vi phạm" className="sm:col-span-2">
-          <Input value={f.violation} onChange={(e) => set('violation', e.target.value)} placeholder="Chạy quá tốc độ, vượt đèn đỏ…" />
-        </Field>
-        <Field label="Địa điểm" className="sm:col-span-2">
-          <Input value={f.location} onChange={(e) => set('location', e.target.value)} />
-        </Field>
-        <Field label="Mức phạt">
-          <MoneyInput value={f.amount} onChange={(v) => set('amount', v)} />
-        </Field>
-        <Field label="Nguồn">
-          <Select value={f.source} onChange={(e) => set('source', e.target.value as FineSource)}>
-            {FINE_SOURCES.map((s) => (
-              <option key={s} value={s}>
-                {FINE_SOURCE_LABEL[s]}
+      <div className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Xe" required>
+            <Select
+              value={fleetValue}
+              onChange={(e) => {
+                const v = e.target.value;
+                setTouched(true);
+                setOtherPlate(v === OTHER_PLATE);
+                setF((cur) => (cur ? { ...cur, plate: v === OTHER_PLATE ? '' : v, rentalId: null } : cur));
+              }}
+            >
+              <option value="" disabled>
+                — Chọn xe —
               </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Trạng thái" className="sm:col-span-2">
-          <Select value={f.status} onChange={(e) => set('status', e.target.value as FineStatus)}>
-            {FINE_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {FINE_STATUS[s].label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Ghi chú" className="sm:col-span-2">
-          <Textarea value={f.notes} onChange={(e) => set('notes', e.target.value)} />
-        </Field>
-        <PhotoInput kind="fine_notice" label="Ảnh thông báo vi phạm" value={f.noticeFileId} onChange={(v) => set('noticeFileId', v)} className="sm:col-span-2 sm:max-w-56" />
+              {vehicles.map((v) => (
+                <option key={v.id} value={v.plate}>
+                  {v.plate} · {[v.make, v.model].filter(Boolean).join(' ')}
+                </option>
+              ))}
+              <option value={OTHER_PLATE}>Biển khác (nhập tay)…</option>
+            </Select>
+            {otherPlate && <Input className="mt-2" value={f.plate} onChange={(e) => { setTouched(true); set('plate', e.target.value); }} placeholder="vd 51K-123.45" autoCapitalize="characters" autoFocus />}
+          </Field>
+          <Field label="Thời điểm vi phạm" required hint="Ghi trên thông báo phạt / kết quả tra cứu">
+            <DateTimeInput
+              value={f.violatedAt}
+              onChange={(v) => {
+                setTouched(true);
+                setF((cur) => (cur ? { ...cur, violatedAt: v } : cur));
+              }}
+            />
+          </Field>
+        </div>
+
+        {plateOk && f.violatedAt ? (
+          <HolderPanel plate={f.plate} at={f.violatedAt} rentalId={f.rentalId} onPick={(id) => set('rentalId', id)} autoPick={!f.id || touched} />
+        ) : (
+          <p className="rounded-2xl border border-dashed border-border-strong px-4 py-3 text-sm text-muted">Chọn xe và giờ vi phạm để xem ai đang giữ xe lúc đó.</p>
+        )}
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Lỗi vi phạm" className="sm:col-span-2">
+            <Input value={f.violation} onChange={(e) => set('violation', e.target.value)} placeholder="Chạy quá tốc độ, vượt đèn đỏ…" />
+          </Field>
+          <Field label="Địa điểm" className="sm:col-span-2">
+            <Input value={f.location} onChange={(e) => set('location', e.target.value)} />
+          </Field>
+          <Field label="Mức phạt">
+            <MoneyInput value={f.amount} onChange={(v) => set('amount', v)} />
+          </Field>
+          <Field label="Nguồn">
+            <Select value={f.source} onChange={(e) => set('source', e.target.value as FineSource)}>
+              {FINE_SOURCES.map((s) => (
+                <option key={s} value={s}>
+                  {FINE_SOURCE_LABEL[s]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Trạng thái" className="sm:col-span-2">
+            <Select value={f.status} onChange={(e) => set('status', e.target.value as FineStatus)}>
+              {FINE_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {FINE_STATUS[s].label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Ghi chú" className="sm:col-span-2">
+            <Textarea value={f.notes} onChange={(e) => set('notes', e.target.value)} />
+          </Field>
+          <PhotoInput kind="fine_notice" label="Ảnh thông báo vi phạm" value={f.noticeFileId} onChange={(v) => set('noticeFileId', v)} className="sm:col-span-2 sm:max-w-56" />
+        </div>
       </div>
     </Dialog>
   );

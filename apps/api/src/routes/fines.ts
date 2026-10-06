@@ -27,9 +27,10 @@ const zFine = z.object({
 export async function fineRoutes(app: FastifyInstance) {
   app.get('/api/fines/lookup', async (req) => {
     requireRole(req, 'staff');
-    const q = parse(z.object({ plate: z.string().trim().min(3), at: zMs }), req.query);
+    const q = parse(z.object({ plate: z.string().trim().min(3), at: zMs, preview: z.enum(['0', '1']).default('0') }), req.query);
     const result = lookupFine(q.plate, q.at);
-    audit(req, 'fine.lookup', 'vehicle', result.vehicle?.id ?? null, { plate: q.plate, at: q.at, verdict: result.verdict });
+    // preview = tra ngược tự động khi đang điền form → không ghi nhật ký mỗi lần đổi giờ.
+    if (q.preview !== '1') audit(req, 'fine.lookup', 'vehicle', result.vehicle?.id ?? null, { plate: q.plate, at: q.at, verdict: result.verdict });
     return result;
   });
 
