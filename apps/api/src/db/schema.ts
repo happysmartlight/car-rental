@@ -117,6 +117,10 @@ export const vehicles = sqliteTable('vehicles', {
   overKmFee: integer('over_km_fee').notNull().default(0),
   overHourFee: integer('over_hour_fee').notNull().default(0),
   depositAmount: integer('deposit_amount').notNull().default(0),
+  /** Giá thuê tháng (null/0 = không nhận thuê tháng). */
+  priceMonth: integer('price_month'),
+  /** Giới hạn km mỗi tháng (null = 30 × km/ngày). */
+  kmLimitMonth: integer('km_limit_month'),
   inspectionExpiry: text('inspection_expiry'),
   insuranceTndsExpiry: text('insurance_tnds_expiry'),
   insuranceBodyExpiry: text('insurance_body_expiry'),

@@ -48,7 +48,7 @@ export function CustomerPicker({ value, onChange, placeholder = 'Tìm khách: t�
         <Input value={q} onChange={(e) => setQ(e.target.value)} onFocus={() => setFocused(true)} onBlur={() => setTimeout(() => setFocused(false), 200)} placeholder={placeholder} className="pl-9" />
         {isFetching && <Spinner className="absolute top-1/2 right-3 size-4 -translate-y-1/2" />}
         {focused && dq && (
-          <div className="anim-fade absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-2xl border border-border bg-surface shadow-pop">
+          <div className="anim-fade absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-2xl border border-border-strong bg-popover p-1 shadow-pop">
             {items.length ? (
               items.map((c) => (
                 <button
@@ -59,12 +59,12 @@ export function CustomerPicker({ value, onChange, placeholder = 'Tìm khách: t�
                     onChange(c);
                     setQ('');
                   }}
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-2"
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-hover"
                 >
                   <Avatar name={c.fullName} fileId={c.portraitFileId} size="size-8" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">
-                      {c.fullName} {c.blacklisted && <span className="text-red-600">· danh sách đen</span>}
+                      {c.fullName} {c.blacklisted && <span className="text-red-600 dark:text-red-400">· danh sách đen</span>}
                     </span>
                     <span className="block truncate text-xs text-muted">{[c.phone, c.idNumber].filter(Boolean).join(' · ')}</span>
                   </span>

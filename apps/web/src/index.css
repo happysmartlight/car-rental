@@ -13,10 +13,12 @@
   --surface-2: #f0f2f5;
   --surface-3: #e7eaef;
   --border: #e3e6eb;
-  --border-strong: #cfd4dc;
+  --border-strong: #c3c9d3;
+  --popover: #ffffff;
+  --hover: #eef1f5;
   --fg: #0e1420;
   --muted: #5f6b7d;
-  --subtle: #8a94a5;
+  --subtle: #7d8798;
   --brand: #2563eb;
   --brand-hover: #1d4ed8;
   --brand-soft: #e8efff;
@@ -33,10 +35,13 @@
   --surface-2: #191d26;
   --surface-3: #222734;
   --border: #242a36;
-  --border-strong: #333a49;
+  --border-strong: #4a5468;
+  /* Lớp nổi (menu, danh sách xổ xuống) phải sáng hơn thẻ phía sau mới không bị chìm. */
+  --popover: #1d2230;
+  --hover: #2c3446;
   --fg: #e8eaf0;
-  --muted: #9aa3b5;
-  --subtle: #6e778a;
+  --muted: #a3acbd;
+  --subtle: #8089a0;
   --brand: #4f8dfd;
   --brand-hover: #6a9ffd;
   --brand-soft: #172446;
@@ -55,6 +60,8 @@
   --color-surface-3: var(--surface-3);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
+  --color-popover: var(--popover);
+  --color-hover: var(--hover);
   --color-fg: var(--fg);
   --color-muted: var(--muted);
   --color-subtle: var(--subtle);
@@ -97,6 +104,45 @@
       font-size: 14px;
     }
   }
+}
+
+/* Ô chọn: mũi tên vẽ bằng CSS (viết bg-[…] trong class thì tailwind-merge xóa mất bg-surface). */
+@utility select-chevron {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a94a5' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 16px;
+}
+
+@layer base {
+  /* Danh sách lựa chọn của ô chọn gốc (Windows/Android vẽ theo màu này). */
+  select option,
+  select optgroup {
+    background-color: var(--popover);
+    color: var(--fg);
+  }
+}
+
+/* Lưới an toàn: chữ màu trạng thái đậm (…-600/700) tự sáng lên trong giao diện tối để đủ tương phản. */
+.dark .text-red-600,
+.dark .text-red-700 {
+  color: var(--color-red-400);
+}
+.dark .text-emerald-600,
+.dark .text-emerald-700 {
+  color: var(--color-emerald-400);
+}
+.dark .text-amber-600,
+.dark .text-amber-700,
+.dark .text-amber-800 {
+  color: var(--color-amber-400);
+}
+.dark .text-blue-600,
+.dark .text-blue-700 {
+  color: var(--color-blue-400);
+}
+.dark .text-violet-600 {
+  color: var(--color-violet-400);
 }
 
 @utility tabular {

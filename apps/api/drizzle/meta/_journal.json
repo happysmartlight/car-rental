@@ -15,6 +15,13 @@
       "when": 1791293136768,
       "tag": "0001_accessories",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791295812887,
+      "tag": "0002_monthly_price",
+      "breakpoints": true
     }
   ]
 }

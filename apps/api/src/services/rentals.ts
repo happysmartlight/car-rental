@@ -23,6 +23,8 @@ export function vehiclePricing(v: Vehicle): VehiclePricing {
     kmLimitDay: v.kmLimitDay,
     overKmFee: v.overKmFee,
     overHourFee: v.overHourFee,
+    priceMonth: v.priceMonth,
+    kmLimitMonth: v.kmLimitMonth,
   };
 }
 

@@ -4,7 +4,7 @@ import { buildVietQrPayload, crc16, sanitizeTransferNote } from './vietqr.js';
 import { parseCccdQr } from './cccd.js';
 import { DEFAULT_PRICING_RULES, overKmCharge, overtimeCharge, quoteRental, type VehiclePricing } from './pricing.js';
 import { planSettlement, summarizeMoney } from './money.js';
-import { fmtDateTime, msToVnLocalInput, vnDateLong, vnLocalInputToMs } from './time.js';
+import { addMonthsVn, fmtDateTime, msToVnLocalInput, vnDateLong, vnLocalInputToMs } from './time.js';
 
 describe('đọc số tiền bằng chữ', () => {
   const cases: [number, string][] = [
@@ -127,6 +127,49 @@ describe('tính giá', () => {
   it('vượt km', () => {
     expect(overKmCharge(10000, 10700, 600, 3000)?.amount).toBe(300000);
     expect(overKmCharge(10000, 10500, 600, 3000)).toBeNull();
+  });
+});
+
+describe('thuê tháng', () => {
+  const monthly: VehiclePricing = { ...car, priceMonth: 15_000_000, kmLimitMonth: 3000 };
+  it('cộng tháng dương lịch, ngày cuối tháng lùi về cuối tháng sau', () => {
+    expect(msToVnLocalInput(addMonthsVn(at('2027-01-31T08:00'), 1))).toBe('2027-02-28T08:00');
+    expect(msToVnLocalInput(addMonthsVn(at('2026-10-05T08:30'), 3))).toBe('2027-01-05T08:30');
+  });
+  it('đúng 1 tháng', () => {
+    const q = quoteRental(at('2026-10-05T08:00'), at('2026-11-05T08:00'), monthly, DEFAULT_PRICING_RULES);
+    expect(q).toMatchObject({ mode: 'month', months: 1, total: 15_000_000, kmLimit: 3000 });
+  });
+  it('trả trong ân hạn vẫn tính đủ 1 tháng', () => {
+    expect(quoteRental(at('2026-10-05T08:00'), at('2026-11-05T08:45'), monthly, DEFAULT_PRICING_RULES).total).toBe(15_000_000);
+  });
+  it('1 tháng + 10 ngày lẻ tính giá tháng ÷ 30', () => {
+    const q = quoteRental(at('2026-10-05T08:00'), at('2026-11-15T08:00'), monthly, DEFAULT_PRICING_RULES);
+    expect(q.months).toBe(1);
+    expect(q.days).toBe(10);
+    expect(q.total).toBe(15_000_000 + 10 * 500_000);
+    expect(q.kmLimit).toBe(4000);
+  });
+  it('3 tháng', () => {
+    const q = quoteRental(at('2026-10-05T08:00'), at('2027-01-05T08:00'), monthly, DEFAULT_PRICING_RULES);
+    expect(q).toMatchObject({ months: 3, total: 45_000_000, kmLimit: 9000 });
+  });
+  it('chưa đủ tháng nhưng tính ngày đắt hơn → áp giá 1 tháng', () => {
+    const q = quoteRental(at('2026-10-05T08:00'), at('2026-10-30T08:00'), monthly, DEFAULT_PRICING_RULES);
+    expect(q).toMatchObject({ mode: 'month', total: 15_000_000 });
+  });
+  it('thuê ngắn vẫn tính theo ngày', () => {
+    const q = quoteRental(at('2026-10-05T08:00'), at('2026-10-08T08:00'), monthly, DEFAULT_PRICING_RULES);
+    expect(q).toMatchObject({ mode: 'day', total: 2_400_000 });
+  });
+  it('không đặt giới hạn km/tháng → 30 × km/ngày', () => {
+    const q = quoteRental(at('2026-10-05T08:00'), at('2026-11-05T08:00'), { ...monthly, kmLimitMonth: null }, DEFAULT_PRICING_RULES);
+    expect(q.kmLimit).toBe(9000);
+  });
+  it('xe không có giá tháng → luôn tính ngày', () => {
+    const q = quoteRental(at('2026-10-05T08:00'), at('2026-11-05T08:00'), car, DEFAULT_PRICING_RULES);
+    expect(q.mode).toBe('day');
+    expect(q.months).toBe(0);
   });
 });
 

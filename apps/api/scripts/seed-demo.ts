@@ -49,11 +49,11 @@ setSetting('business', {
 setSetting('rules', { ...getSetting('rules'), holidays: [{ name: 'Tết Nguyên đán', from: '2027-02-05', to: '2027-02-12', surchargePct: 50 }] });
 
 const cars = [
-  { plate: '51K-123.45', make: 'Toyota', model: 'Vios 1.5G', year: 2023, color: 'Trắng', seats: 5, priceDay: 800000, priceWeekendDay: 950000, odo: 31000, inspectionExpiry: '2026-10-20' },
-  { plate: '51H-678.90', make: 'Mitsubishi', model: 'Xpander AT', year: 2022, color: 'Bạc', seats: 7, priceDay: 1000000, priceWeekendDay: 1200000, odo: 48000, insuranceTndsExpiry: '2026-10-12' },
+  { plate: '51K-123.45', make: 'Toyota', model: 'Vios 1.5G', year: 2023, color: 'Trắng', seats: 5, priceDay: 800000, priceWeekendDay: 950000, priceMonth: 15000000, kmLimitMonth: 3000, odo: 31000, inspectionExpiry: '2026-10-20' },
+  { plate: '51H-678.90', make: 'Mitsubishi', model: 'Xpander AT', year: 2022, color: 'Bạc', seats: 7, priceDay: 1000000, priceWeekendDay: 1200000, priceMonth: 20000000, odo: 48000, insuranceTndsExpiry: '2026-10-12' },
   { plate: '51L-246.80', make: 'Kia', model: 'Seltos Premium', year: 2024, color: 'Đỏ', seats: 5, priceDay: 1100000, priceWeekendDay: 1300000, odo: 15420 },
-  { plate: '51G-135.79', make: 'Hyundai', model: 'Accent AT', year: 2021, color: 'Đen', seats: 5, priceDay: 750000, priceWeekendDay: 850000, odo: 66800, nextServiceOdo: 67500 },
-  { plate: '51K-999.88', make: 'VinFast', model: 'VF 6 Plus', year: 2025, color: 'Xanh', seats: 5, priceDay: 1200000, priceWeekendDay: 1400000, odo: 8900, fuel: 'electric' as const },
+  { plate: '51G-135.79', make: 'Hyundai', model: 'Accent AT', year: 2021, color: 'Đen', seats: 5, priceDay: 750000, priceWeekendDay: 850000, priceMonth: 14000000, odo: 66800, nextServiceOdo: 67500 },
+  { plate: '51K-999.88', make: 'VinFast', model: 'VF 6 Plus', year: 2025, color: 'Xanh', seats: 5, priceDay: 1200000, priceWeekendDay: 1400000, priceMonth: 22000000, kmLimitMonth: 4000, odo: 8900, fuel: 'electric' as const },
 ];
 const vehicleIds: number[] = [];
 for (const c of cars) {

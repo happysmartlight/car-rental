@@ -15,7 +15,7 @@ import type { Customer, Precheck, RentalDetail, VehicleWithStatus } from '@/lib/
 import { CHARGE_KINDS, CHARGE_KIND_LABEL, COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, type ChargeKind, type CollateralKind } from '@shared/constants';
 import { planSettlement } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
-import { DAY_MS, fmtDate, fmtDateTime } from '@shared/time';
+import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime } from '@shared/time';
 
 type DialogProps = { d: RentalDetail; open: boolean; onOpenChange: (o: boolean) => void };
 const inv = (id: number) => ({ invalidate: [['rental', String(id)], ['rentals'], ['dashboard'], ['calendar']] });
@@ -243,13 +243,13 @@ export function ReleaseHoldDialog({ d, open, onOpenChange }: DialogProps) {
     <Dialog open={open} onOpenChange={onOpenChange} title="Hoàn cọc giữ lại" description={`Đang giữ ${fmtVnd(d.money.depositHeld)} · hạn ${d.rental.fineHoldUntil ? fmtDate(d.rental.fineHoldUntil) : '—'}`} footer={<Button onClick={() => save.mutate()} loading={save.isPending} disabled={refund < 0}>Xác nhận</Button>}>
       <div className="space-y-4">
         <Notice tone="amber">
-          Tra phạt nguội biển <b>{d.vehicle.plate}</b> trên csgt.vn hoặc ứng dụng VNeTraffic cho khoảng {seg ? `${fmtDateTime(seg.startAt)} → ${fmtDateTime(seg.endAt)}` : 'thời gian thuê'} trước khi hoàn.
+          Kiểm tra phạt nguội biển <b>{d.vehicle.plate}</b> (trang Phạt nguội → Kiểm tra) cho khoảng {seg ? `${fmtDateTime(seg.startAt)} → ${fmtDateTime(seg.endAt)}` : 'thời gian thuê'} trước khi hoàn.
           <div className="mt-2 flex flex-wrap gap-3">
-            <a href="https://www.csgt.vn/tra-cuu-phuong-tien-vi-pham.html" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline">
-              Mở csgt.vn <ExternalLink className="size-3" />
+            <a href="https://csgt.bocongan.gov.vn/tra-cuu-phat-nguoi" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline">
+              Mở trang tra cứu chính thức <ExternalLink className="size-3" />
             </a>
             <Link to="/fines" className="font-medium underline">
-              Ghi phạt nguội vào app
+              Kiểm tra trong app
             </Link>
           </div>
         </Notice>
@@ -280,6 +280,13 @@ export function ReleaseHoldDialog({ d, open, onOpenChange }: DialogProps) {
 }
 
 // ── Sửa lịch / gia hạn ───────────────────────────────────────────────────────
+
+const EXTEND = [
+  { label: '+1 ngày', apply: (e: number) => e + DAY_MS },
+  { label: '+3 ngày', apply: (e: number) => e + 3 * DAY_MS },
+  { label: '+1 tuần', apply: (e: number) => e + 7 * DAY_MS },
+  { label: '+1 tháng', apply: (e: number) => addMonthsVn(e, 1) },
+];
 
 export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
   const r = d.rental;
@@ -353,9 +360,25 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
             <DateTimeInput value={end} onChange={setEnd} disabled={!['booked', 'active'].includes(r.status)} />
           </Field>
         </div>
+        {['booked', 'active'].includes(r.status) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted">Gia hạn nhanh:</span>
+            {EXTEND.map((x) => (
+              <button
+                key={x.label}
+                type="button"
+                onClick={() => setEnd(x.apply(end ?? r.scheduledEnd))}
+                className="rounded-full border border-border px-3 py-1 text-xs font-medium text-muted hover:bg-surface-2"
+              >
+                {x.label}
+              </button>
+            ))}
+          </div>
+        )}
         {pre && (end !== r.scheduledEnd || start !== r.scheduledStart || vehicleId !== r.vehicleId) && (
           <Notice tone="blue">
             Tiền thuê tính lại: {fmtVnd(oldRental)} → <b>{fmtVnd(pre.quote.total)}</b> ({pre.quote.lines.map((l) => l.description).join(', ')})
+            {pre.quote.mode === 'month' && ' — tính theo tháng'}
           </Notice>
         )}
         {pre?.conflicts.map((c) => (

@@ -38,9 +38,10 @@ function dirSize(dir: string): number {
 const mask = (s: string) => (s ? `${s.slice(0, 6)}…${s.slice(-4)}` : '');
 
 export async function systemRoutes(app: FastifyInstance) {
-  app.get('/api/health', async () => ({ ok: true, version: config.version }));
+  // Health check chạy 30s/lần (Docker) và trang web hỏi version liên tục → không ghi log.
+  app.get('/api/health', { logLevel: 'warn' }, async () => ({ ok: true, version: config.version }));
 
-  app.get('/api/version', async () => ({ version: config.version, commit: config.commit, buildTime: config.buildTime }));
+  app.get('/api/version', { logLevel: 'warn' }, async () => ({ version: config.version, commit: config.commit, buildTime: config.buildTime }));
 
   app.get('/api/system/info', async (req) => {
     requireRole(req, 'admin');

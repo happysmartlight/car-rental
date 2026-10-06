@@ -145,6 +145,10 @@ export default function VehicleDetail() {
               <InfoRow label="Giới hạn">{v.kmLimitDay ? `${fmtNumber(v.kmLimitDay)} km/ngày` : 'Không giới hạn'}</InfoRow>
               <InfoRow label="Vượt km">{fmtVnd(v.overKmFee)}/km</InfoRow>
               <InfoRow label="Quá giờ">{fmtVnd(v.overHourFee)}/giờ</InfoRow>
+              {!!v.priceMonth && <InfoRow label="Thuê tháng">{fmtVnd(v.priceMonth)}</InfoRow>}
+              {!!v.priceMonth && (
+                <InfoRow label="Km/tháng">{v.kmLimitMonth ? `${fmtNumber(v.kmLimitMonth)} km` : v.kmLimitDay ? `${fmtNumber(v.kmLimitDay * 30)} km` : 'Không giới hạn'}</InfoRow>
+              )}
               <InfoRow label="Cọc mặc định">{fmtVnd(v.depositAmount)}</InfoRow>
               {data.revenue != null && <InfoRow label="Tổng doanh thu">{fmtVnd(data.revenue)}</InfoRow>}
             </CardBody>

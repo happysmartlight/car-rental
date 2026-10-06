@@ -36,11 +36,11 @@ không cần mở terminal.
 | | |
 |---|---|
 | **Khách hàng** | Quét QR trên CCCD gắn chip / thẻ Căn cước để điền form (đọc ngay trên máy, không gửi ảnh đi đâu). Ảnh CCCD, GPLX. Báo trùng hồ sơ. Danh sách đen. Lịch sử thuê. |
-| **Đặt xe** | Báo giá trực tiếp: ngày thường / cuối tuần / lễ Tết, giờ lẻ, giới hạn km. Thấy xe nào trống. Chặn trùng lịch (có khoảng đệm rửa xe). Cảnh báo GPLX hết hạn, khách còn nợ phạt nguội. Lái phụ, cọc, tài sản thế chấp. |
+| **Đặt xe** | Báo giá trực tiếp: ngày thường / cuối tuần / lễ Tết, giờ lẻ, giới hạn km, **thuê tháng** (tự chọn cách tính rẻ hơn). Thấy xe nào trống. Chặn trùng lịch (có khoảng đệm rửa xe). Cảnh báo GPLX hết hạn, khách còn nợ phạt nguội. Lái phụ, cọc, tài sản thế chấp. |
 | **Hợp đồng tự động** | Mẫu Word (.docx) chèn biến `{khach.ho_ten}`… → xuất Word + PDF. Số tiền bằng chữ. Văn bản đã in được đóng băng, lưu ảnh bản giấy đã ký. 3 mẫu dựng sẵn: hợp đồng, biên bản giao xe, biên bản nhận xe & quyết toán. |
 | **Giao / nhận xe** | Trên điện thoại: ODO, mức xăng, 6 khung ảnh đóng dấu giờ + biển số, vết trầy có sẵn, giấy tờ kèm theo, khách ký trên màn hình. Lúc nhận xe so ảnh trước/sau, tự gợi ý phí trễ giờ, vượt km. |
 | **Tiền** | Sổ thu/chi từng lượt, VietQR đúng số tiền + nội dung, quyết toán cấn trừ cọc, **giữ lại một phần cọc chờ phạt nguội** rồi nhắc hoàn. |
-| **Phạt nguội** | Nhập biển số + giờ vi phạm → ai đang giữ xe (theo giờ giao/nhận thực tế), kèm SĐT, CCCD, hợp đồng, ảnh giao xe. Cảnh báo vi phạm sát giờ giao/nhận, lượt thuê quên ghi giao xe. Hồ sơ vi phạm, trừ cọc. |
+| **Phạt nguội** | Chọn biển số → Kiểm tra: mỗi vi phạm tìm được tự hiện người đang giữ xe lúc đó (theo giờ giao/nhận thực tế), ghi hồ sơ một chạm. Dịch vụ tra cứu lỗi thì dán kết quả từ trang chính thức. Tự kiểm tra cả đội hằng ngày/tuần, báo Telegram. Có thông báo giấy thì tra theo giờ. Trừ cọc. |
 | **Xe** | Bảng giá riêng, hạn đăng kiểm / bảo hiểm / phí đường bộ, mốc bảo dưỡng, lịch gara. Lịch xe dạng timeline. |
 | **Phụ kiện** | Danh mục dùng chung (gõ không dấu, tên gọi khác như "tpms"), gợi ý theo xe cùng dòng / cả đội / xe điện, chép từ xe khác. Tự vào checklist giao/nhận và hợp đồng; nhận xe thiếu món nào thì đề xuất khoản đền bù theo giá trị đã khai. |
 | **Chia sẻ cho khách** | Ảnh bảng giá một xe hoặc cả đội + tin nhắn chữ để dán Zalo; gửi bằng nút chia sẻ của điện thoại (khách không cần vào app). |

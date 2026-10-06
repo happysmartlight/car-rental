@@ -16,7 +16,7 @@ import type { CalendarData, Customer, Precheck, Rental, VehicleWithStatus } from
 import { cn, errorMessage } from '@/lib/utils';
 import { COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, type CollateralKind } from '@shared/constants';
 import { fmtNumber, fmtVnd } from '@shared/text';
-import { DAY_MS, HOUR_MS, fmtDateTime, fmtDuration } from '@shared/time';
+import { DAY_MS, HOUR_MS, addMonthsVn, fmtDateTime, fmtDuration } from '@shared/time';
 
 interface PayRow {
   purpose: 'rent' | 'deposit';
@@ -121,6 +121,9 @@ export default function RentalNew() {
   const dangerWarnings = (pre?.warnings ?? []).filter((w) => w.severity === 'danger');
 
   const setDays = (n: number) => start && setEnd(start + n * DAY_MS);
+  const setMonths = (n: number) => start && setEnd(addMonthsVn(start, n));
+  const chip = (active: boolean) =>
+    cn('rounded-full border px-3 py-1 text-xs font-medium', active ? 'border-brand bg-brand-soft text-brand' : 'border-border text-muted hover:bg-surface-2');
 
   const submit = async (force = false) => {
     if (!customer) return toast.error('Chọn khách thuê');
@@ -198,6 +201,7 @@ export default function RentalNew() {
                 </div>
               )}
             </div>
+            {pre?.quote.mode === 'month' && <Notice tone="violet">Tính theo tháng — rẻ hơn tính theo ngày ({fmtVnd(vehicle.priceMonth ?? 0)}/tháng).</Notice>}
             <div className="flex items-baseline justify-between border-t border-border pt-3">
               <span className="font-medium">Tổng tiền thuê</span>
               <span className="tabular text-xl font-semibold">{fmtVnd(total)}</span>
@@ -293,8 +297,13 @@ export default function RentalNew() {
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {[1, 2, 3, 5, 7].map((n) => (
-                <button key={n} type="button" onClick={() => setDays(n)} className={cn('rounded-full border px-3 py-1 text-xs font-medium', start && end && end - start === n * DAY_MS ? 'border-brand bg-brand-soft text-brand' : 'border-border text-muted hover:bg-surface-2')}>
+                <button key={n} type="button" onClick={() => setDays(n)} className={chip(!!start && !!end && end - start === n * DAY_MS)}>
                   {n === 7 ? '1 tuần' : `${n} ngày`}
+                </button>
+              ))}
+              {[1, 3, 6].map((n) => (
+                <button key={`m${n}`} type="button" onClick={() => setMonths(n)} className={chip(!!start && !!end && end === addMonthsVn(start, n))}>
+                  {n} tháng
                 </button>
               ))}
             </div>
@@ -319,7 +328,7 @@ export default function RentalNew() {
                     <span className="min-w-0 flex-1">
                       <span className="block font-semibold">{v.plate}</span>
                       <span className="block truncate text-xs text-muted">
-                        {v.make} {v.model} · {fmtVnd(v.priceDay)}/ngày
+                        {v.make} {v.model} · {fmtVnd(v.priceDay)}/ngày{v.priceMonth ? ` · ${fmtVnd(v.priceMonth)}/tháng` : ''}
                       </span>
                       <span className={cn('block text-xs font-medium', isBusy ? 'text-red-600' : 'text-emerald-600')}>{isBusy ? 'Trùng lịch' : validTime ? 'Trống' : ''}</span>
                     </span>

@@ -16,6 +16,11 @@ cho nền/chữ/viền:
 | `border-border` / `border-border-strong` | Viền thẻ / viền ô nhập |
 | `text-fg` / `text-muted` / `text-subtle` | Chữ chính / phụ / mờ |
 | `bg-brand`, `text-brand`, `bg-brand-soft` | Màu nhấn (xanh dương), mục đang chọn |
+| `bg-popover` | Lớp nổi: menu, danh sách xổ xuống, ô tìm nhanh (giao diện tối sáng hơn thẻ phía sau) |
+| `bg-hover` | Dòng đang trỏ/chọn trong menu và danh sách |
+
+Ô chọn `<select>` dùng component `Select` (class `select-chevron` vẽ mũi tên). Không viết `bg-[…]` tùy ý cạnh `bg-surface`
+— tailwind-merge sẽ xóa mất màu nền. Danh sách lựa chọn bên trong lấy màu `--popover` từ CSS gốc.
 
 Màu trạng thái dùng `Badge tone=` / `Notice tone=` (`blue` đã đặt, `violet` đang thuê, `amber` chờ/cảnh báo,
 `red` quá hạn/lỗi, `green` xong). Màu Tailwind trực tiếp (`text-red-600`…) chỉ cho số tiền âm/dương, cảnh báo nhỏ — luôn kèm `dark:`.

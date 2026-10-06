@@ -30,8 +30,6 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   const app = Fastify({
     logger: opts.logger === false ? false : config.isProd ? { level: 'info' } : { level: 'info', transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } } },
     trustProxy: true,
-    // Không ghi log từng request (health check 30s/lần làm đầy log); lỗi 5xx vẫn được ghi ở errorHandler.
-    disableRequestLogging: config.isProd,
     bodyLimit: 5 * 1024 * 1024,
   });
 

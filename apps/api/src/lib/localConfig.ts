@@ -46,6 +46,14 @@ export interface LocalConfig {
   digest: {
     lastDate?: string;
   };
+  /** Tự kiểm tra phạt nguội cả đội xe. */
+  fineCheck: {
+    frequency: 'off' | 'daily' | 'weekly';
+    lastRunAt?: number;
+    lastError?: string | null;
+    lastFound?: number;
+    lastNew?: number;
+  };
 }
 
 const DEFAULT: LocalConfig = {
@@ -53,6 +61,7 @@ const DEFAULT: LocalConfig = {
   backup: { nightlyHour: 2, keepDaily: 30, keepMonthly: 12, passphrase: '', telegramEnabled: false },
   update: { autoUpdate: false, autoUpdateHour: 3 },
   digest: {},
+  fineCheck: { frequency: 'weekly' },
 };
 
 const file = () => path.join(config.configDir, 'local.json');
@@ -72,6 +81,7 @@ export function getLocalConfig(): LocalConfig {
     backup: { ...DEFAULT.backup, ...parsed.backup },
     update: { ...DEFAULT.update, ...parsed.update },
     digest: { ...DEFAULT.digest, ...parsed.digest },
+    fineCheck: { ...DEFAULT.fineCheck, ...parsed.fineCheck },
   };
   return cache;
 }

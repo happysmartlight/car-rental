@@ -112,7 +112,7 @@ export default function VehicleEdit() {
           </div>
         </Group>
 
-        <Group title="Bảng giá" description="Giá tại lúc đặt được chốt vào lượt thuê — đổi giá ở đây không ảnh hưởng lượt đã đặt.">
+        <Group title="Bảng giá" description="Giá lúc đặt được chốt vào lượt thuê. Có giá tháng thì app tự chọn cách tính rẻ hơn cho khách (theo ngày hoặc theo tháng).">
           <Field label="Giá ngày (24h)" required>
             <MoneyInput value={f.priceDay} onChange={(v) => set('priceDay', v ?? 0)} />
           </Field>
@@ -133,6 +133,12 @@ export default function VehicleEdit() {
           </Field>
           <Field label="Tiền cọc mặc định">
             <MoneyInput value={f.depositAmount} onChange={(v) => set('depositAmount', v ?? 0)} />
+          </Field>
+          <Field label="Giá thuê tháng" hint="Để trống nếu không nhận thuê tháng">
+            <MoneyInput value={f.priceMonth} onChange={(v) => set('priceMonth', v)} />
+          </Field>
+          <Field label="Giới hạn km/tháng" hint={f.kmLimitDay ? `Để trống = ${(f.kmLimitDay * 30).toLocaleString('vi-VN')} km (30 × km/ngày)` : 'Để trống = không giới hạn'}>
+            <NumberInput value={f.kmLimitMonth} onChange={(v) => set('kmLimitMonth', v)} suffix="km" />
           </Field>
         </Group>
 

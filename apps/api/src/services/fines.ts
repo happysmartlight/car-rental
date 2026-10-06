@@ -6,8 +6,10 @@
 import { and, eq, inArray, isNull, lte, or, gte } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import type { Customer, Rental, RentalSegment, Vehicle, VehicleBlock } from '../db/schema.js';
-import { HOUR_MS } from '../shared/time.js';
-import { plateKey } from '../shared/text.js';
+import { escapeHtml, notify } from '../lib/telegram.js';
+import type { FineSource, FineStatus } from '../shared/constants.js';
+import { HOUR_MS, fmtDateTime } from '../shared/time.js';
+import { fmtVnd, formatPlate, plateKey } from '../shared/text.js';
 
 export interface FineMatch {
   segment: RentalSegment;
@@ -105,4 +107,63 @@ export function lookupFine(plate: string, at: number): FineLookupResult {
 
   const verdict = matches.length ? 'rented' : blocks.length ? 'blocked' : 'idle';
   return { ...base, verdict, matches, blocks, scheduledOnly, nearby };
+}
+
+export interface NewFine {
+  plate: string;
+  violatedAt: number;
+  location?: string | null;
+  violation?: string | null;
+  amount?: number | null;
+  source?: FineSource;
+  noticeFileId?: string | null;
+  rentalId?: number | null;
+  customerId?: number | null;
+  status?: FineStatus;
+  notes?: string | null;
+}
+
+/** Ghi một vi phạm vào hồ sơ. Chưa chỉ định lượt thuê → tự khớp người đang giữ xe lúc đó. */
+export function recordFine(body: NewFine, userId: number | null) {
+  const key = plateKey(body.plate);
+  const vehicle = db.select().from(schema.vehicles).where(eq(schema.vehicles.plateKey, key)).get();
+  let rentalId = body.rentalId ?? null;
+  let customerId = body.customerId ?? null;
+  if (!rentalId) {
+    const found = lookupFine(body.plate, body.violatedAt);
+    if (found.matches.length === 1) {
+      rentalId = found.matches[0].rental.id;
+      customerId = found.matches[0].customer.id;
+    }
+  } else if (!customerId) {
+    customerId = db.select().from(schema.rentals).where(eq(schema.rentals.id, rentalId)).get()?.customerId ?? null;
+  }
+  const now = Date.now();
+  const f = db
+    .insert(schema.trafficFines)
+    .values({
+      plate: vehicle?.plate ?? formatPlate(body.plate),
+      plateKey: key,
+      vehicleId: vehicle?.id ?? null,
+      violatedAt: body.violatedAt,
+      location: body.location ?? null,
+      violation: body.violation ?? null,
+      amount: body.amount ?? null,
+      source: body.source ?? 'csgt',
+      noticeFileId: body.noticeFileId ?? null,
+      rentalId,
+      customerId,
+      status: body.status ?? 'new',
+      notes: body.notes ?? null,
+      createdBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning()
+    .get();
+  const who = customerId ? db.select().from(schema.customers).where(eq(schema.customers.id, customerId)).get() : null;
+  notify(
+    `🚨 <b>Phạt nguội mới</b> ${escapeHtml(f.plate)} lúc ${fmtDateTime(f.violatedAt)}\n${escapeHtml(f.violation ?? '')}${f.amount ? ` · ${fmtVnd(f.amount)}` : ''}\n${who ? `Người giữ xe: ${escapeHtml(who.fullName)} · ${escapeHtml(who.phone ?? '')}` : 'Chưa xác định người giữ xe'}`,
+  );
+  return f;
 }

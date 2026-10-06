@@ -3,6 +3,17 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.0] - 2026-10-06
+
+### Mới
+- **Thuê theo tháng**: mỗi xe có giá tháng và giới hạn km/tháng. App tự chọn cách tính rẻ hơn cho khách (theo ngày hay theo tháng dương lịch); ngày lẻ tính bằng giá tháng ÷ 30; thuê gần tháng mà tính ngày đắt hơn thì tự áp giá 1 tháng. Nút chọn nhanh 1 / 3 / 6 tháng khi đặt xe, gia hạn nhanh +1 ngày / +1 tuần / +1 tháng. Giá tháng có trong hợp đồng và ảnh/tin nhắn chia sẻ bảng giá.
+- **Kiểm tra phạt nguội chỉ cần biển số**: chọn xe → Kiểm tra, mỗi vi phạm tìm được tự hiện người đang giữ xe lúc đó, bấm "Ghi hồ sơ" một lần. Dịch vụ tra cứu tự động lỗi thì chép biển số, mở trang chính thức của Cục CSGT, dán kết quả vào app — app tự đọc giờ vi phạm. Tra theo giờ (khi có thông báo giấy) chuyển thành mục phụ.
+- **Tự kiểm tra phạt nguội cả đội xe** mỗi ngày hoặc mỗi tuần: vi phạm mới tự ghi hồ sơ và báo Telegram kèm tên khách.
+
+### Sửa
+- Giao diện tối: ô chọn (dropdown) bị nền trắng chữ trắng — nay có nền tối, đủ tương phản; menu, ô tìm nhanh, danh sách chọn khách nổi rõ trên nền; dòng đang chọn dễ thấy; chữ đỏ/xanh/vàng sáng hơn; thông báo đổi màu theo giao diện.
+- Ô chọn thiếu mũi tên và bị cắt chữ.
+
 ## [0.1.0] - 2026-10-06
 
 Bản đầu tiên.

@@ -47,6 +47,8 @@ Trạng thái lượt thuê: `booked → active → returned → settled → clo
 
 Khối 24 giờ kể từ giờ nhận. Khối bắt đầu ngày cuối tuần (giờ VN) → giá cuối tuần; rơi vào kỳ lễ → + % phụ thu.
 Giờ lẻ: trong ân hạn bỏ qua; ≤ N giờ và rẻ hơn 1 ngày → tính giờ; còn lại +1 ngày. Trả trễ / vượt km tính lúc nhận xe.
+Xe có **giá tháng**: tính thêm phương án theo tháng dương lịch (`addMonthsVn`, 31/01 + 1 tháng = 28/02), ngày lẻ = giá tháng ÷ 30,
+không phụ thu cuối tuần/lễ, km = km/tháng × số tháng; lấy phương án rẻ hơn. Chưa đủ tháng mà tính ngày đắt hơn → áp giá 1 tháng.
 Giá xe được **chốt vào lượt thuê** lúc đặt; đổi lịch thì tính lại các dòng tiền thuê tự sinh (`charges.auto`).
 
 ## Hợp đồng
@@ -60,6 +62,15 @@ Mẫu dựng sẵn sinh bằng `apps/api/scripts/build-default-templates.ts`, đ
 - Thêm cho xe bằng `catalogId` hoặc tên. Tên được chuẩn hóa không dấu (`accessoryKey`) → "sac du phong" dùng lại "Sạc dự phòng"; tên mới tự vào danh mục.
 - Gợi ý (`suggestAccessories`): +60 xe cùng dòng có, +10/xe khác có (+25 nếu quá nửa đội), +45 đồ xe điện cho xe điện, +30 đồ thiết yếu. Đồ "chỉ xe điện" không gợi ý cho xe xăng.
 - Biên bản giao xe chụp lại danh sách phụ kiện (tên, số lượng, giá trị, có/không). Biên bản nhận so với lúc giao; thiếu → giao diện thêm khoản `accessory` = giá trị × số lượng.
+
+## Kiểm tra phạt nguội
+
+- Trang chính thức (csgt.bocongan.gov.vn) có reCAPTCHA → app **không** tự tra ở đó.
+- `services/fineCheck.ts` hỏi dịch vụ tra cứu công khai `api.checkphatnguoi.vn` (không chính thức, có lúc sập) theo biển số.
+  Lỗi → trả `{ ok: false }`, giao diện chuyển sang: chép biển số, mở trang chính thức, người dùng dán kết quả →
+  `shared/violationText.ts` đọc các dòng "Thời gian vi phạm / Hành vi / Địa điểm / Trạng thái".
+- Mỗi vi phạm được khớp người giữ xe qua `lookupFine` (rental_segments) và đánh dấu nếu đã có trong hồ sơ (cùng biển, lệch ≤ 1 phút).
+- Lịch tự kiểm tra (mặc định mỗi tuần, sau 9h): vi phạm *chưa xử phạt* mới → tự ghi hồ sơ + Telegram; dịch vụ lỗi thì thử lại sau 6 giờ, chỉ báo Telegram lần đầu.
 
 ## Chia sẻ bảng giá
 

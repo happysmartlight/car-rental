@@ -80,7 +80,10 @@ export default function VehiclesList() {
                   <div className="p-4">
                     <div className="flex items-baseline justify-between gap-2">
                       <p className="text-lg font-semibold tracking-wide">{v.plate}</p>
-                      <p className="tabular text-sm font-medium">{fmtVnd(v.priceDay)}/ngày</p>
+                      <p className="tabular text-right text-sm font-medium">
+                        {fmtVnd(v.priceDay)}/ngày
+                        {!!v.priceMonth && <span className="block text-xs font-normal text-muted">{fmtVnd(v.priceMonth)}/tháng</span>}
+                      </p>
                     </div>
                     <p className="text-sm text-muted">
                       {[v.make, v.model, v.year].filter(Boolean).join(' ')} · {v.seats ? `${v.seats} chỗ` : ''} {v.transmission ? TRANSMISSION_LABEL[v.transmission].toLowerCase() : ''} {v.fuel ? `· ${FUEL_LABEL[v.fuel].toLowerCase()}` : ''}

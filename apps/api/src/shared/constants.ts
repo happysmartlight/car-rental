@@ -75,7 +75,7 @@ export const FINE_STATUS: Record<FineStatus, { label: string; tone: Tone }> = {
 export const FINE_SOURCES = ['csgt', 'vnetraffic', 'notice', 'other'] as const;
 export type FineSource = (typeof FINE_SOURCES)[number];
 export const FINE_SOURCE_LABEL: Record<FineSource, string> = {
-  csgt: 'csgt.vn',
+  csgt: 'Cổng tra cứu CSGT',
   vnetraffic: 'Ứng dụng VNeTraffic',
   notice: 'Thông báo giấy',
   other: 'Nguồn khác',

@@ -54,12 +54,12 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     setQ('');
     navigate(to);
   };
-  const item = 'flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm data-[selected=true]:bg-surface-2';
+  const item = 'flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm data-[selected=true]:bg-hover';
   return (
     <D.Root open={open} onOpenChange={onOpenChange}>
       <D.Portal>
         <D.Overlay className="anim-fade fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]" />
-        <D.Content className="anim-zoom fixed inset-x-3 top-[max(1rem,env(safe-area-inset-top))] z-50 mx-auto max-w-xl overflow-hidden rounded-2xl border border-border bg-surface shadow-pop md:top-[12vh]">
+        <D.Content className="anim-zoom fixed inset-x-3 top-[max(1rem,env(safe-area-inset-top))] z-50 mx-auto max-w-xl overflow-hidden rounded-2xl border border-border-strong bg-popover shadow-pop md:top-[12vh]">
           <D.Title className="sr-only">Tìm nhanh</D.Title>
           <D.Description className="sr-only">Tìm khách, xe, lượt thuê</D.Description>
           <Command shouldFilter={false} loop>
@@ -84,7 +84,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                     <Command.Item key={`c${c.id}`} value={`c${c.id}`} onSelect={() => go(`/customers/${c.id}`)} className={item}>
                       <User className="size-4 text-muted" />
                       <span className="flex-1 text-fg">
-                        {c.fullName} {c.blacklisted && <span className="text-red-600">· danh sách đen</span>}
+                        {c.fullName} {c.blacklisted && <span className="text-red-600 dark:text-red-400">· danh sách đen</span>}
                       </span>
                       <span className="text-xs text-muted">{c.phone ?? c.idNumber}</span>
                     </Command.Item>

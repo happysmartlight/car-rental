@@ -191,7 +191,11 @@ const contract = doc([
   P(['– Giới hạn quãng đường cho cả thời gian thuê: ', '{hd.km_gioi_han}', ' km.']),
 
   H('Điều 3. Giá thuê và thanh toán'),
+  P(['– Hình thức thuê: ', { b: '{hd.hinh_thuc}' }, '.']),
   P(['– Đơn giá: ', '{gia.ngay}', ' đồng/ngày (24 giờ); ngày cuối tuần ', '{gia.cuoi_tuan}', ' đồng/ngày; giờ lẻ ', '{gia.gio}', ' đồng/giờ.']),
+  Tag('{#co_gia_thang}'),
+  P(['– Thuê theo tháng: ', '{gia.thang}', ' đồng/tháng dương lịch, giới hạn ', '{gia.km_thang}', ' km/tháng; ngày lẻ tính bằng giá tháng chia 30.']),
+  Tag('{/co_gia_thang}'),
   P(['– Chi tiết các khoản:']),
   loopTable(['Khoản', 'Diễn giải', 'Số tiền (đồng)'], [22, 53, 25], 'khoan', ['loai', 'mo_ta', 'so_tien'], [AlignmentType.LEFT, AlignmentType.LEFT, AlignmentType.RIGHT]),
   P([''], { after: 40 }),

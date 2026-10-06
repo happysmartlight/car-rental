@@ -45,7 +45,8 @@ Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 
 - [ ] Web Push (thông báo trên iPhone không qua Telegram).
 - [ ] Trang đặt xe công khai (cần mở ra Internet: Cloudflare Tunnel / Tailscale Funnel).
 - [ ] OCR GPLX bằng AI (Gemini) — chỉ khi bạn đồng ý gửi ảnh ra ngoài.
-- [ ] Tự tra phạt nguội (csgt.vn có captcha — cần khảo sát).
+- [x] Kiểm tra phạt nguội theo biển số (dịch vụ tra cứu công khai + dán kết quả trang chính thức) — v0.2.0.
+- [ ] Thêm nguồn tra cứu dự phòng khi api.checkphatnguoi.vn sập lâu (dịch vụ không chính thức).
 - [ ] Nén ảnh HEIC phía máy chủ (hiện dựa vào trình duyệt đổi sang JPEG trước khi gửi).
 
 ### Phase 6

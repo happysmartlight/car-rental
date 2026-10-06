@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Car, ExternalLink, MessageCircle, Phone, Plus, Search, ShieldAlert, UserRound, Wrench } from 'lucide-react';
+import { AlertTriangle, Car, ChevronDown, Clock, ExternalLink, MessageCircle, Phone, Plus, Search, ShieldAlert, UserRound, Wrench } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { Page } from '@/components/layout/AppShell';
 import { FineStatusBadge, Money } from '@/components/common';
 import { PhotoInput } from '@/components/images';
+import { OFFICIAL_LOOKUP_URL, ViolationCheck } from '@/components/ViolationCheck';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { DateTimeInput, Field, Input, MoneyInput, Segmented, Select, Textarea } from '@/components/ui/form';
@@ -148,6 +149,7 @@ export default function Fines() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'open' | 'all'>('open');
   const [form, setForm] = useState<FineForm | null>(null);
+  const [timeOpen, setTimeOpen] = useState(false);
 
   const { data: vehicles } = useQuery({ queryKey: ['vehicles'], queryFn: () => api.get<VehicleWithStatus[]>('/api/vehicles') });
   const { data: list, isLoading } = useQuery({ queryKey: ['fines', filter], queryFn: () => api.get<{ items: FineListItem[] }>(`/api/fines${qs({ status: filter })}`) });
@@ -165,20 +167,32 @@ export default function Fines() {
     }
   };
 
+  const activeVehicles = (vehicles ?? []).filter((v) => v.active);
+
   return (
     <Page
       title="Phạt nguội"
-      subtitle="Biển số + giờ vi phạm → ai đang giữ xe"
+      subtitle="Kiểm tra theo biển số — app tự cho biết ai giữ xe lúc vi phạm"
       actions={
         <Button variant="outline" onClick={() => setForm(emptyForm())}>
-          <Plus /> <span className="hidden sm:inline">Ghi vi phạm</span>
+          <Plus /> <span className="hidden sm:inline">Ghi thủ công</span>
         </Button>
       }
     >
       <div className="space-y-4">
+        {vehicles && <ViolationCheck vehicles={activeVehicles} />}
+
         <Card>
-          <CardHeader icon={Search} title="Tra người giữ xe" description="Dùng giờ giao/nhận xe thực tế đã ghi trong app" />
-          <CardBody className="space-y-4">
+          <button onClick={() => setTimeOpen(!timeOpen)} className="flex w-full items-center gap-3 px-4 py-4 text-left md:px-5">
+            <Clock className="size-5 shrink-0 text-muted" />
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">Có thông báo phạt giấy? Tra theo giờ vi phạm</span>
+              <span className="block text-sm text-muted">Đã biết giờ vi phạm → xem ai đang giữ xe, hợp đồng, ảnh giao xe</span>
+            </span>
+            <ChevronDown className={cn('size-5 text-muted transition-transform', timeOpen && 'rotate-180')} />
+          </button>
+          {timeOpen && (
+          <CardBody className="space-y-4 border-t border-border pt-4">
             {!!vehicles?.length && (
               <div className="flex flex-wrap gap-1.5">
                 {vehicles.map((v) => (
@@ -200,12 +214,13 @@ export default function Fines() {
             {result && !looking && <LookupResult r={result} onRecord={(rentalId) => setForm(emptyForm(result.vehicle?.plate ?? plate, result.at, rentalId))} />}
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
               <span>Nguồn tra cứu chính thức:</span>
-              <a href="https://www.csgt.vn/tra-cuu-phuong-tien-vi-pham.html" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand">
-                csgt.vn <ExternalLink className="size-3" />
+              <a href={OFFICIAL_LOOKUP_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand">
+                csgt.bocongan.gov.vn <ExternalLink className="size-3" />
               </a>
               <span>Ứng dụng VNeTraffic (Bộ Công an)</span>
             </p>
           </CardBody>
+          )}
         </Card>
 
         <Card>

@@ -4,6 +4,7 @@ import { and, eq, lt } from 'drizzle-orm';
 import { config } from '../config.js';
 import { db, schema } from '../db/index.js';
 import { buildDigest, handoversSoon } from '../services/alerts.js';
+import { runFleetFineCheck } from '../services/fineCheck.js';
 import { startUpdate } from '../services/updateFlow.js';
 import { HOUR_MS, fmtDateTime, vnDateKey, vnParts } from '../shared/time.js';
 import { purgeExpiredSessions } from './auth.js';
@@ -90,6 +91,17 @@ async function digest(now: number) {
   if (text) await sendTelegram(text).catch((err) => console.error('digest failed', err));
 }
 
+/** Kiểm tra phạt nguội cả đội theo lịch (sau 9h sáng, để thông báo đến lúc đang làm việc). */
+async function fineCheck(now: number) {
+  const fc = getLocalConfig().fineCheck;
+  if (fc.frequency === 'off' || vnParts(now).hour < 9) return;
+  const every = fc.frequency === 'daily' ? 24 * HOUR_MS : 7 * 24 * HOUR_MS;
+  // Lỗi lần trước thì thử lại sau 6 giờ, không đợi hết chu kỳ.
+  const wait = fc.lastError ? 6 * HOUR_MS : every - HOUR_MS;
+  if (fc.lastRunAt && now - fc.lastRunAt < wait) return;
+  await runFleetFineCheck(null);
+}
+
 let running = false;
 
 export async function tick(now = Date.now()) {
@@ -106,6 +118,7 @@ export async function tick(now = Date.now()) {
     await overdueReturns(now);
     await updateCheck(now);
     await autoUpdate(now);
+    await fineCheck(now);
   } catch (err) {
     console.error('scheduler tick failed', err);
   } finally {

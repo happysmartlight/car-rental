@@ -19,7 +19,24 @@ export const DEFAULT_SHARE_OPTIONS: ShareOptions = { plate: false, deposit: true
 
 export type ShareVehicle = Pick<
   Vehicle,
-  'plate' | 'make' | 'model' | 'year' | 'color' | 'seats' | 'transmission' | 'fuel' | 'photoFileId' | 'priceDay' | 'priceWeekendDay' | 'priceHour' | 'kmLimitDay' | 'overKmFee' | 'overHourFee' | 'depositAmount'
+  | 'plate'
+  | 'make'
+  | 'model'
+  | 'year'
+  | 'color'
+  | 'seats'
+  | 'transmission'
+  | 'fuel'
+  | 'photoFileId'
+  | 'priceDay'
+  | 'priceWeekendDay'
+  | 'priceHour'
+  | 'kmLimitDay'
+  | 'overKmFee'
+  | 'overHourFee'
+  | 'depositAmount'
+  | 'priceMonth'
+  | 'kmLimitMonth'
 > & { highlights: string[] };
 
 const W = 1080;
@@ -45,6 +62,8 @@ const vnd = (n: number) => `${fmtNumber(n)}đ`;
 const title = (v: ShareVehicle) => [v.make, v.model].filter(Boolean).join(' ') || v.plate;
 const specs = (v: ShareVehicle) =>
   [v.year, v.seats && `${v.seats} chỗ`, v.transmission && TRANSMISSION_LABEL[v.transmission], v.fuel && FUEL_LABEL[v.fuel], v.color].filter(Boolean).join(' · ');
+const monthKm = (v: ShareVehicle) => (v.kmLimitMonth && v.kmLimitMonth > 0 ? v.kmLimitMonth : v.kmLimitDay * 30);
+const monthLine = (v: ShareVehicle) => (v.priceMonth ? `Thuê tháng: ${vnd(v.priceMonth)}/tháng${monthKm(v) ? ` (${fmtNumber(monthKm(v))} km)` : ''}` : null);
 const weekendPrice = (v: ShareVehicle) => (v.priceWeekendDay && v.priceWeekendDay !== v.priceDay ? v.priceWeekendDay : null);
 const WEEKDAY_NAME = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 const weekendLabel = (rules: RulesSettings) => (rules.weekendDays.length ? [...rules.weekendDays].sort((a, b) => (a || 7) - (b || 7)).map((d) => WEEKDAY_NAME[d]).join(', ') : 'Cuối tuần');
@@ -278,7 +297,8 @@ export async function renderVehicleCard(v: ShareVehicle, biz: BusinessSettings, 
   // Khung giá chính
   pen.gap(32);
   const we = weekendPrice(v);
-  const boxH = we ? 196 : 140;
+  const ml = monthLine(v);
+  const boxH = 140 + (we ? 56 : 0) + (ml ? 56 : 0);
   ctx.fillStyle = C.brandSoft;
   rr(ctx, P, pen.y, W - 2 * P, boxH, 28);
   ctx.fill();
@@ -289,11 +309,14 @@ export async function renderVehicleCard(v: ShareVehicle, biz: BusinessSettings, 
   const pw = ctx.measureText(price).width;
   ctx.font = font(500, 34);
   ctx.fillText(' / ngày (24 giờ)', P + 40 + pw, pen.y + 98);
+  let lineY = pen.y + 160;
+  ctx.fillStyle = C.fg;
+  ctx.font = font(600, 34);
   if (we) {
-    ctx.fillStyle = C.fg;
-    ctx.font = font(600, 34);
-    ctx.fillText(`${weekendLabel(rules)}: ${vnd(we)}/ngày`, P + 40, pen.y + 160);
+    ctx.fillText(`${weekendLabel(rules)}: ${vnd(we)}/ngày`, P + 40, lineY);
+    lineY += 56;
   }
+  if (ml) ctx.fillText(ml, P + 40, lineY);
   pen.gap(boxH);
 
   const rows: [string, string][] = [];
@@ -373,7 +396,9 @@ export async function renderFleetCard(vehicles: ShareVehicle[], biz: BusinessSet
     pen.gap(6);
     pen.text(`${vnd(v.priceDay)}/ngày`, { size: 42, weight: 700, color: C.brand, x, maxW, lh: 52 });
     const we = weekendPrice(v);
-    const sub = [we && `${weekendLabel(rules)}: ${vnd(we)}`, opt.highlights && v.highlights.slice(0, 2).join(', ')].filter(Boolean).join(' · ');
+    const sub = [we && `${weekendLabel(rules)}: ${vnd(we)}`, v.priceMonth && `Tháng: ${vnd(v.priceMonth)}`, opt.highlights && v.highlights.slice(0, 2).join(', ')]
+      .filter(Boolean)
+      .join(' · ');
     if (sub) pen.text(sub, { size: 26, color: C.muted, x, maxW, lh: 34 });
     pen.y = top + h;
   });
@@ -399,6 +424,8 @@ export function vehicleShareText(v: ShareVehicle, biz: BusinessSettings, rules: 
   if (opt.plate) lines.push(`🔖 Biển số: ${v.plate}`);
   const we = weekendPrice(v);
   lines.push(`💰 Giá thuê: ${vnd(v.priceDay)}/ngày${we ? ` (${weekendLabel(rules)}: ${vnd(we)})` : ''}`);
+  const ml = monthLine(v);
+  if (ml) lines.push(`📅 ${ml}`);
   if (opt.extras) {
     const extra = [v.priceHour && `giờ lẻ ${vnd(v.priceHour)}/giờ`, v.kmLimitDay ? `giới hạn ${fmtNumber(v.kmLimitDay)} km/ngày${v.overKmFee ? `, vượt ${vnd(v.overKmFee)}/km` : ''}` : 'không giới hạn km'].filter(Boolean);
     const extraText = extra.join(' · ');
@@ -415,7 +442,8 @@ export function fleetShareText(vehicles: ShareVehicle[], biz: BusinessSettings, 
   const lines = [`🚗 BẢNG GIÁ THUÊ XE TỰ LÁI${biz.name ? ` — ${biz.name}` : ''}`, ''];
   for (const v of vehicles) {
     const we = weekendPrice(v);
-    lines.push(`• ${title(v)}${v.seats ? ` (${v.seats} chỗ)` : ''}${opt.plate ? ` [${v.plate}]` : ''}: ${vnd(v.priceDay)}/ngày${we ? `, ${weekendLabel(rules)} ${vnd(we)}` : ''}`);
+    const month = v.priceMonth ? `, tháng ${vnd(v.priceMonth)}` : '';
+    lines.push(`• ${title(v)}${v.seats ? ` (${v.seats} chỗ)` : ''}${opt.plate ? ` [${v.plate}]` : ''}: ${vnd(v.priceDay)}/ngày${we ? `, ${weekendLabel(rules)} ${vnd(we)}` : ''}${month}`);
   }
   lines.push('');
   const deposits = vehicles.map((v) => v.depositAmount).filter((d) => d > 0);

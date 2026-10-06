@@ -41,6 +41,18 @@ export function vnStartOfDay(ms: number): number {
   return Date.UTC(p.year, p.month - 1, p.day) - VN_OFFSET_MS;
 }
 
+/**
+ * Cộng k tháng dương lịch theo giờ VN, giữ nguyên giờ phút.
+ * Ngày không tồn tại thì lùi về cuối tháng: 31/01 + 1 tháng = 28/02 (hoặc 29/02).
+ */
+export function addMonthsVn(ms: number, k: number): number {
+  const p = vnParts(ms);
+  const target = new Date(Date.UTC(p.year, p.month - 1 + k, 1));
+  const daysInMonth = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  const sub = (ms + VN_OFFSET_MS) % 60_000;
+  return Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), Math.min(p.day, daysInMonth), p.hour, p.minute) - VN_OFFSET_MS + sub;
+}
+
 /** "YYYY-MM-DD" (giờ VN) → epoch ms lúc 00:00 giờ VN. */
 export function vnDateKeyToMs(key: string): number {
   const [y, m, d] = key.split('-').map(Number);

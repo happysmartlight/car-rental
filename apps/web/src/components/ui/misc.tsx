@@ -130,7 +130,7 @@ export function Menu({ trigger, children, align = 'end' }: { trigger: ReactNode;
     <DM.Root>
       <DM.Trigger asChild>{trigger}</DM.Trigger>
       <DM.Portal>
-        <DM.Content align={align} sideOffset={6} className="anim-zoom z-50 min-w-48 rounded-xl border border-border bg-surface p-1 shadow-pop">
+        <DM.Content align={align} sideOffset={6} className="anim-zoom z-50 min-w-48 rounded-xl border border-border-strong bg-popover p-1 shadow-pop">
           {children}
         </DM.Content>
       </DM.Portal>
@@ -144,7 +144,7 @@ export function MenuItem({ children, onSelect, icon: Icon, danger, disabled }: {
       disabled={disabled}
       onSelect={onSelect}
       className={cn(
-        'flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-[disabled]:opacity-50 data-[highlighted]:bg-surface-2',
+        'flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-[disabled]:opacity-50 data-[highlighted]:bg-hover',
         danger && 'text-red-600 dark:text-red-400',
       )}
     >
@@ -154,4 +154,4 @@ export function MenuItem({ children, onSelect, icon: Icon, danger, disabled }: {
   );
 }
 
-export const MenuSeparator = () => <DM.Separator className="my-1 h-px bg-border" />;
+export const MenuSeparator = () => <DM.Separator className="my-1 h-px bg-border-strong/60" />;

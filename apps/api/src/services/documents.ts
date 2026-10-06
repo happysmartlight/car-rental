@@ -24,6 +24,7 @@ import {
   type TemplateKind,
 } from '../shared/constants.js';
 import { planSettlement } from '../shared/money.js';
+import { monthKmLimit, quoteRental } from '../shared/pricing.js';
 import { fmtNumber, vndInWords } from '../shared/text.js';
 import { fmtDate, fmtDateKey, fmtDateTime, fmtDuration, vnDateLong } from '../shared/time.js';
 import { handoverAccessoryTemplate } from './accessories.js';
@@ -120,6 +121,9 @@ export const TEMPLATE_FIELDS: { group: string; fields: FieldDoc[] }[] = [
       { key: 'gia.gio', label: 'Giá giờ' },
       { key: 'gia.vuot_km', label: 'Phí vượt km (đ/km)' },
       { key: 'gia.qua_gio', label: 'Phí quá giờ (đ/giờ)' },
+      { key: 'gia.thang', label: 'Giá thuê tháng (điều kiện {#co_gia_thang}…{/co_gia_thang})' },
+      { key: 'gia.km_thang', label: 'Giới hạn km mỗi tháng' },
+      { key: 'hd.hinh_thuc', label: 'Hình thức thuê: "theo ngày" / "theo tháng"' },
       { key: 'tien.tong', label: 'Tổng tiền' },
       { key: 'tien.tong_chu', label: 'Tổng tiền bằng chữ' },
       { key: 'tien.coc', label: 'Tiền cọc thỏa thuận' },
@@ -300,6 +304,7 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
       nhan_xe: fmtDateTime(r.scheduledStart),
       tra_xe: fmtDateTime(r.scheduledEnd),
       thoi_gian: fmtDuration(r.scheduledEnd - r.scheduledStart),
+      hinh_thuc: quoteRental(r.scheduledStart, r.scheduledEnd, pricing, rules).mode === 'month' ? 'theo tháng' : 'theo ngày',
       km_gioi_han: r.kmLimit ? fmtNumber(r.kmLimit) : 'Không giới hạn',
       noi_giao: r.pickupLocation || biz.address,
       noi_tra: r.returnLocation || r.pickupLocation || biz.address,
@@ -311,7 +316,10 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
       gio: money(pricing.priceHour),
       vuot_km: money(pricing.overKmFee),
       qua_gio: money(pricing.overHourFee || pricing.priceHour),
+      thang: money(pricing.priceMonth || null),
+      km_thang: pricing.priceMonth ? (monthKmLimit(pricing) ? fmtNumber(monthKmLimit(pricing)) : 'Không giới hạn') : '',
     },
+    co_gia_thang: !!pricing.priceMonth,
     tien: {
       tong: money(d.money.totalCharges),
       tong_chu: vndInWords(d.money.totalCharges),
@@ -493,9 +501,9 @@ export async function retryPdf(documentId: number, userId: number) {
  * (thành phiên bản mới của mẫu) — trừ khi người dùng đã thay file mẫu đó (builtin = "<key>-user").
  */
 const BUILTINS: { key: string; rev: number; file: string; name: string; kind: TemplateKind }[] = [
-  { key: 'contract', rev: 2, file: 'hop-dong-thue-xe.docx', name: 'Hợp đồng thuê xe tự lái', kind: 'contract' },
-  { key: 'pickup', rev: 2, file: 'bien-ban-giao-xe.docx', name: 'Biên bản giao xe', kind: 'pickup' },
-  { key: 'return', rev: 2, file: 'bien-ban-nhan-xe.docx', name: 'Biên bản nhận xe & quyết toán', kind: 'return' },
+  { key: 'contract', rev: 3, file: 'hop-dong-thue-xe.docx', name: 'Hợp đồng thuê xe tự lái', kind: 'contract' },
+  { key: 'pickup', rev: 3, file: 'bien-ban-giao-xe.docx', name: 'Biên bản giao xe', kind: 'pickup' },
+  { key: 'return', rev: 3, file: 'bien-ban-nhan-xe.docx', name: 'Biên bản nhận xe & quyết toán', kind: 'return' },
 ];
 
 export function builtinTemplatePath(file: string): string {

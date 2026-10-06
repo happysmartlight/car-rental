@@ -3,12 +3,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { idParam, notFound, parse, requireRole, zFileId, zMs, zOptText } from '../lib/http.js';
-import { escapeHtml, notify } from '../lib/telegram.js';
-import { lookupFine } from '../services/fines.js';
+import { badRequest, idParam, notFound, parse, requireRole, userId, zFileId, zMs, zOptText } from '../lib/http.js';
+import { getLocalConfig, updateLocalConfig } from '../lib/localConfig.js';
+import { checkProvider, matchViolations, parseViolationText, runFleetFineCheck } from '../services/fineCheck.js';
+import { lookupFine, recordFine } from '../services/fines.js';
 import { FINE_SOURCES, FINE_STATUSES } from '../shared/constants.js';
-import { fmtVnd, formatPlate, plateKey } from '../shared/text.js';
-import { fmtDateTime } from '../shared/time.js';
+import { formatPlate, plateKey } from '../shared/text.js';
 
 const zFine = z.object({
   plate: z.string().trim().min(4).max(20),
@@ -55,32 +55,92 @@ export async function fineRoutes(app: FastifyInstance) {
   app.post('/api/fines', async (req) => {
     requireRole(req, 'staff');
     const body = parse(zFine, req.body);
-    const key = plateKey(body.plate);
-    const vehicle = db.select().from(schema.vehicles).where(eq(schema.vehicles.plateKey, key)).get();
-    // Chưa chỉ định lượt thuê → tự khớp nếu tra ra đúng một người.
-    let rentalId = body.rentalId ?? null;
-    let customerId = body.customerId ?? null;
-    if (!rentalId) {
-      const found = lookupFine(body.plate, body.violatedAt);
-      if (found.matches.length === 1) {
-        rentalId = found.matches[0].rental.id;
-        customerId = found.matches[0].customer.id;
-      }
-    } else if (!customerId) {
-      customerId = db.select().from(schema.rentals).where(eq(schema.rentals.id, rentalId)).get()?.customerId ?? null;
-    }
-    const now = Date.now();
-    const f = db
-      .insert(schema.trafficFines)
-      .values({ ...body, amount: body.amount ?? null, plate: vehicle?.plate ?? formatPlate(body.plate), plateKey: key, vehicleId: vehicle?.id ?? null, rentalId, customerId, createdBy: req.user!.id, createdAt: now, updatedAt: now })
-      .returning()
-      .get();
-    audit(req, 'fine.create', 'fine', f.id, { plate: f.plate, rentalId, customerId });
-    const who = customerId ? db.select().from(schema.customers).where(eq(schema.customers.id, customerId)).get() : null;
-    notify(
-      `🚨 <b>Phạt nguội mới</b> ${escapeHtml(f.plate)} lúc ${fmtDateTime(f.violatedAt)}\n${escapeHtml(f.violation ?? '')}${f.amount ? ` · ${fmtVnd(f.amount)}` : ''}\n${who ? `Người giữ xe: ${escapeHtml(who.fullName)} · ${escapeHtml(who.phone ?? '')}` : 'Chưa xác định người giữ xe'}`,
-    );
+    const f = recordFine(body, userId(req));
+    audit(req, 'fine.create', 'fine', f.id, { plate: f.plate, rentalId: f.rentalId, customerId: f.customerId });
     return f;
+  });
+
+  /** Kiểm tra theo biển số qua dịch vụ tra cứu — không cần biết giờ vi phạm. */
+  app.post('/api/fines/check', async (req) => {
+    requireRole(req, 'staff');
+    const { plate } = parse(z.object({ plate: z.string().trim().min(4).max(20) }), req.body);
+    const r = await checkProvider(plate);
+    audit(req, 'fine.check', 'vehicle', null, { plate, ok: r.ok, found: r.ok ? r.violations.length : null });
+    if (!r.ok) return { ok: false, error: r.error, plate, violations: [] };
+    return { ok: true, plate, checkedAt: Date.now(), violations: matchViolations(plate, r.violations) };
+  });
+
+  /** Đọc kết quả người dùng chép từ trang tra cứu chính thức / VNeTraffic. */
+  app.post('/api/fines/parse', async (req) => {
+    requireRole(req, 'staff');
+    const { plate, text } = parse(z.object({ plate: z.string().trim().min(4).max(20), text: z.string().min(5).max(50_000) }), req.body);
+    const found = parseViolationText(text, plate);
+    if (!found.length) throw badRequest('Không đọc được vi phạm nào. Chép cả phần có "Thời gian vi phạm" rồi dán lại.');
+    return { ok: true, plate, violations: matchViolations(plate, found) };
+  });
+
+  /** Ghi nhiều vi phạm tìm được vào hồ sơ (bỏ qua cái đã có). */
+  app.post('/api/fines/record', async (req) => {
+    requireRole(req, 'staff');
+    const body = parse(
+      z.object({
+        plate: z.string().trim().min(4).max(20),
+        items: z
+          .array(
+            z.object({
+              violatedAt: zMs,
+              location: zOptText,
+              violation: zOptText,
+              statusText: zOptText,
+              unit: zOptText,
+            }),
+          )
+          .min(1)
+          .max(50),
+      }),
+      req.body,
+    );
+    const already = matchViolations(
+      body.plate,
+      body.items.map((i) => ({ plate: body.plate, violatedAt: i.violatedAt, timeText: '', location: null, violation: null, status: 'unknown', statusText: null, unit: null, resolvePlaces: [] })),
+    );
+    const created = [];
+    const ids: number[] = [];
+    for (let i = 0; i < body.items.length; i++) {
+      if (already[i].recordedFineId) {
+        ids.push(already[i].recordedFineId!);
+        continue;
+      }
+      const it = body.items[i];
+      const f = recordFine(
+        { plate: body.plate, violatedAt: it.violatedAt, location: it.location, violation: it.violation, source: 'csgt', notes: [it.statusText, it.unit && `Phát hiện: ${it.unit}`].filter(Boolean).join(' · ') || null },
+        userId(req),
+      );
+      created.push(f);
+      ids.push(f.id);
+    }
+    audit(req, 'fine.record_batch', 'vehicle', null, { plate: body.plate, created: created.length });
+    return { created: created.length, skipped: body.items.length - created.length, ids };
+  });
+
+  app.get('/api/fines/auto-check', async (req) => {
+    requireRole(req, 'staff');
+    return getLocalConfig().fineCheck;
+  });
+
+  app.put('/api/fines/auto-check', async (req) => {
+    requireRole(req, 'admin');
+    const { frequency } = parse(z.object({ frequency: z.enum(['off', 'daily', 'weekly']) }), req.body);
+    updateLocalConfig((c) => {
+      c.fineCheck.frequency = frequency;
+    });
+    audit(req, 'fine.auto_check_config', 'system', null, { frequency });
+    return getLocalConfig().fineCheck;
+  });
+
+  app.post('/api/fines/auto-check/run', async (req) => {
+    requireRole(req, 'admin');
+    return runFleetFineCheck(userId(req));
   });
 
   app.patch('/api/fines/:id', async (req) => {

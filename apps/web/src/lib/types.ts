@@ -235,3 +235,45 @@ export interface SettingsData {
   rules: RulesSettings;
   banks: { bin: string; code: string; name: string }[];
 }
+
+export interface MatchedViolation {
+  plate: string;
+  violatedAt: number | null;
+  timeText: string;
+  location: string | null;
+  violation: string | null;
+  status: 'unpaid' | 'paid' | 'unknown';
+  statusText: string | null;
+  unit: string | null;
+  resolvePlaces: string[];
+  verdict: 'rented' | 'blocked' | 'idle' | 'unknown_vehicle' | 'no_time';
+  renter: { customerId: number; fullName: string; phone: string | null } | null;
+  rental: { id: number; code: string } | null;
+  nearBoundary: boolean;
+  recordedFineId: number | null;
+}
+
+export interface ViolationCheckResult {
+  ok: boolean;
+  error?: string;
+  plate: string;
+  checkedAt?: number;
+  violations: MatchedViolation[];
+}
+
+export interface FineAutoCheck {
+  frequency: 'off' | 'daily' | 'weekly';
+  lastRunAt?: number;
+  lastError?: string | null;
+  lastFound?: number;
+  lastNew?: number;
+}
+
+export interface FleetCheckResult {
+  ok: boolean;
+  error: string | null;
+  checked: number;
+  found: number;
+  recorded: number;
+  vehicles: { plate: string; ok: boolean; error?: string; found: number; recorded: number }[];
+}
