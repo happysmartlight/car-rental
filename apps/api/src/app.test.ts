@@ -369,10 +369,78 @@ describe('phụ kiện trên xe', () => {
     db.update(schema.contractTemplates).set({ builtin: 'pickup-user' }).where(eq(schema.contractTemplates.id, pickupT.id)).run();
     ensureBuiltinTemplates();
     const c2 = db.select().from(schema.contractTemplates).where(eq(schema.contractTemplates.id, contract.id)).get()!;
-    expect(c2.builtin).toBe('contract-v3');
+    expect(c2.builtin).toBe('contract-v4');
     expect(c2.version).toBe(contract.version + 1);
     const p2 = db.select().from(schema.contractTemplates).where(eq(schema.contractTemplates.id, pickupT.id)).get()!;
     expect(p2.version).toBe(pickupT.version);
     expect(db.select().from(schema.contractTemplates).all()).toHaveLength(3);
+  });
+});
+
+describe('khách hủy đặt xe', () => {
+  const H = 3_600_000;
+  let vid = 0;
+  let cust = 0;
+  const book = async (startInHours: number, payments: object[]) => {
+    const start = Date.now() + startInHours * H;
+    const r = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, scheduledStart: start, scheduledEnd: start + 48 * H, depositRequired: 3000000, payments });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    return r.json.id as number;
+  };
+  const detail = async (id: number) => (await call('GET', `/api/rentals/${id}`)).json;
+  const live = (d: any) => d.payments.filter((p: any) => !p.voidedAt).map((p: any) => [p.direction, p.purpose, p.method, p.amount]);
+  const revenue = async () => (await call('GET', '/api/dashboard')).json.finance.revenue as number;
+
+  it('chuẩn bị xe + khách; chính sách mặc định 72 giờ / 100%', async () => {
+    vid = (await call('POST', '/api/vehicles', { plate: '51A-777.77', make: 'Kia', model: 'Morning', priceDay: 600000, odo: 1000 })).json.id;
+    cust = (await call('POST', '/api/customers', { fullName: 'Đỗ Hủy Kèo', idNumber: '079099000077' })).json.id;
+    const rules = (await call('GET', '/api/settings')).json.rules;
+    expect(rules).toMatchObject({ cancelNoticeHours: 72, cancelForfeitPct: 100 });
+  });
+
+  it('hủy sát giờ: mất cọc, hoàn tiền thuê trả trước; sổ tiền về 0, doanh thu cộng phí hủy', async () => {
+    const rev0 = await revenue();
+    const id = await book(24, [
+      { purpose: 'deposit', method: 'transfer', amount: 3000000 },
+      { purpose: 'rent', method: 'cash', amount: 1000000 },
+    ]);
+    const over = await call('POST', `/api/rentals/${id}/cancel`, { reason: 'Khách đổi kế hoạch', keep: 5000000, refund: { method: 'transfer' } });
+    expect(over.status).toBe(400);
+    const c = await call('POST', `/api/rentals/${id}/cancel`, { reason: 'Khách đổi kế hoạch', keep: 3000000, refund: { method: 'transfer' } });
+    expect(c.status, JSON.stringify(c.json)).toBe(200);
+    expect(c.json.status).toBe('cancelled');
+    const d = await detail(id);
+    expect(d.charges.map((x: any) => [x.kind, x.amount])).toEqual([['cancel_fee', 3000000]]);
+    expect(d.money).toMatchObject({ due: 0, depositHeld: 0 });
+    expect(live(d)).toEqual(expect.arrayContaining([['offset', 'deposit', 'offset', 3000000], ['out', 'rent', 'transfer', 1000000]]));
+    expect(await revenue()).toBe(rev0 + 3000000);
+    expect((await call('POST', `/api/rentals/${id}/cancel`, { reason: 'lần nữa' })).status).toBe(400);
+  });
+
+  it('hủy sớm: hoàn đủ cọc, không có phí hủy', async () => {
+    const id = await book(240, [{ purpose: 'deposit', method: 'cash', amount: 2000000 }]);
+    expect((await call('POST', `/api/rentals/${id}/cancel`, { reason: 'Khách báo sớm', keep: 0, refund: { method: 'cash' } })).status).toBe(200);
+    const d = await detail(id);
+    expect(d.charges).toEqual([]);
+    expect(d.money).toMatchObject({ due: 0, depositHeld: 0 });
+    expect(live(d)).toContainEqual(['out', 'deposit', 'cash', 2000000]);
+  });
+
+  it('giữ một phần, hoàn sau bằng nút Hoàn cọc', async () => {
+    const id = await book(12, [{ purpose: 'deposit', method: 'transfer', amount: 2000000 }]);
+    expect((await call('POST', `/api/rentals/${id}/cancel`, { reason: 'Khách bận', keep: 500000 })).status).toBe(200);
+    expect((await detail(id)).money).toMatchObject({ due: 0, depositHeld: 1500000 });
+    expect((await call('POST', `/api/rentals/${id}/payments`, { direction: 'out', purpose: 'deposit', method: 'transfer', amount: 1500000 })).status).toBe(200);
+    expect((await detail(id)).money.depositHeld).toBe(0);
+  });
+
+  it('hợp đồng in chính sách hủy theo cài đặt', async () => {
+    const rules = (await call('GET', '/api/settings')).json.rules;
+    expect((await call('PUT', '/api/settings/rules', { ...rules, cancelNoticeHours: 48, cancelForfeitPct: 50 })).status).toBe(200);
+    const id = await book(400, []);
+    const doc = await call('POST', `/api/rentals/${id}/documents`, { kind: 'contract' });
+    const file = await app.inject({ method: 'GET', url: `/api/files/${doc.json.document.docxFileId}`, headers: { cookie: adminCookie } });
+    const xml = new PizZip(file.rawPayload).file('word/document.xml')!.asText();
+    expect(xml).toContain('Hủy trong vòng 48 giờ (2 ngày) trước giờ nhận xe hoặc không đến nhận xe: mất 50% tiền cọc');
   });
 });

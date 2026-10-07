@@ -339,10 +339,17 @@ export async function rentalRoutes(app: FastifyInstance) {
   app.post('/api/rentals/:id/cancel', async (req) => {
     requireRole(req, 'staff');
     const id = idParam(req);
-    const { reason } = parse(z.object({ reason: z.string().trim().min(2, 'nhập lý do hủy').max(500) }), req.body);
-    const r = cancelRental(id, reason, userId(req));
-    audit(req, 'rental.cancel', 'rental', id, { reason });
-    return r;
+    const body = parse(
+      z.object({
+        reason: z.string().trim().min(2, 'nhập lý do hủy').max(500),
+        keep: zMoney.default(0),
+        refund: z.object({ method: z.enum(['cash', 'transfer']) }).nullable().default(null),
+      }),
+      req.body,
+    );
+    const { rental, removedCharges } = cancelRental(id, body, userId(req));
+    audit(req, 'rental.cancel', 'rental', id, { ...body, removedCharges });
+    return rental;
   });
 
   // ── Tiền ─────────────────────────────────────────────────────────────────

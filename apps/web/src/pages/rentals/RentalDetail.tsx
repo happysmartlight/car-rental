@@ -141,6 +141,7 @@ export default function RentalDetail() {
   if (isLoading || !d) return <PageLoader />;
   const r = d.rental;
   const m = d.money;
+  const cancelFee = d.charges.filter((c) => c.kind === 'cancel_fee').reduce((s, c) => s + c.amount, 0);
   const overdue = r.status === 'active' && r.scheduledEnd < now;
   const pickupHo = d.handovers.find((h) => h.kind === 'pickup');
   const returnHo = [...d.handovers].reverse().find((h) => h.kind === 'return');
@@ -258,7 +259,12 @@ export default function RentalDetail() {
             {r.fineHoldUntil < now ? ' — đã đến hạn hoàn.' : '.'}
           </Notice>
         )}
-        {r.status === 'cancelled' && <Notice tone="gray">Đã hủy: {r.cancelReason}</Notice>}
+        {r.status === 'cancelled' && (
+          <Notice tone="gray">
+            Đã hủy: {r.cancelReason}
+            {cancelFee > 0 && ` · khách mất ${fmtVnd(cancelFee)} tiền cọc`}
+          </Notice>
+        )}
         {d.warnings.map((w) => (
           <Notice key={w.code + w.message} tone={w.severity === 'danger' ? 'red' : w.severity === 'warn' ? 'amber' : 'blue'}>
             {w.message}
@@ -352,6 +358,11 @@ export default function RentalDetail() {
                 {m.depositHeld > 0 && ['cancelled', 'closed'].includes(r.status) && (
                   <Button size="sm" variant="secondary" onClick={() => openPay('deposit_out')}>
                     Hoàn cọc
+                  </Button>
+                )}
+                {m.due < 0 && r.status === 'cancelled' && (
+                  <Button size="sm" variant="secondary" onClick={() => openPay('rent_out')}>
+                    Hoàn tiền thuê
                   </Button>
                 )}
               </div>

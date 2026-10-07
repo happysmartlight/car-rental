@@ -356,7 +356,7 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
                 {charges.map((c, i) => (
                   <div key={i} className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[160px_1fr_140px_auto]">
                     <Select className="col-span-2 sm:col-span-1" value={c.kind} onChange={(e) => setCharges(charges.map((y, j) => (j === i ? { ...y, kind: e.target.value as ChargeKind } : y)))}>
-                      {CHARGE_KINDS.filter((k) => k !== 'rental' && k !== 'discount').map((k) => (
+                      {CHARGE_KINDS.filter((k) => k !== 'rental' && k !== 'discount' && k !== 'cancel_fee').map((k) => (
                         <option key={k} value={k}>
                           {CHARGE_KIND_LABEL[k]}
                         </option>

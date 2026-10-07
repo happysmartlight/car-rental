@@ -52,6 +52,8 @@ const zRules = z.object({
   minDriverAge: z.coerce.number().int().min(0).max(99),
   checklist: z.array(z.string().trim().min(1).max(120)).max(40),
   deliveryFeeDefault: zMoney,
+  cancelNoticeHours: z.coerce.number().int().min(0).max(24 * 60).default(72),
+  cancelForfeitPct: z.coerce.number().int().min(0).max(100).default(100),
 });
 
 export async function settingsRoutes(app: FastifyInstance) {

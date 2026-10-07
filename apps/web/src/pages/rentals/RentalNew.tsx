@@ -14,6 +14,7 @@ import { ApiError, api, fileUrl, qs } from '@/lib/api';
 import { useAuth, useSettings } from '@/lib/hooks';
 import type { CalendarData, Customer, Precheck, Rental, VehicleWithStatus } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
+import { cancelPolicyText } from '@shared/money';
 import { COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, type CollateralKind } from '@shared/constants';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { DAY_MS, HOUR_MS, addMonthsVn, fmtDateTime, fmtDuration } from '@shared/time';
@@ -379,6 +380,7 @@ export default function RentalNew() {
 
             <div className="mt-5 space-y-2">
               <p className="text-sm font-medium">Tiền nhận ngay (cọc giữ chỗ, trả trước)</p>
+              {settings && <p className="text-xs text-muted">Chính sách hủy: {cancelPolicyText(settings.rules)}</p>}
               {payments.map((p, i) => (
                 <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:grid-cols-[140px_140px_1fr_auto]">
                   <Select value={p.purpose} onChange={(e) => setPayments(payments.map((x, j) => (j === i ? { ...x, purpose: e.target.value as PayRow['purpose'] } : x)))}>

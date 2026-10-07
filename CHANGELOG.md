@@ -3,6 +3,15 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.5] - 2026-10-07
+
+### Mới
+- **Khách hủy sát giờ thì mất cọc**: chính sách hủy mới trong **Cài đặt → Giá & quy định** — hủy trong vòng bao nhiêu giờ trước giờ nhận xe (hoặc không đến lấy xe) thì khách mất bao nhiêu % tiền cọc. Mặc định 72 giờ / 100%, chỉnh theo quy định của cửa hàng.
+- Bấm **Hủy lượt thuê**: app cho biết còn bao lâu tới giờ nhận xe, tự gợi ý số tiền giữ lại theo chính sách (vẫn chỉnh được: giữ hết, hoàn hết, giữ một phần) và số tiền phải hoàn cho khách; tích "Đã hoàn tiền cho khách ngay" để ghi luôn phiếu hoàn (chuyển khoản/tiền mặt), hoặc hoàn sau bằng nút Hoàn cọc / Hoàn tiền thuê.
+- Tiền cọc giữ lại ghi thành khoản **"Phí hủy (mất cọc)"** và được tính vào doanh thu tháng hủy; sổ tiền của lượt đã hủy về 0, không còn treo "Cọc đang giữ".
+- Hợp đồng dựng sẵn có thêm điều khoản hủy thuê theo đúng chính sách đã cài (mẫu tự cập nhật). Mẫu Word riêng của bạn: thêm biến `{tien.chinh_sach_huy}` nếu muốn in.
+- Trang Đặt xe mới nhắc chính sách hủy ngay chỗ nhận cọc, để báo trước cho khách.
+
 ## [0.2.4] - 2026-10-07
 
 ### Cải tiến

@@ -9,8 +9,9 @@ import { getSetting } from '../lib/settings.js';
 import { ageAt } from '../shared/cccd.js';
 import type { ChargeKind, CollateralKind, PaymentMethod, RentalStatus } from '../shared/constants.js';
 import { RENTAL_STATUS } from '../shared/constants.js';
-import { summarizeMoney, type PaymentPurpose } from '../shared/money.js';
+import { planCancellation, summarizeMoney, type PaymentPurpose } from '../shared/money.js';
 import { quoteRental, type Quote, type VehiclePricing } from '../shared/pricing.js';
+import { fmtNumber } from '../shared/text.js';
 import { DAY_MS, fmtDateTime, vnDateKey, vnParts } from '../shared/time.js';
 
 export const OPEN_STATUSES: RentalStatus[] = ['booked', 'active'];
@@ -520,16 +521,38 @@ export function releaseHold(id: number, input: ReleaseHoldInput, userId: number)
   });
 }
 
-export function cancelRental(id: number, reason: string, userId: number): Rental {
+export interface CancelInput {
+  reason: string;
+  /** Số tiền giữ lại (khách mất) — lấy từ cọc trước, thiếu thì từ tiền thuê trả trước. */
+  keep: number;
+  /** Hoàn phần còn lại ngay; null = hoàn sau (nút Hoàn cọc / Hoàn tiền thuê). */
+  refund: { method: 'cash' | 'transfer' } | null;
+}
+
+/**
+ * Hủy lượt chưa giao xe. Các khoản báo giá (tiền thuê, giao xe…) bỏ đi vì chuyến không diễn ra;
+ * tiền giữ lại thành khoản "Phí hủy (mất cọc)" được cấn từ cọc, nên sổ tiền của lượt về 0.
+ */
+export function cancelRental(id: number, input: CancelInput, userId: number): { rental: Rental; removedCharges: { kind: ChargeKind; description: string; amount: number }[] } {
   const r = getRental(id);
   if (r.status !== 'booked') throw badRequest('Chỉ hủy được lượt chưa giao xe');
-  void userId;
-  return db
-    .update(schema.rentals)
-    .set({ status: 'cancelled', cancelReason: reason, updatedAt: Date.now() })
-    .where(eq(schema.rentals.id, id))
-    .returning()
-    .get();
+  const before = rentalMoney(id);
+  const plan = planCancellation(before, input.keep);
+  if (input.keep > plan.keep) throw badRequest(`Số tiền giữ lại vượt quá tiền khách đã trả (${fmtNumber(plan.keep)} đ)`);
+  return db.transaction(() => {
+    const removedCharges = db.delete(schema.charges).where(eq(schema.charges.rentalId, id)).returning({ kind: schema.charges.kind, description: schema.charges.description, amount: schema.charges.amount }).all();
+    if (plan.keep > 0) addCharge(id, { kind: 'cancel_fee', description: `Khách hủy chuyến lúc ${fmtDateTime(Date.now())} (hẹn nhận xe ${fmtDateTime(r.scheduledStart)})`, amount: plan.keep }, userId);
+    if (plan.offset > 0) addPayment(id, { direction: 'offset', purpose: 'deposit', method: 'offset', amount: plan.offset, note: 'Giữ cọc do khách hủy chuyến' }, userId);
+    if (input.refund && plan.refundDeposit > 0) addPayment(id, { direction: 'out', purpose: 'deposit', method: input.refund.method, amount: plan.refundDeposit, note: 'Hoàn cọc khi hủy chuyến' }, userId);
+    if (input.refund && plan.refundRent > 0) addPayment(id, { direction: 'out', purpose: 'rent', method: input.refund.method, amount: plan.refundRent, note: 'Hoàn tiền thuê trả trước khi hủy chuyến' }, userId);
+    const rental = db
+      .update(schema.rentals)
+      .set({ status: 'cancelled', cancelReason: input.reason, updatedAt: Date.now() })
+      .where(eq(schema.rentals.id, id))
+      .returning()
+      .get();
+    return { rental, removedCharges };
+  });
 }
 
 // ── Đọc chi tiết ───────────────────────────────────────────────────────────

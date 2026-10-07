@@ -20,7 +20,7 @@ export const RENTAL_STATUS: Record<RentalStatus, { label: string; tone: Tone; hi
 export const RENTAL_TYPES = ['self_drive', 'with_driver'] as const;
 export type RentalType = (typeof RENTAL_TYPES)[number];
 
-export const CHARGE_KINDS = ['rental', 'delivery', 'over_km', 'over_time', 'fuel', 'cleaning', 'damage', 'accessory', 'toll', 'fine', 'other', 'discount'] as const;
+export const CHARGE_KINDS = ['rental', 'delivery', 'over_km', 'over_time', 'fuel', 'cleaning', 'damage', 'accessory', 'toll', 'fine', 'other', 'discount', 'cancel_fee'] as const;
 export type ChargeKind = (typeof CHARGE_KINDS)[number];
 export const CHARGE_KIND_LABEL: Record<ChargeKind, string> = {
   rental: 'Tiền thuê xe',
@@ -35,6 +35,7 @@ export const CHARGE_KIND_LABEL: Record<ChargeKind, string> = {
   fine: 'Phạt nguội',
   other: 'Khoản khác',
   discount: 'Giảm giá',
+  cancel_fee: 'Phí hủy (mất cọc)',
 };
 
 export const PAYMENT_METHODS = ['cash', 'transfer', 'offset'] as const;

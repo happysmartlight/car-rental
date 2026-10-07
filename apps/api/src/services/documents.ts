@@ -23,7 +23,7 @@ import {
   TRANSMISSION_LABEL,
   type TemplateKind,
 } from '../shared/constants.js';
-import { planSettlement } from '../shared/money.js';
+import { cancelPolicyText, planSettlement } from '../shared/money.js';
 import { monthKmLimit, quoteRental } from '../shared/pricing.js';
 import { fmtNumber, vndInWords } from '../shared/text.js';
 import { fmtDate, fmtDateKey, fmtDateTime, fmtDuration, vnDateLong } from '../shared/time.js';
@@ -133,6 +133,7 @@ export const TEMPLATE_FIELDS: { group: string; fields: FieldDoc[] }[] = [
       { key: 'tien.con_lai', label: 'Còn phải trả' },
       { key: 'tien.giu_coc', label: 'Số tiền cọc giữ chờ phạt nguội' },
       { key: 'tien.giu_coc_ngay', label: 'Số ngày giữ cọc' },
+      { key: 'tien.chinh_sach_huy', label: 'Chính sách hủy thuê (mất cọc khi hủy sát giờ)' },
     ],
   },
   {
@@ -330,6 +331,7 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
       con_lai: money(Math.max(0, d.money.due)),
       giu_coc: money(r.fineHoldAmount || rules.fineHoldAmount),
       giu_coc_ngay: rules.fineHoldDays,
+      chinh_sach_huy: cancelPolicyText(rules),
     },
     khoan: d.charges.map((c) => ({ loai: CHARGE_KIND_LABEL[c.kind], mo_ta: c.description, so_tien: money(c.amount) })),
     phu_kien: accGiao.filter((a) => !giaoChecked || a.present).map((a) => ({ ten: a.name, so_luong: a.quantity, gia_tri: money(a.value), ghi_chu: a.note ?? '' })),
@@ -501,7 +503,7 @@ export async function retryPdf(documentId: number, userId: number) {
  * (thành phiên bản mới của mẫu) — trừ khi người dùng đã thay file mẫu đó (builtin = "<key>-user").
  */
 const BUILTINS: { key: string; rev: number; file: string; name: string; kind: TemplateKind }[] = [
-  { key: 'contract', rev: 3, file: 'hop-dong-thue-xe.docx', name: 'Hợp đồng thuê xe tự lái', kind: 'contract' },
+  { key: 'contract', rev: 4, file: 'hop-dong-thue-xe.docx', name: 'Hợp đồng thuê xe tự lái', kind: 'contract' },
   { key: 'pickup', rev: 3, file: 'bien-ban-giao-xe.docx', name: 'Biên bản giao xe', kind: 'pickup' },
   { key: 'return', rev: 3, file: 'bien-ban-nhan-xe.docx', name: 'Biên bản nhận xe & quyết toán', kind: 'return' },
 ];

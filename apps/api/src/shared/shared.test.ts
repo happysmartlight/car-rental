@@ -3,7 +3,7 @@ import { formatPlate, numberToVietnameseWords, parseMoney, plateKey, unaccent, v
 import { buildVietQrPayload, crc16, sanitizeTransferNote } from './vietqr.js';
 import { parseCccdQr } from './cccd.js';
 import { DEFAULT_PRICING_RULES, overKmCharge, overtimeCharge, quoteRental, type VehiclePricing } from './pricing.js';
-import { planSettlement, summarizeMoney } from './money.js';
+import { cancelForfeit, cancelPolicyText, planCancellation, planSettlement, summarizeMoney } from './money.js';
 import { addMonthsVn, fmtDateTime, msToVnLocalInput, vnDateLong, vnLocalInputToMs } from './time.js';
 
 describe('đọc số tiền bằng chữ', () => {
@@ -197,6 +197,37 @@ describe('sổ tiền & quyết toán', () => {
       { direction: 'offset', purpose: 'deposit', amount: 1000 },
     ]);
     expect(s).toMatchObject({ rentPaid: 1000, depositHeld: 2000, due: 0 });
+  });
+});
+
+describe('khách hủy đặt xe', () => {
+  const H = 3_600_000;
+  const policy = { cancelNoticeHours: 72, cancelForfeitPct: 100 };
+  it('hủy sát giờ (hoặc không đến) mất cọc, hủy sớm thì không', () => {
+    const start = vnLocalInputToMs('2026-10-20T08:00');
+    expect(cancelForfeit(3000000, start, start - 73 * H, policy)).toBe(0);
+    expect(cancelForfeit(3000000, start, start - 72 * H, policy)).toBe(0);
+    expect(cancelForfeit(3000000, start, start - 71 * H, policy)).toBe(3000000);
+    expect(cancelForfeit(3000000, start, start + 2 * H, policy)).toBe(3000000);
+    expect(cancelForfeit(3000000, start, start - H, { cancelNoticeHours: 24, cancelForfeitPct: 50 })).toBe(1500000);
+    expect(cancelForfeit(3000000, start, start - H, { cancelNoticeHours: 24, cancelForfeitPct: 0 })).toBe(0);
+    expect(cancelForfeit(0, start, start - H, policy)).toBe(0);
+  });
+  it('giữ từ cọc trước, thiếu thì lấy tiền thuê trả trước; hoàn phần còn lại', () => {
+    const s = summarizeMoney([{ amount: 2000000 }], [
+      { direction: 'in', purpose: 'deposit', amount: 3000000 },
+      { direction: 'in', purpose: 'rent', amount: 1000000 },
+    ]);
+    expect(planCancellation(s, 3000000)).toEqual({ keep: 3000000, offset: 3000000, refundDeposit: 0, refundRent: 1000000 });
+    expect(planCancellation(s, 1000000)).toEqual({ keep: 1000000, offset: 1000000, refundDeposit: 2000000, refundRent: 1000000 });
+    expect(planCancellation(s, 3500000)).toEqual({ keep: 3500000, offset: 3000000, refundDeposit: 0, refundRent: 500000 });
+    expect(planCancellation(s, 9000000).keep).toBe(4000000); // không giữ quá tiền khách đã đưa
+    expect(planCancellation(s, 0)).toEqual({ keep: 0, offset: 0, refundDeposit: 3000000, refundRent: 1000000 });
+  });
+  it('câu chính sách', () => {
+    expect(cancelPolicyText(policy)).toBe('Hủy trong vòng 72 giờ (3 ngày) trước giờ nhận xe hoặc không đến nhận xe: mất toàn bộ tiền cọc (tiền thuê đã trả được hoàn lại). Hủy sớm hơn: hoàn lại toàn bộ tiền cọc và tiền thuê đã trả.');
+    expect(cancelPolicyText({ cancelNoticeHours: 24, cancelForfeitPct: 50 })).toContain('trong vòng 24 giờ trước giờ nhận xe hoặc không đến nhận xe: mất 50% tiền cọc');
+    expect(cancelPolicyText({ cancelNoticeHours: 24, cancelForfeitPct: 0 })).toBe('Hủy trước giờ nhận xe: hoàn lại toàn bộ tiền cọc và tiền thuê đã trả.');
   });
 });
 

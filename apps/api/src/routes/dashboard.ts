@@ -53,12 +53,18 @@ export async function dashboardRoutes(app: FastifyInstance) {
     if (req.user!.role === 'admin') {
       const { start, end } = monthRange(now);
       const revenue =
-        db
+        (db
           .select({ total: sql<number>`COALESCE(SUM(${schema.charges.amount}), 0)` })
           .from(schema.charges)
           .innerJoin(schema.rentals, eq(schema.rentals.id, schema.charges.rentalId))
           .where(and(sql`${schema.rentals.status} != 'cancelled'`, gte(schema.rentals.scheduledStart, start), lt(schema.rentals.scheduledStart, end)))
-          .get()?.total ?? 0;
+          .get()?.total ?? 0) +
+        // Cọc khách mất khi hủy chuyến: tính vào tháng ghi nhận.
+        (db
+          .select({ total: sql<number>`COALESCE(SUM(${schema.charges.amount}), 0)` })
+          .from(schema.charges)
+          .where(and(eq(schema.charges.kind, 'cancel_fee'), gte(schema.charges.createdAt, start), lt(schema.charges.createdAt, end)))
+          .get()?.total ?? 0);
       const pays = db
         .select()
         .from(schema.payments)

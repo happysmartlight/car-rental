@@ -7,15 +7,16 @@ import { CustomerPicker } from '@/components/CustomerPicker';
 import { MultiPhotoInput } from '@/components/images';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
-import { DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select, Textarea } from '@/components/ui/form';
+import { Checkbox, DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select, Textarea } from '@/components/ui/form';
 import { Notice } from '@/components/ui/misc';
 import { api } from '@/lib/api';
 import { useAction, useSettings } from '@/lib/hooks';
 import type { Customer, Precheck, RentalDetail, VehicleWithStatus } from '@/lib/types';
+import { cn } from '@/lib/utils';
 import { CHARGE_KINDS, CHARGE_KIND_LABEL, COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, type ChargeKind, type CollateralKind } from '@shared/constants';
-import { planSettlement } from '@shared/money';
+import { cancelForfeit, planCancellation, planSettlement } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
-import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime } from '@shared/time';
+import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime, fmtDuration } from '@shared/time';
 
 type DialogProps = { d: RentalDetail; open: boolean; onOpenChange: (o: boolean) => void };
 const inv = (id: number) => ({ invalidate: [['rental', String(id)], ['rentals'], ['dashboard'], ['calendar']] });
@@ -106,7 +107,7 @@ export function ChargeDialog({ d, open, onOpenChange }: DialogProps) {
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Loại">
           <Select value={kind} onChange={(e) => setKind(e.target.value as ChargeKind)}>
-            {CHARGE_KINDS.filter((k) => k !== 'rental').map((k) => (
+            {CHARGE_KINDS.filter((k) => k !== 'rental' && k !== 'cancel_fee').map((k) => (
               <option key={k} value={k}>
                 {CHARGE_KIND_LABEL[k]}
               </option>
@@ -406,15 +407,105 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
 }
 
 export function CancelDialog({ d, open, onOpenChange }: DialogProps) {
+  const { data: settings } = useSettings();
+  const rules = settings?.rules;
+  const m = d.money;
+  const r = d.rental;
+  const policyKeep = (at: number) => (rules ? cancelForfeit(m.depositHeld, r.scheduledStart, at, rules) : 0);
   const [reason, setReason] = useState('');
-  const save = useAction(() => api.post(`/api/rentals/${d.rental.id}/cancel`, { reason }), { ...inv(d.rental.id), success: 'Đã hủy lượt thuê', onSuccess: () => onOpenChange(false) });
+  const [keep, setKeep] = useState<number | null>(0);
+  const [refundNow, setRefundNow] = useState(true);
+  const [method, setMethod] = useState<'cash' | 'transfer'>('transfer');
+  const [openedAt, setOpenedAt] = useState(Date.now());
+  useEffect(() => {
+    if (!open) return;
+    const now = Date.now();
+    setOpenedAt(now);
+    setReason('');
+    setKeep(policyKeep(now));
+    setRefundNow(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, rules]);
+
+  const received = Math.max(0, m.depositHeld) + Math.max(0, m.rentPaid);
+  const suggested = policyKeep(openedAt);
+  const plan = planCancellation(m, keep ?? 0);
+  const refund = plan.refundDeposit + plan.refundRent;
+  const left = r.scheduledStart - openedAt;
+  const save = useAction(() => api.post(`/api/rentals/${r.id}/cancel`, { reason, keep: plan.keep, refund: refundNow && refund > 0 ? { method } : null }), {
+    ...inv(r.id),
+    success: 'Đã hủy lượt thuê',
+    onSuccess: () => onOpenChange(false),
+  });
+  const chip = (label: string, value: number) => (
+    <button type="button" onClick={() => setKeep(value)} className={cn('rounded-full border px-3 py-1 text-sm', (keep ?? 0) === value ? 'border-brand bg-brand-soft text-brand' : 'border-border hover:bg-surface-2')}>
+      {label}
+    </button>
+  );
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title={`Hủy ${d.rental.code}?`} size="sm" footer={<Button variant="danger" onClick={() => save.mutate()} loading={save.isPending} disabled={reason.trim().length < 2}>Hủy lượt thuê</Button>}>
-      <div className="space-y-3">
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Hủy ${r.code}?`}
+      description={`${d.customer.fullName} · hẹn nhận xe ${fmtDateTime(r.scheduledStart)}`}
+      footer={
+        <Button variant="danger" onClick={() => save.mutate()} loading={save.isPending} disabled={reason.trim().length < 2}>
+          Hủy lượt thuê
+        </Button>
+      }
+    >
+      <div className="space-y-4">
         <Field label="Lý do">
-          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} autoFocus placeholder="Khách đổi kế hoạch…" />
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Khách đổi kế hoạch…" />
         </Field>
-        {d.money.depositHeld > 0 && <Notice tone="amber">Đang giữ cọc {fmtVnd(d.money.depositHeld)}. Sau khi hủy, ghi nhận hoàn cọc (hoặc giữ lại theo thỏa thuận) ở mục Tiền.</Notice>}
+        {received > 0 && (
+          <>
+            <Notice tone={suggested > 0 ? 'amber' : 'blue'}>
+              {left > 0 ? `Còn ${fmtDuration(left)} tới giờ nhận xe` : `Đã quá giờ nhận xe ${fmtDuration(-left)}`}
+              {rules && (suggested > 0 ? ` — theo chính sách khách mất ${fmtVnd(suggested)} tiền cọc.` : ' — theo chính sách hoàn đủ cọc.')}
+            </Notice>
+            <div className="divide-y divide-border rounded-2xl border border-border px-4 py-1">
+              <div className="flex justify-between py-1.5 text-sm">
+                <span className="text-muted">Khách đã đặt cọc</span>
+                <span className="tabular">{fmtVnd(m.depositHeld)}</span>
+              </div>
+              {m.rentPaid > 0 && (
+                <div className="flex justify-between py-1.5 text-sm">
+                  <span className="text-muted">Tiền thuê đã trả trước</span>
+                  <span className="tabular">{fmtVnd(m.rentPaid)}</span>
+                </div>
+              )}
+            </div>
+            <Field label="Giữ lại — khách mất" error={(keep ?? 0) > received ? `Tối đa ${fmtVnd(received)} (số tiền khách đã đưa)` : null}>
+              <MoneyInput value={keep} onChange={setKeep} />
+            </Field>
+            <div className="flex flex-wrap gap-1.5">
+              {rules && suggested > 0 && chip('Theo chính sách', suggested)}
+              {chip('Hoàn hết', 0)}
+              {m.depositHeld > 0 && m.depositHeld !== suggested && chip('Giữ hết cọc', m.depositHeld)}
+            </div>
+            <div className="flex justify-between rounded-2xl bg-surface-2 px-4 py-2.5 text-sm font-semibold">
+              <span>Hoàn lại khách</span>
+              <span className={cn('tabular', refund > 0 && 'text-emerald-600')}>{fmtVnd(refund)}</span>
+            </div>
+            {refund > 0 && (
+              <div className="space-y-2">
+                <Checkbox checked={refundNow} onChange={setRefundNow} label="Đã hoàn tiền cho khách ngay" description={refundNow ? undefined : 'Hoàn sau ở mục Tiền của lượt thuê (nút Hoàn cọc / Hoàn tiền thuê).'} />
+                {refundNow && (
+                  <Segmented
+                    value={method}
+                    onChange={setMethod}
+                    options={[
+                      { value: 'transfer', label: 'Chuyển khoản' },
+                      { value: 'cash', label: 'Tiền mặt' },
+                    ]}
+                  />
+                )}
+              </div>
+            )}
+          </>
+        )}
       </div>
     </Dialog>
   );

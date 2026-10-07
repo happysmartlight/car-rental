@@ -12,6 +12,7 @@ import { api } from '@/lib/api';
 import { useAuth, useMediaQuery, useSettings } from '@/lib/hooks';
 import type { BusinessSettings, RulesSettings } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
+import { cancelPolicyText } from '@shared/money';
 import { WEEKDAY_LONG } from '@shared/time';
 import { SettingsAccessories } from './SettingsAccessories';
 import { SettingsBackup } from './SettingsBackup';
@@ -326,6 +327,21 @@ function RulesSection() {
           <Field label="Thời gian giữ">
             <NumberInput value={f.fineHoldDays} onChange={(v) => setF({ ...f, fineHoldDays: v ?? 0 })} suffix="ngày" />
           </Field>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Khách hủy đặt xe" description="Hủy sát giờ nhận xe thì khách mất cọc — in vào hợp đồng, gợi ý sẵn khi bấm Hủy" />
+        <CardBody className="space-y-3">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Hủy trong vòng" hint="Trước giờ nhận xe (0 = chỉ khi không đến nhận xe)">
+              <NumberInput value={f.cancelNoticeHours} onChange={(v) => setF({ ...f, cancelNoticeHours: v ?? 0 })} suffix="giờ" />
+            </Field>
+            <Field label="Khách mất" hint="Phần trăm tiền cọc (0 = luôn hoàn đủ)">
+              <NumberInput value={f.cancelForfeitPct} onChange={(v) => setF({ ...f, cancelForfeitPct: Math.min(100, v ?? 0) })} suffix="% cọc" />
+            </Field>
+          </div>
+          <p className="rounded-xl bg-surface-2 px-3 py-2 text-sm text-muted">{cancelPolicyText(f)}</p>
         </CardBody>
       </Card>
 

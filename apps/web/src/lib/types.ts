@@ -228,6 +228,8 @@ export interface RulesSettings {
   minDriverAge: number;
   checklist: string[];
   deliveryFeeDefault: number;
+  cancelNoticeHours: number;
+  cancelForfeitPct: number;
 }
 
 export interface SettingsData {

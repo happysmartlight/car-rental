@@ -218,6 +218,7 @@ const contract = doc([
     '{tien.giu_coc_ngay}',
     ' ngày kể từ ngày trả xe để đối soát vi phạm giao thông phát hiện qua hình ảnh (phạt nguội). Hết thời hạn này, Bên A hoàn trả số tiền giữ lại sau khi trừ các khoản phạt (nếu có).',
   ]),
+  P(['– Bên B hủy thuê trước khi nhận xe: ', '{tien.chinh_sach_huy}']),
 
   H('Điều 5. Quyền và nghĩa vụ của Bên A'),
   P(['1. Giao xe đúng thời gian, địa điểm; xe bảo đảm an toàn kỹ thuật, có giấy tờ theo quy định (bản sao đăng ký xe có chứng thực, bảo hiểm trách nhiệm dân sự bắt buộc, giấy chứng nhận kiểm định).']),
