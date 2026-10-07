@@ -3,6 +3,12 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.4] - 2026-10-07
+
+### Cải tiến
+- **Lịch xe trên điện thoại vuốt ngang được**: vuốt trái/phải để xem các ngày, cột biển số đứng yên, mỗi lần vuốt dừng gọn vào một ngày. Gần hết thì tự nạp thêm 4 tuần, vuốt tiếp không giới hạn. Nút ‹ › nhảy 1 tuần, "Hôm nay" cuộn về hôm nay.
+- Ngày trên lịch rõ hơn: mỗi ngày một cột đủ rộng, không còn chữ ngày dính vào nhau. Biển số dài tự xuống dòng, không tràn ra ngoài.
+
 ## [0.2.3] - 2026-10-07
 
 ### Sửa
