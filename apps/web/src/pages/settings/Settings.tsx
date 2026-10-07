@@ -286,11 +286,25 @@ function RulesSection() {
       <Card>
         <CardHeader title="Phụ thu lễ, Tết" description="Khối ngày bắt đầu trong kỳ lễ được cộng % phụ thu" />
         <CardBody className="space-y-2">
+          {f.holidays.length > 0 && (
+            <div className="hidden gap-2 text-xs font-medium text-muted sm:grid sm:grid-cols-[1fr_150px_150px_110px_40px]">
+              <span>Tên kỳ lễ</span>
+              <span>Từ ngày</span>
+              <span>Đến ngày</span>
+              <span>Phụ thu</span>
+            </div>
+          )}
           {f.holidays.map((h, i) => (
-            <div key={i} className="grid grid-cols-2 gap-2 rounded-2xl border border-border p-3 sm:grid-cols-[1fr_150px_150px_110px_auto] sm:border-0 sm:p-0">
-              <Input className="col-span-2 sm:col-span-1" value={h.name} placeholder="Tết Nguyên đán" onChange={(e) => setF({ ...f, holidays: f.holidays.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
-              <DateInput value={h.from} onChange={(v) => setF({ ...f, holidays: f.holidays.map((x, j) => (j === i ? { ...x, from: v ?? '' } : x)) })} />
-              <DateInput value={h.to} onChange={(v) => setF({ ...f, holidays: f.holidays.map((x, j) => (j === i ? { ...x, to: v ?? '' } : x)) })} />
+            <div key={i} className="grid grid-cols-2 gap-2 rounded-2xl border border-border p-3 sm:grid-cols-[1fr_150px_150px_110px_40px] sm:border-0 sm:p-0">
+              <Input className="col-span-2 sm:col-span-1" value={h.name} placeholder="Tết Nguyên đán" aria-label="Tên kỳ lễ" onChange={(e) => setF({ ...f, holidays: f.holidays.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
+              <label className="min-w-0">
+                <span className="mb-1 block text-xs text-muted sm:sr-only">Từ ngày</span>
+                <DateInput value={h.from} onChange={(v) => setF({ ...f, holidays: f.holidays.map((x, j) => (j === i ? { ...x, from: v ?? '' } : x)) })} />
+              </label>
+              <label className="min-w-0">
+                <span className="mb-1 block text-xs text-muted sm:sr-only">Đến ngày</span>
+                <DateInput value={h.to} onChange={(v) => setF({ ...f, holidays: f.holidays.map((x, j) => (j === i ? { ...x, to: v ?? '' } : x)) })} />
+              </label>
               <NumberInput value={h.surchargePct} onChange={(v) => setF({ ...f, holidays: f.holidays.map((x, j) => (j === i ? { ...x, surchargePct: v ?? 0 } : x)) })} suffix="%" />
               <Button variant="ghost" size="icon" onClick={() => setF({ ...f, holidays: f.holidays.filter((_, j) => j !== i) })} aria-label="Xóa">
                 <Trash2 />

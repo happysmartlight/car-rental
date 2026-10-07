@@ -80,7 +80,9 @@ export function AppShell() {
   const ThemeIcon = THEMES.find((t) => t.value === theme)?.icon ?? Monitor;
 
   return (
-    <div className="min-h-dvh lg:pl-64">
+    // overflow-x-clip: phần tử nào lỡ tràn ngang cũng không làm trang rộng hơn màn hình (iOS sẽ thu nhỏ cả trang).
+    // clip (không phải hidden) để thanh tiêu đề sticky vẫn dính.
+    <div className="min-h-dvh overflow-x-clip lg:pl-64">
       {/* ── Sidebar máy tính ── */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-surface lg:flex">
         <div className="flex h-16 items-center gap-2.5 px-5">

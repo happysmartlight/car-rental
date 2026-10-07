@@ -104,6 +104,20 @@
       font-size: 14px;
     }
   }
+  /* Ô ngày nằm trong lưới phải co được theo cột. */
+  input:is([type='date'], [type='time'], [type='datetime-local'], [type='month'], [type='week']) {
+    min-width: 0;
+  }
+  /* iOS Safari (RenderThemeIOS::adjustInputElementButtonStyle): ô ngày có width không phải px cố định bị ép
+     min-width = bề rộng chuỗi ngày dài nhất của locale + box-sizing: content-box.
+     Hậu quả: ô tràn khỏi thẻ, cả trang rộng hơn màn hình → iOS thu nhỏ trang (thanh tiêu đề hụt bên phải)
+     → chạm vào ô thì chữ < 16px nên iOS phóng to. appearance: none tắt hẳn việc ép này. */
+  @supports (-webkit-touch-callout: none) {
+    input:is([type='date'], [type='time'], [type='datetime-local'], [type='month'], [type='week']) {
+      -webkit-appearance: none;
+      appearance: none;
+    }
+  }
 }
 
 /* Ô chọn: mũi tên vẽ bằng CSS (viết bg-[…] trong class thì tailwind-merge xóa mất bg-surface). */

@@ -3,6 +3,12 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.2] - 2026-10-07
+
+### Sửa
+- **iPhone: ô chọn ngày giờ bị tràn ra ngoài khung** (giờ nhận/trả xe khi đặt xe, ngày lễ Tết trong Giá & quy định…). Lỗi này còn làm cả trang bị thu nhỏ — thanh tiêu đề hụt một khoảng bên phải — và mỗi lần chạm vào ô nhập là màn hình tự phóng to. Nay các ô nằm gọn trong khung, trang không còn tự phóng to khi nhập liệu (vẫn chụm hai ngón để phóng to được).
+- Phụ thu lễ, Tết: hai ô ngày có nhãn **Từ ngày / Đến ngày**, không còn là hai ô trống khó phân biệt trên điện thoại.
+
 ## [0.2.1] - 2026-10-06
 
 ### Cải tiến

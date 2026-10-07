@@ -20,6 +20,11 @@
         var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
         if (dark) document.documentElement.classList.add('dark');
       } catch (e) {}
+      // iPhone/iPad tự phóng to khi chạm ô nhập có chữ < 16px (iPad dùng 14px). maximum-scale=1 tắt việc đó;
+      // iOS vẫn cho chụm hai ngón để phóng to. Không áp cho Android vì ở đó nó chặn luôn chụm phóng to.
+      if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)) {
+        document.querySelector('meta[name=viewport]').content = 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover';
+      }
     </script>
   </head>
   <body>
