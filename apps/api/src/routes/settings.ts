@@ -7,6 +7,7 @@ import { DOCX_MIME, saveBinary } from '../lib/files.js';
 import { badRequest, idParam, notFound, parse, requireRole, zMoney } from '../lib/http.js';
 import { getSetting, setSetting } from '../lib/settings.js';
 import { builtinTemplatePath, TEMPLATE_FIELDS, validateTemplate } from '../services/documents.js';
+import { DEFAULT_PICKUP_TIME } from '../shared/booking.js';
 import { TEMPLATE_KINDS } from '../shared/constants.js';
 import { BANKS } from '../shared/vietqr.js';
 import fs from 'node:fs';
@@ -47,6 +48,7 @@ const zRules = z.object({
     )
     .max(100),
   bufferMinutes: z.coerce.number().int().min(0).max(24 * 60),
+  defaultPickupTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Giờ nhận mặc định phải dạng HH:mm').default(DEFAULT_PICKUP_TIME),
   fineHoldAmount: zMoney,
   fineHoldDays: z.coerce.number().int().min(0).max(365),
   minDriverAge: z.coerce.number().int().min(0).max(99),

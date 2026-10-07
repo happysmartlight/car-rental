@@ -223,6 +223,7 @@ export interface RulesSettings {
   graceMinutes: number;
   holidays: { name: string; from: string; to: string; surchargePct: number }[];
   bufferMinutes: number;
+  defaultPickupTime: string;
   fineHoldAmount: number;
   fineHoldDays: number;
   minDriverAge: number;

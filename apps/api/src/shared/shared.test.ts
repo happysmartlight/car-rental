@@ -5,6 +5,7 @@ import { parseCccdQr } from './cccd.js';
 import { DEFAULT_PRICING_RULES, overKmCharge, overtimeCharge, quoteRental, type VehiclePricing } from './pricing.js';
 import { cancelForfeit, cancelMessage, cancelPolicyText, planCancellation, planSettlement, summarizeMoney } from './money.js';
 import { CAR_MAKES, findCarMake, findCarModel } from './carModels.js';
+import { suggestBookingSlot } from './booking.js';
 import { addMonthsVn, fmtDateTime, msToVnLocalInput, vnDateLong, vnLocalInputToMs } from './time.js';
 
 describe('đọc số tiền bằng chữ', () => {
@@ -272,5 +273,56 @@ describe('danh mục hãng / dòng xe', () => {
     expect(findCarModel(findCarMake('Toyota'), 'Vios 1.5G')).toBeUndefined();
     expect(findCarMake('Lada')).toBeUndefined();
     expect(vf?.electric).toContain('VF 3');
+  });
+});
+
+describe('gợi ý giờ đặt xe từ Lịch xe', () => {
+  const t = vnLocalInputToMs;
+  const now = t('2026-10-08T14:10');
+  const buffer = 120 * 60_000;
+  const rental = (start: string, end: string, status = 'booked') => ({ type: 'rental' as const, status, start: t(start), end: t(end) });
+  const slot = (firstDay: string, items: ReturnType<typeof rental>[] = [], lastDay?: string) => {
+    const s = suggestBookingSlot({ firstDay: t(firstDay), lastDay: lastDay ? t(lastDay) : undefined, items, bufferMs: buffer, now });
+    return { start: msToVnLocalInput(s.start), end: msToVnLocalInput(s.end), after: s.after, before: s.before };
+  };
+
+  it('ngày trống: nhận giờ mặc định 8:30, thuê 1 ngày', () => expect(slot('2026-10-10T00:00')).toMatchObject({ start: '2026-10-10T08:30', end: '2026-10-11T08:30' }));
+  it('giờ nhận mặc định chỉnh trong cài đặt; sai định dạng thì về 8:30', () => {
+    const at = (pickupTime: string) => msToVnLocalInput(suggestBookingSlot({ firstDay: t('2026-10-10T00:00'), items: [], bufferMs: buffer, now, pickupTime }).start);
+    expect(at('07:15')).toBe('2026-10-10T07:15');
+    expect(at('25:00')).toBe('2026-10-10T08:30');
+  });
+  it('hôm nay: sớm nhất sau 1 tiếng, tròn nửa giờ', () => expect(slot('2026-10-08T00:00')).toMatchObject({ start: '2026-10-08T15:30', end: '2026-10-09T15:30' }));
+  it('kéo nhiều ngày: thuê đủ số ngày', () => expect(slot('2026-10-10T00:00', [], '2026-10-12T00:00')).toMatchObject({ start: '2026-10-10T08:30', end: '2026-10-13T08:30' }));
+
+  it('lượt trước trả trong ngày: nhận sau giờ trả + dọn xe', () => {
+    const prev = rental('2026-10-08T09:00', '2026-10-10T10:15');
+    expect(slot('2026-10-10T00:00', [prev])).toMatchObject({ start: '2026-10-10T12:30', end: '2026-10-11T12:30', after: prev });
+  });
+
+  it('lượt kế tiếp: trả sớm cho kịp dọn xe', () => {
+    const next = rental('2026-10-11T07:00', '2026-10-12T07:00');
+    expect(slot('2026-10-10T00:00', [next])).toMatchObject({ start: '2026-10-10T08:30', end: '2026-10-11T05:00', before: next });
+  });
+
+  it('khe giữa 2 lượt: lùi giờ nhận và kéo giờ trả', () => {
+    const prev = rental('2026-10-09T08:00', '2026-10-10T08:00');
+    const next = rental('2026-10-12T08:00', '2026-10-13T08:00');
+    expect(slot('2026-10-10T00:00', [prev, next], '2026-10-13T00:00')).toMatchObject({ start: '2026-10-10T10:00', end: '2026-10-12T06:00', after: prev, before: next });
+  });
+
+  it('lượt chiếm buổi sáng: nhận sau khi lượt đó xong', () => {
+    const morning = rental('2026-10-10T09:00', '2026-10-10T13:00');
+    expect(slot('2026-10-10T00:00', [morning])).toMatchObject({ start: '2026-10-10T15:00', after: morning });
+  });
+
+  it('ngày kín lịch: giữ giờ mặc định để form báo trùng', () => {
+    expect(slot('2026-10-10T00:00', [rental('2026-10-09T08:00', '2026-10-12T08:00')])).toEqual({ start: '2026-10-10T08:30', end: '2026-10-11T08:30', after: undefined, before: undefined });
+  });
+
+  it('bỏ qua lượt đã trả/đã hủy; khối tạm ngưng không cần đệm', () => {
+    expect(slot('2026-10-10T00:00', [rental('2026-10-09T08:00', '2026-10-10T10:00', 'returned')])).toMatchObject({ start: '2026-10-10T08:30' });
+    const block = { type: 'block' as const, status: 'garage', start: t('2026-10-09T00:00'), end: t('2026-10-10T09:00') };
+    expect(suggestBookingSlot({ firstDay: t('2026-10-10T00:00'), items: [block], bufferMs: buffer, now }).start).toBe(t('2026-10-10T09:00'));
   });
 });

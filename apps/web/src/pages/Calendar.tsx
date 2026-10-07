@@ -9,10 +9,11 @@ import { Button, ButtonLink } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/form';
 import { Card, PageLoader } from '@/components/ui/misc';
 import { api, qs } from '@/lib/api';
-import { useMediaQuery, useNow } from '@/lib/hooks';
+import { useMediaQuery, useNow, useSettings } from '@/lib/hooks';
 import type { CalendarData } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { DAY_MS, fmtDateTime, vnParts, vnStartOfDay, WEEKDAY_SHORT } from '@shared/time';
+import { suggestBookingSlot, type BookingSlot } from '@shared/booking';
+import { DAY_MS, fmtDate, fmtDateTime, vnParts, vnStartOfDay, WEEKDAY_SHORT } from '@shared/time';
 
 const STYLE: Record<string, string> = {
   booked: 'bg-blue-100 text-blue-900 ring-blue-300 dark:bg-blue-950 dark:text-blue-100 dark:ring-blue-800',
@@ -32,6 +33,32 @@ const MOBILE_DAYS = MOBILE_BEFORE + 42;
 const MORE_DAYS = 28;
 
 const startFor = (desktop: boolean) => vnStartOfDay(Date.now()) - (desktop ? 1 : MOBILE_BEFORE) * DAY_MS;
+
+type CalItem = CalendarData['items'][number];
+
+/** Vì sao giờ nhận/trả gợi ý lệch khỏi mặc định — hiện trong form Đặt xe để người dùng biết mà sửa. */
+function slotNotes(s: BookingSlot<CalItem>, items: CalItem[], bufferMin: number): string[] {
+  const notes: string[] = [];
+  const clean = bufferMin ? ` + ${bufferMin} phút dọn xe` : '';
+  // Xe quá hạn chỉ bị tính bận tới "bây giờ" — chưa biết khi nào về, nên nhắc riêng.
+  const overdue = items.find((i) => i.overdue);
+  if (overdue) notes.push(`Xe chưa về: lượt ${overdue.code} (${overdue.label}) quá hạn từ ${fmtDateTime(overdue.scheduledEnd)} — gọi khách trước khi chốt giờ nhận.`);
+  const a = s.after;
+  if (a && a !== overdue)
+    notes.push(
+      a.type === 'block'
+        ? `Nhận ${fmtDateTime(s.start)}: xe tạm ngưng (${a.label}) tới ${fmtDateTime(a.end)}.`
+        : `Nhận ${fmtDateTime(s.start)}: sau khi lượt ${a.code} (${a.label}) trả xe lúc ${fmtDateTime(a.end)}${clean}.`,
+    );
+  const b = s.before;
+  if (b)
+    notes.push(
+      b.type === 'block'
+        ? `Trả ${fmtDateTime(s.end)}: xe tạm ngưng (${b.label}) từ ${fmtDateTime(b.start)}.`
+        : `Trả ${fmtDateTime(s.end)}: kịp dọn xe cho lượt ${b.code} (${b.label}) nhận lúc ${fmtDateTime(b.start)}.`,
+    );
+  return notes;
+}
 
 export default function Calendar() {
   const isDesktop = useMediaQuery('(min-width: 768px)');
@@ -96,6 +123,39 @@ export default function Calendar() {
       growing.current = true;
       setMobileDays((d) => d + MORE_DAYS);
     }
+  };
+
+  // Bấm ô ngày → Đặt xe với giờ nhận/trả gợi ý sẵn. Máy tính: giữ chuột kéo ngang để chọn nhiều ngày.
+  const { data: settings } = useSettings();
+  const [sel, setSel] = useState<{ vehicleId: number; a: number; b: number } | null>(null);
+  const book = (vehicleId: number, firstDay: number, lastDay: number) => {
+    const bufferMin = settings?.rules.bufferMinutes ?? 0;
+    const items = (data?.items ?? []).filter((i) => i.vehicleId === vehicleId);
+    const s = suggestBookingSlot({ firstDay, lastDay, items, bufferMs: bufferMin * 60_000, now: Date.now(), pickupTime: settings?.rules.defaultPickupTime });
+    navigate(`/rentals/new${qs({ vehicleId, start: s.start, end: s.end })}`, { state: { slotNotes: slotNotes(s, items, bufferMin) } });
+  };
+  useEffect(() => {
+    if (!sel) return;
+    const up = () => {
+      setSel(null);
+      // Một ô (a = b) thì để onClick của ô xử lý — chung đường với chạm/bàn phím.
+      if (sel.a !== sel.b) book(sel.vehicleId, Math.min(sel.a, sel.b), Math.max(sel.a, sel.b));
+    };
+    const cancel = () => setSel(null);
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && cancel();
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', esc);
+    return () => {
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', esc);
+    };
+  });
+  const dayAt = (el: HTMLElement, clientX: number) => {
+    const r = el.getBoundingClientRect();
+    const idx = Math.min(days - 1, Math.max(0, Math.floor(((clientX - r.left) / r.width) * days)));
+    return Math.max(todayStart, from + idx * DAY_MS);
   };
 
   const step = (dir: 1 | -1) => {
@@ -204,17 +264,43 @@ export default function Calendar() {
                       <span className="text-[13px] font-semibold md:text-sm md:whitespace-nowrap">{v.plate}</span>
                       <span className="truncate text-xs text-muted">{v.model}</span>
                     </Link>
-                    <div className="relative border-b border-border" style={{ minHeight: 16 + laneCount * LANE }}>
+                    <div
+                      className={cn('relative border-b border-border', sel && 'select-none')}
+                      style={{ minHeight: 16 + laneCount * LANE }}
+                      onPointerMove={(e) => {
+                        if (sel?.vehicleId !== v.id) return;
+                        const b = dayAt(e.currentTarget, e.clientX);
+                        if (b !== sel.b) setSel({ ...sel, b });
+                      }}
+                    >
                       <div className="absolute inset-0 grid" style={{ gridTemplateColumns: cols }}>
-                        {dayList.map((d) => (
-                          <button
-                            key={d}
-                            className={cn('border-l border-border first:border-l-0 hover:bg-brand-soft/60', d === todayStart && 'bg-brand-soft/40')}
-                            onClick={() => navigate(`/rentals/new?vehicleId=${v.id}`)}
-                            aria-label="Đặt xe ngày này"
-                          />
-                        ))}
+                        {dayList.map((d) =>
+                          d < todayStart ? (
+                            <div key={d} className="border-l border-border first:border-l-0" />
+                          ) : (
+                            <button
+                              key={d}
+                              className={cn('cursor-pointer border-l border-border first:border-l-0 hover:bg-brand-soft/60', d === todayStart && 'bg-brand-soft/40')}
+                              onPointerDown={(e) => {
+                                if (e.pointerType !== 'mouse' || e.button !== 0) return;
+                                e.preventDefault(); // không bôi đen chữ khi kéo
+                                setSel({ vehicleId: v.id, a: d, b: d });
+                              }}
+                              onClick={() => book(v.id, d, d)}
+                              title={isDesktop ? `Đặt ${v.plate} từ ${fmtDate(d)} — giữ chuột kéo ngang để chọn nhiều ngày` : undefined}
+                              aria-label={`Đặt xe ${v.plate} ngày ${fmtDate(d)}`}
+                            />
+                          ),
+                        )}
                       </div>
+                      {sel?.vehicleId === v.id && sel.a !== sel.b && (
+                        <div
+                          className="pointer-events-none absolute inset-y-1 z-[6] flex items-center justify-center rounded-lg bg-brand/15 text-xs font-semibold text-brand ring-2 ring-brand ring-inset"
+                          style={{ left: `${pct(Math.min(sel.a, sel.b))}%`, width: `${pct(Math.max(sel.a, sel.b) + DAY_MS) - pct(Math.min(sel.a, sel.b))}%` }}
+                        >
+                          <span className="rounded-md bg-surface px-1.5 py-0.5 shadow-pop">{Math.abs(sel.b - sel.a) / DAY_MS + 1} ngày</span>
+                        </div>
+                      )}
                       {now >= from && now <= to && <div className="pointer-events-none absolute inset-y-0 z-10 w-px bg-red-500" style={{ left: `${pct(now)}%` }} />}
                       {items.map((i, idx) => {
                         const left = pct(i.start);

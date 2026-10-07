@@ -4,6 +4,7 @@
 
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
+import { DEFAULT_PICKUP_TIME } from '../shared/booking.js';
 import { DEFAULT_CHECKLIST } from '../shared/constants.js';
 import type { CancelPolicy } from '../shared/money.js';
 import { DEFAULT_PRICING_RULES, type PricingRules } from '../shared/pricing.js';
@@ -31,6 +32,8 @@ export interface BusinessSettings {
 export interface RulesSettings extends PricingRules, CancelPolicy {
   /** Khoảng đệm giữa 2 lượt thuê (rửa xe, kiểm tra). */
   bufferMinutes: number;
+  /** Giờ nhận xe gợi ý ("HH:mm") khi bấm ô ngày trên Lịch xe. */
+  defaultPickupTime: string;
   /** Số tiền cọc giữ lại chờ phạt nguội. */
   fineHoldAmount: number;
   fineHoldDays: number;
@@ -61,6 +64,7 @@ export const DEFAULT_BUSINESS: BusinessSettings = {
 export const DEFAULT_RULES: RulesSettings = {
   ...DEFAULT_PRICING_RULES,
   bufferMinutes: 120,
+  defaultPickupTime: DEFAULT_PICKUP_TIME,
   fineHoldAmount: 2_000_000,
   fineHoldDays: 15,
   minDriverAge: 21,

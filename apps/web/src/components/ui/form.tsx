@@ -129,6 +129,11 @@ export function DateInput({ value, onChange, className, ...props }: { value: str
   return <input type="date" className={cn(fieldBase, 'h-11 md:h-10', className)} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} {...props} />;
 }
 
+/** Chọn giờ trong ngày (giá trị "HH:mm"). */
+export function TimeInput({ value, onChange, className, ...props }: { value: string | null | undefined; onChange: (v: string | null) => void; className?: string; disabled?: boolean }) {
+  return <input type="time" className={cn(fieldBase, 'h-11 md:h-10', className)} value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} {...props} />;
+}
+
 export function Checkbox({ checked, onChange, label, description, className }: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode; description?: ReactNode; className?: string }) {
   return (
     <label className={cn('flex cursor-pointer items-start gap-3 select-none', className)}>

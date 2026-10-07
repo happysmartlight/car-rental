@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Car, Check, CircleAlert, Info, Plus, Trash2, UserPlus, X } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Page } from '@/components/layout/AppShell';
 import { CustomerPicker } from '@/components/CustomerPicker';
@@ -57,6 +57,7 @@ const SEV = { danger: { tone: 'red', icon: CircleAlert }, warn: { tone: 'amber',
 export default function RentalNew() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const confirm = useConfirm();
   const { isAdmin } = useAuth();
   const { data: settings } = useSettings();
@@ -65,8 +66,14 @@ export default function RentalNew() {
   const [drivers, setDrivers] = useState<Customer[]>([]);
   const [addingDriver, setAddingDriver] = useState(false);
   const [vehicleId, setVehicleId] = useState<number | null>(params.get('vehicleId') ? Number(params.get('vehicleId')) : null);
-  const [start, setStart] = useState<number | null>(() => nextHalfHour(Date.now() + HOUR_MS));
-  const [end, setEnd] = useState<number | null>(() => nextHalfHour(Date.now() + HOUR_MS) + DAY_MS);
+  // Mở từ Lịch xe: giờ nhận/trả đã gợi ý theo ô ngày được chọn, kèm lý do nếu phải lùi/kéo giờ
+  const [preset] = useState(() => {
+    const s = Number(params.get('start'));
+    const e = Number(params.get('end'));
+    return s > 0 && e > s ? { start: s, end: e, notes: (location.state as { slotNotes?: string[] } | null)?.slotNotes ?? [] } : null;
+  });
+  const [start, setStart] = useState<number | null>(() => preset?.start ?? nextHalfHour(Date.now() + HOUR_MS));
+  const [end, setEnd] = useState<number | null>(() => preset?.end ?? nextHalfHour(Date.now() + HOUR_MS) + DAY_MS);
   const [pickupMethod, setPickupMethod] = useState<'at_shop' | 'delivery'>('at_shop');
   const [pickupLocation, setPickupLocation] = useState('');
   const [returnLocation, setReturnLocation] = useState('');
@@ -296,6 +303,13 @@ export default function RentalNew() {
                 <DateTimeInput value={end} onChange={setEnd} />
               </Field>
             </div>
+            {!!preset?.notes.length && start === preset.start && end === preset.end && (
+              <Notice tone="blue" icon={Info} className="mt-3">
+                {preset.notes.map((n) => (
+                  <p key={n}>{n}</p>
+                ))}
+              </Notice>
+            )}
             <div className="mt-2 flex flex-wrap gap-1.5">
               {[1, 2, 3, 5, 7].map((n) => (
                 <button key={n} type="button" onClick={() => setDays(n)} className={chip(!!start && !!end && end - start === n * DAY_MS)}>

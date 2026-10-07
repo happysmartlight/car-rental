@@ -6,12 +6,13 @@ import { toast } from 'sonner';
 import { Page } from '@/components/layout/AppShell';
 import { VietQr } from '@/components/common';
 import { Button } from '@/components/ui/button';
-import { Checkbox, DateInput, Field, Input, MoneyInput, NumberInput, Select, Textarea } from '@/components/ui/form';
+import { Checkbox, DateInput, Field, Input, MoneyInput, NumberInput, Select, Textarea, TimeInput } from '@/components/ui/form';
 import { Card, CardBody, CardHeader, PageLoader } from '@/components/ui/misc';
 import { api } from '@/lib/api';
 import { useAuth, useMediaQuery, useSettings } from '@/lib/hooks';
 import type { BusinessSettings, RulesSettings } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
+import { DEFAULT_PICKUP_TIME } from '@shared/booking';
 import { cancelPolicyText } from '@shared/money';
 import { WEEKDAY_LONG } from '@shared/time';
 import { SettingsAccessories } from './SettingsAccessories';
@@ -273,6 +274,9 @@ function RulesSection() {
             </Field>
             <Field label="Đệm giữa 2 lượt thuê" hint="Rửa xe, kiểm tra">
               <NumberInput value={f.bufferMinutes} onChange={(v) => setF({ ...f, bufferMinutes: v ?? 0 })} suffix="phút" />
+            </Field>
+            <Field label="Giờ nhận xe mặc định" hint="Khi bấm ô ngày trên Lịch xe (xe rảnh)">
+              <TimeInput value={f.defaultPickupTime} onChange={(v) => setF({ ...f, defaultPickupTime: v ?? DEFAULT_PICKUP_TIME })} />
             </Field>
             <Field label="Phí giao xe tận nơi mặc định">
               <MoneyInput value={f.deliveryFeeDefault} onChange={(v) => setF({ ...f, deliveryFeeDefault: v ?? 0 })} />

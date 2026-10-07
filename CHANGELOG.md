@@ -3,6 +3,16 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.8] - 2026-10-08
+
+### Cải tiến
+- **Lịch xe: bấm vào ô ngày là điền sẵn giờ nhận và giờ trả** — trước đây chỉ chọn sẵn xe, ngày bắt đầu thuê vẫn phải nhập lại. Nay form Đặt xe mở ra với đúng ngày đã bấm, nhận xe lúc 8:30 sáng, thuê 1 ngày. Bấm vào hôm nay thì giờ nhận là sớm nhất có thể (sau 1 tiếng).
+- **Tự né lịch của xe**: ngày đó lượt trước trả xe trong ngày thì giờ nhận tự lùi sau giờ trả + thời gian dọn xe; vướng lượt kế tiếp thì giờ trả tự kéo sớm cho kịp. Form ghi rõ lý do ngay dưới ô giờ, ví dụ "Nhận 18:00 11/10: sau khi lượt HD-2026-0004 trả xe lúc 16:00 + 120 phút dọn xe".
+- **Máy tính: giữ chuột kéo ngang trên hàng xe để chọn nhiều ngày** — khung xanh hiện số ngày đang chọn, thả chuột là mở form thuê đủ số ngày đó. Bấm Esc để hủy.
+- Xe đang quá hạn chưa trả: form Đặt xe nhắc "Xe chưa về … gọi khách trước khi chốt giờ nhận".
+- **Giờ nhận xe mặc định chỉnh được** trong **Cài đặt → Giá & quy định** (mặc định 8:30).
+- Ô ngày đã qua trên Lịch xe không bấm được nữa (tránh đặt nhầm vào ngày cũ).
+
 ## [0.2.7] - 2026-10-07
 
 ### Cải tiến

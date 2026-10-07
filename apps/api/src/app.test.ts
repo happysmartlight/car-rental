@@ -443,4 +443,14 @@ describe('khách hủy đặt xe', () => {
     const xml = new PizZip(file.rawPayload).file('word/document.xml')!.asText();
     expect(xml).toContain('Hủy trong vòng 48 giờ (2 ngày) trước giờ nhận xe hoặc không đến nhận xe: mất 50% tiền cọc');
   });
+
+  it('giờ nhận xe mặc định (Lịch xe): 08:30, chỉnh được, chặn giờ sai', async () => {
+    const { defaultPickupTime, ...rules } = (await call('GET', '/api/settings')).json.rules;
+    expect(defaultPickupTime).toBe('08:30');
+    // Máy gửi cài đặt cũ (chưa có trường này) vẫn lưu được, giữ mặc định
+    expect((await call('PUT', '/api/settings/rules', rules)).json.defaultPickupTime).toBe('08:30');
+    expect((await call('PUT', '/api/settings/rules', { ...rules, defaultPickupTime: '07:45' })).status).toBe(200);
+    expect((await call('GET', '/api/settings')).json.rules.defaultPickupTime).toBe('07:45');
+    expect((await call('PUT', '/api/settings/rules', { ...rules, defaultPickupTime: '8h30' })).status).toBe(400);
+  });
 });
