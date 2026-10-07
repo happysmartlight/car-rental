@@ -3,6 +3,15 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.7] - 2026-10-07
+
+### Cải tiến
+- **Thêm/sửa xe: chọn hãng và dòng xe từ danh sách** — VinFast đứng đầu, sau đó Toyota, Hyundai, Kia, Mitsubishi, Honda, Mazda, Ford… Chọn hãng thì chỉ hiện các dòng xe của hãng đó; xe chưa có trong danh sách thì chọn "Khác (tự nhập)". Chọn dòng xe điện (VinFast VF, BYD…) thì nhiên liệu tự chuyển sang "Điện".
+
+### Sửa
+- Ô năm sản xuất không còn hiện dấu chấm như số tiền (2022 thay vì 2.022).
+- Hộp thoại "Thêm khách mới" trên máy tính: nút "Lưu & chọn khách này" nổi gọn ở góc dưới, không còn dải nền xám kéo dài.
+
 ## [0.2.6] - 2026-10-07
 
 ### Cải tiến

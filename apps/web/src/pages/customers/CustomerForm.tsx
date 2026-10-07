@@ -10,7 +10,7 @@ import { Notice } from '@/components/ui/misc';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/hooks';
 import type { Customer, Warning } from '@/lib/types';
-import { errorMessage } from '@/lib/utils';
+import { cn, errorMessage } from '@/lib/utils';
 import type { CccdData } from '@shared/cccd';
 import { LICENSE_CLASSES } from '@shared/constants';
 
@@ -266,8 +266,16 @@ export function CustomerForm({
         )}
       </Section>
 
-      <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 -mx-1 flex justify-end gap-2 rounded-2xl bg-bg/80 p-1 backdrop-blur lg:bottom-4">
-        <Button size="lg" onClick={save} loading={saving} className="w-full sm:w-auto">
+      {/* Trong hộp thoại: chỉ nút nổi ở góc dưới, không có dải nền. Trang riêng: nổi trên thanh tab điện thoại. */}
+      <div
+        className={cn(
+          'sticky z-10 flex justify-end gap-2',
+          compact
+            ? 'pointer-events-none bottom-0 [&>*]:pointer-events-auto'
+            : '-mx-1 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] rounded-2xl bg-bg/80 p-1 backdrop-blur lg:bottom-4',
+        )}
+      >
+        <Button size="lg" onClick={save} loading={saving} className={cn('w-full sm:w-auto', compact && 'shadow-pop')}>
           {submitLabel}
         </Button>
       </div>

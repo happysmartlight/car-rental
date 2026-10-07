@@ -4,6 +4,7 @@ import { buildVietQrPayload, crc16, sanitizeTransferNote } from './vietqr.js';
 import { parseCccdQr } from './cccd.js';
 import { DEFAULT_PRICING_RULES, overKmCharge, overtimeCharge, quoteRental, type VehiclePricing } from './pricing.js';
 import { cancelForfeit, cancelMessage, cancelPolicyText, planCancellation, planSettlement, summarizeMoney } from './money.js';
+import { CAR_MAKES, findCarMake, findCarModel } from './carModels.js';
 import { addMonthsVn, fmtDateTime, msToVnLocalInput, vnDateLong, vnLocalInputToMs } from './time.js';
 
 describe('đọc số tiền bằng chữ', () => {
@@ -258,5 +259,18 @@ describe('giờ VN', () => {
     const ms = vnLocalInputToMs('2026-10-06T14:30');
     expect(fmtDateTime(ms)).toBe('14:30 06/10/2026');
     expect(vnDateLong(ms)).toBe('ngày 06 tháng 10 năm 2026');
+  });
+});
+
+describe('danh mục hãng / dòng xe', () => {
+  it('VinFast đứng đầu; khớp tên không phân biệt hoa thường, khoảng trắng', () => {
+    expect(CAR_MAKES[0].name).toBe('VinFast');
+    const vf = findCarMake('vinfast');
+    expect(vf?.name).toBe('VinFast');
+    expect(findCarModel(vf, 'VF3')).toBe('VF 3');
+    expect(findCarModel(findCarMake('Toyota'), 'vios')).toBe('Vios');
+    expect(findCarModel(findCarMake('Toyota'), 'Vios 1.5G')).toBeUndefined();
+    expect(findCarMake('Lada')).toBeUndefined();
+    expect(vf?.electric).toContain('VF 3');
   });
 });

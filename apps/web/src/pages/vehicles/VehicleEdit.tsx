@@ -10,6 +10,7 @@ import { Card, CardBody, CardHeader, PageLoader } from '@/components/ui/misc';
 import { api } from '@/lib/api';
 import type { Vehicle, VehicleDetail } from '@/lib/types';
 import { errorMessage } from '@/lib/utils';
+import { CAR_MAKES, findCarMake, findCarModel } from '@shared/carModels';
 import { FUEL_LABEL, FUEL_TYPES, TRANSMISSIONS, TRANSMISSION_LABEL } from '@shared/constants';
 
 type Form = Partial<Omit<Vehicle, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt' | 'plateKey'>>;
@@ -27,6 +28,94 @@ function Group({ title, description, children }: { title: string; description?: 
   );
 }
 
+const OTHER = '__other';
+
+/** Hãng → dòng xe chọn từ danh mục (VinFast đầu tiên); "Khác" để tự nhập. */
+function MakeModelFields({ make, model, onMake, onModel, onElectric }: { make: string; model: string; onMake: (v: string) => void; onModel: (v: string) => void; onElectric: () => void }) {
+  const [makeMode, setMakeMode] = useState<'list' | 'other'>('list');
+  const [modelMode, setModelMode] = useState<'list' | 'other'>('list');
+  const known = findCarMake(make);
+  const makeOther = makeMode === 'other' || (!!make && !known);
+  const modelOther = !known || makeOther || modelMode === 'other' || (!!model && !findCarModel(known, model));
+  const back = (onClick: () => void) => (
+    <button type="button" onClick={onClick} className="mt-1 text-xs text-brand hover:underline">
+      Chọn từ danh sách
+    </button>
+  );
+  return (
+    <>
+      <Field label="Hãng">
+        {makeOther ? (
+          <>
+            <Input value={make} onChange={(e) => onMake(e.target.value)} placeholder="Tên hãng" autoFocus={makeMode === 'other'} />
+            {back(() => {
+              setMakeMode('list');
+              onMake('');
+              onModel('');
+            })}
+          </>
+        ) : (
+          <Select
+            value={known?.name ?? ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === OTHER) {
+                setMakeMode('other');
+                onMake('');
+              } else {
+                onMake(v);
+                if (!findCarModel(findCarMake(v), model)) onModel('');
+              }
+              setModelMode('list');
+            }}
+          >
+            <option value="">— Chọn hãng —</option>
+            {CAR_MAKES.map((m) => (
+              <option key={m.name} value={m.name}>
+                {m.name}
+              </option>
+            ))}
+            <option value={OTHER}>Khác (tự nhập)</option>
+          </Select>
+        )}
+      </Field>
+      <Field label="Dòng xe">
+        {modelOther ? (
+          <>
+            <Input value={model} onChange={(e) => onModel(e.target.value)} placeholder={known ? 'Tên dòng xe' : 'Vios 1.5G'} autoFocus={modelMode === 'other'} />
+            {known && !makeOther && back(() => {
+              setModelMode('list');
+              onModel('');
+            })}
+          </>
+        ) : (
+          <Select
+            value={findCarModel(known, model) ?? ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === OTHER) {
+                setModelMode('other');
+                onModel('');
+                return;
+              }
+              onModel(v);
+              if (known?.electric?.includes(v)) onElectric();
+            }}
+          >
+            <option value="">— Chọn dòng xe —</option>
+            {known?.models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+            <option value={OTHER}>Khác (tự nhập)</option>
+          </Select>
+        )}
+      </Field>
+    </>
+  );
+}
+
 export default function VehicleEdit() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -35,7 +124,10 @@ export default function VehicleEdit() {
   const [f, setF] = useState<Form>(EMPTY);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    if (data) setF(data.vehicle);
+    if (!data) return;
+    // Khớp tên đã lưu với danh mục ("Vinfast" → "VinFast", "VF3" → "VF 3").
+    const mk = findCarMake(data.vehicle.make);
+    setF({ ...data.vehicle, make: mk?.name ?? data.vehicle.make, model: findCarModel(mk, data.vehicle.model) ?? data.vehicle.model });
   }, [data]);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((s) => ({ ...s, [k]: v }));
   const text = (k: keyof Form) => ({ value: (f[k] as string | null | undefined) ?? '', onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => set(k, e.target.value as never) });
@@ -65,14 +157,9 @@ export default function VehicleEdit() {
           <Field label="Biển số" required>
             <Input {...text('plate')} placeholder="51K-123.45" autoCapitalize="characters" />
           </Field>
-          <Field label="Hãng">
-            <Input {...text('make')} placeholder="Toyota" />
-          </Field>
-          <Field label="Dòng xe">
-            <Input {...text('model')} placeholder="Vios 1.5G" />
-          </Field>
+          <MakeModelFields make={f.make ?? ''} model={f.model ?? ''} onMake={(v) => set('make', v)} onModel={(v) => set('model', v)} onElectric={() => set('fuel', 'electric')} />
           <Field label="Năm sản xuất">
-            <NumberInput value={f.year} onChange={(v) => set('year', v)} placeholder="2022" />
+            <NumberInput value={f.year} onChange={(v) => set('year', v)} placeholder="2022" plain maxDigits={4} />
           </Field>
           <Field label="Màu">
             <Input {...text('color')} />

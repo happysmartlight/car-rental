@@ -82,14 +82,27 @@ export function MoneyInput({ value, onChange, className, placeholder = '0', ...p
   );
 }
 
-export function NumberInput({ value, onChange, suffix, className, ...props }: { value: number | null | undefined; onChange: (v: number | null) => void; suffix?: string; className?: string; min?: number; max?: number; placeholder?: string; disabled?: boolean }) {
+/** Ô số. `plain`: không ngăn hàng nghìn (năm sản xuất…), `maxDigits` giới hạn số chữ số. */
+export function NumberInput({
+  value,
+  onChange,
+  suffix,
+  className,
+  plain,
+  maxDigits,
+  ...props
+}: { value: number | null | undefined; onChange: (v: number | null) => void; suffix?: string; className?: string; min?: number; max?: number; placeholder?: string; disabled?: boolean; plain?: boolean; maxDigits?: number }) {
   return (
     <div className="relative">
       <input
         inputMode="numeric"
         className={cn(fieldBase, 'tabular h-11 md:h-10', suffix && 'pr-12', className)}
-        value={value == null ? '' : fmtNumber(value)}
-        onChange={(e) => onChange(parseMoney(e.target.value))}
+        value={value == null ? '' : plain ? String(value) : fmtNumber(value)}
+        onChange={(e) => {
+          if (!plain && !maxDigits) return onChange(parseMoney(e.target.value));
+          const digits = e.target.value.replace(/\D/g, '').slice(0, maxDigits ?? 15);
+          onChange(digits ? Number.parseInt(digits, 10) : null);
+        }}
         {...props}
       />
       {suffix && <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-subtle">{suffix}</span>}
