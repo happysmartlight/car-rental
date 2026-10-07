@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { ExternalLink, Plus, Trash2 } from 'lucide-react';
+import { ExternalLink, Plus, Send, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
+import { toast } from 'sonner';
 import { VietQr } from '@/components/common';
 import { CustomerPicker } from '@/components/CustomerPicker';
 import { MultiPhotoInput } from '@/components/images';
@@ -10,11 +11,12 @@ import { Dialog } from '@/components/ui/dialog';
 import { Checkbox, DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select, Textarea } from '@/components/ui/form';
 import { Notice } from '@/components/ui/misc';
 import { api } from '@/lib/api';
+import { shareText } from '@/lib/shareCard';
 import { useAction, useSettings } from '@/lib/hooks';
 import type { Customer, Precheck, RentalDetail, VehicleWithStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { CHARGE_KINDS, CHARGE_KIND_LABEL, COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, type ChargeKind, type CollateralKind } from '@shared/constants';
-import { cancelForfeit, planCancellation, planSettlement } from '@shared/money';
+import { cancelForfeit, cancelMessage, cancelPolicyText, planCancellation, planSettlement } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime, fmtDuration } from '@shared/time';
 
@@ -408,7 +410,7 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
 
 export function CancelDialog({ d, open, onOpenChange }: DialogProps) {
   const { data: settings } = useSettings();
-  const rules = settings?.rules;
+  const rules = settings?.rules ?? null;
   const m = d.money;
   const r = d.rental;
   const policyKeep = (at: number) => (rules ? cancelForfeit(m.depositHeld, r.scheduledStart, at, rules) : 0);
@@ -427,20 +429,48 @@ export function CancelDialog({ d, open, onOpenChange }: DialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, rules]);
 
-  const received = Math.max(0, m.depositHeld) + Math.max(0, m.rentPaid);
+  const deposit = Math.max(0, m.depositHeld);
+  const rentPaid = Math.max(0, m.rentPaid);
+  const received = deposit + rentPaid;
   const suggested = policyKeep(openedAt);
   const plan = planCancellation(m, keep ?? 0);
   const refund = plan.refundDeposit + plan.refundRent;
   const left = r.scheduledStart - openedAt;
+  const message = cancelMessage({
+    customerName: d.customer.fullName,
+    code: r.code,
+    plate: d.vehicle.plate,
+    scheduledStart: r.scheduledStart,
+    at: openedAt,
+    policy: rules,
+    money: m,
+    keep: plan.keep,
+    shopName: settings?.business.name,
+    shopPhone: settings?.business.phone,
+  });
   const save = useAction(() => api.post(`/api/rentals/${r.id}/cancel`, { reason, keep: plan.keep, refund: refundNow && refund > 0 ? { method } : null }), {
     ...inv(r.id),
     success: 'Đã hủy lượt thuê',
     onSuccess: () => onOpenChange(false),
   });
+  const send = async () => {
+    try {
+      const res = await shareText(message);
+      if (res === 'copied') toast.success('Đã chép tin nhắn — dán vào Zalo gửi khách');
+    } catch {
+      toast.error('Không chép được tin nhắn');
+    }
+  };
   const chip = (label: string, value: number) => (
     <button type="button" onClick={() => setKeep(value)} className={cn('rounded-full border px-3 py-1 text-sm', (keep ?? 0) === value ? 'border-brand bg-brand-soft text-brand' : 'border-border hover:bg-surface-2')}>
       {label}
     </button>
+  );
+  const Line = ({ label, value }: { label: string; value: string }) => (
+    <div className="flex justify-between gap-3 py-1.5 text-sm">
+      <span className="shrink-0 text-muted">{label}</span>
+      <span className="tabular text-right">{value}</span>
+    </div>
   );
 
   return (
@@ -448,7 +478,7 @@ export function CancelDialog({ d, open, onOpenChange }: DialogProps) {
       open={open}
       onOpenChange={onOpenChange}
       title={`Hủy ${r.code}?`}
-      description={`${d.customer.fullName} · hẹn nhận xe ${fmtDateTime(r.scheduledStart)}`}
+      description={`${d.customer.fullName} · ${d.vehicle.plate}`}
       footer={
         <Button variant="danger" onClick={() => save.mutate()} loading={save.isPending} disabled={reason.trim().length < 2}>
           Hủy lượt thuê
@@ -456,55 +486,83 @@ export function CancelDialog({ d, open, onOpenChange }: DialogProps) {
       }
     >
       <div className="space-y-4">
-        <Field label="Lý do">
-          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Khách đổi kế hoạch…" />
-        </Field>
-        {received > 0 && (
-          <>
-            <Notice tone={suggested > 0 ? 'amber' : 'blue'}>
-              {left > 0 ? `Còn ${fmtDuration(left)} tới giờ nhận xe` : `Đã quá giờ nhận xe ${fmtDuration(-left)}`}
-              {rules && (suggested > 0 ? ` — theo chính sách khách mất ${fmtVnd(suggested)} tiền cọc.` : ' — theo chính sách hoàn đủ cọc.')}
-            </Notice>
-            <div className="divide-y divide-border rounded-2xl border border-border px-4 py-1">
-              <div className="flex justify-between py-1.5 text-sm">
-                <span className="text-muted">Khách đã đặt cọc</span>
-                <span className="tabular">{fmtVnd(m.depositHeld)}</span>
-              </div>
-              {m.rentPaid > 0 && (
-                <div className="flex justify-between py-1.5 text-sm">
-                  <span className="text-muted">Tiền thuê đã trả trước</span>
-                  <span className="tabular">{fmtVnd(m.rentPaid)}</span>
-                </div>
+        <div className="divide-y divide-border rounded-2xl border border-border px-4 py-1">
+          <Line label="Hẹn nhận xe" value={fmtDateTime(r.scheduledStart)} />
+          <Line label="Hủy lúc" value={`${fmtDateTime(openedAt)} · ${left > 0 ? `trước ${fmtDuration(left)}` : `trễ ${fmtDuration(-left)}`}`} />
+          <Line label="Tiền cọc khách đã đặt" value={deposit > 0 ? fmtVnd(deposit) : 'Chưa đặt cọc'} />
+          {rentPaid > 0 && <Line label="Tiền thuê đã trả trước" value={fmtVnd(rentPaid)} />}
+        </div>
+
+        {/* Kết luận rõ ràng: mất cọc hay được hoàn. */}
+        {received === 0 ? (
+          <div className="rounded-2xl bg-surface-2 px-4 py-3 text-sm">
+            <p className="font-semibold">Khách chưa thanh toán — hủy không mất phí.</p>
+          </div>
+        ) : plan.keep > 0 ? (
+          <div className="rounded-2xl bg-red-50 px-4 py-3 ring-1 ring-red-200 ring-inset dark:bg-red-950/40 dark:ring-red-900">
+            <p className="text-base font-semibold text-red-700">Khách MẤT CỌC {fmtVnd(plan.keep)}</p>
+            <p className="mt-0.5 text-sm">
+              {refund > 0 ? (
+                <>
+                  Hoàn lại khách: <b className="tabular">{fmtVnd(refund)}</b>
+                </>
+              ) : (
+                'Không hoàn lại khoản nào.'
               )}
-            </div>
-            <Field label="Giữ lại — khách mất" error={(keep ?? 0) > received ? `Tối đa ${fmtVnd(received)} (số tiền khách đã đưa)` : null}>
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-2xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-200 ring-inset dark:bg-emerald-950/40 dark:ring-emerald-900">
+            <p className="text-base font-semibold text-emerald-700">Khách được HOÀN ĐỦ {fmtVnd(refund)}</p>
+            <p className="mt-0.5 text-sm text-muted">Không giữ lại khoản nào.</p>
+          </div>
+        )}
+        {rules && <p className="text-xs text-muted">Chính sách: {cancelPolicyText(rules)}</p>}
+
+        {received > 0 && (
+          <div className="space-y-2">
+            <Field label="Số tiền giữ lại (chỉnh nếu thỏa thuận khác)" error={(keep ?? 0) > received ? `Tối đa ${fmtVnd(received)} (số tiền khách đã đưa)` : null}>
               <MoneyInput value={keep} onChange={setKeep} />
             </Field>
             <div className="flex flex-wrap gap-1.5">
               {rules && suggested > 0 && chip('Theo chính sách', suggested)}
               {chip('Hoàn hết', 0)}
-              {m.depositHeld > 0 && m.depositHeld !== suggested && chip('Giữ hết cọc', m.depositHeld)}
+              {deposit > 0 && deposit !== suggested && chip('Giữ hết cọc', deposit)}
             </div>
-            <div className="flex justify-between rounded-2xl bg-surface-2 px-4 py-2.5 text-sm font-semibold">
-              <span>Hoàn lại khách</span>
-              <span className={cn('tabular', refund > 0 && 'text-emerald-600')}>{fmtVnd(refund)}</span>
-            </div>
-            {refund > 0 && (
-              <div className="space-y-2">
-                <Checkbox checked={refundNow} onChange={setRefundNow} label="Đã hoàn tiền cho khách ngay" description={refundNow ? undefined : 'Hoàn sau ở mục Tiền của lượt thuê (nút Hoàn cọc / Hoàn tiền thuê).'} />
-                {refundNow && (
-                  <Segmented
-                    value={method}
-                    onChange={setMethod}
-                    options={[
-                      { value: 'transfer', label: 'Chuyển khoản' },
-                      { value: 'cash', label: 'Tiền mặt' },
-                    ]}
-                  />
-                )}
-              </div>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Tin nhắn gửi khách</p>
+          <pre className="max-h-48 overflow-y-auto rounded-2xl bg-surface-2 px-4 py-3 font-sans text-sm whitespace-pre-wrap">{message}</pre>
+          <Button variant="secondary" className="w-full" onClick={send}>
+            <Send /> Gửi / chép tin nhắn cho khách
+          </Button>
+        </div>
+
+        <Field label="Lý do hủy (ghi nội bộ)">
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Khách đổi kế hoạch…" />
+        </Field>
+
+        {refund > 0 && (
+          <div className="space-y-2">
+            <Checkbox
+              checked={refundNow}
+              onChange={setRefundNow}
+              label={`Đã hoàn ${fmtVnd(refund)} cho khách ngay`}
+              description={refundNow ? undefined : 'Hoàn sau ở mục Tiền của lượt thuê (nút Hoàn cọc / Hoàn tiền thuê).'}
+            />
+            {refundNow && (
+              <Segmented
+                value={method}
+                onChange={setMethod}
+                options={[
+                  { value: 'transfer', label: 'Chuyển khoản' },
+                  { value: 'cash', label: 'Tiền mặt' },
+                ]}
+              />
             )}
-          </>
+          </div>
         )}
       </div>
     </Dialog>

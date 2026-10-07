@@ -3,7 +3,7 @@ import { formatPlate, numberToVietnameseWords, parseMoney, plateKey, unaccent, v
 import { buildVietQrPayload, crc16, sanitizeTransferNote } from './vietqr.js';
 import { parseCccdQr } from './cccd.js';
 import { DEFAULT_PRICING_RULES, overKmCharge, overtimeCharge, quoteRental, type VehiclePricing } from './pricing.js';
-import { cancelForfeit, cancelPolicyText, planCancellation, planSettlement, summarizeMoney } from './money.js';
+import { cancelForfeit, cancelMessage, cancelPolicyText, planCancellation, planSettlement, summarizeMoney } from './money.js';
 import { addMonthsVn, fmtDateTime, msToVnLocalInput, vnDateLong, vnLocalInputToMs } from './time.js';
 
 describe('đọc số tiền bằng chữ', () => {
@@ -223,6 +223,27 @@ describe('khách hủy đặt xe', () => {
     expect(planCancellation(s, 3500000)).toEqual({ keep: 3500000, offset: 3000000, refundDeposit: 0, refundRent: 500000 });
     expect(planCancellation(s, 9000000).keep).toBe(4000000); // không giữ quá tiền khách đã đưa
     expect(planCancellation(s, 0)).toEqual({ keep: 0, offset: 0, refundDeposit: 3000000, refundRent: 1000000 });
+  });
+  it('tin nhắn báo khách: mất cọc / được giảm / chưa đặt cọc', () => {
+    const start = vnLocalInputToMs('2026-10-20T08:00');
+    const money = summarizeMoney([], [
+      { direction: 'in', purpose: 'deposit', amount: 3000000 },
+      { direction: 'in', purpose: 'rent', amount: 500000 },
+    ]);
+    const base = { customerName: 'Nguyễn Văn A', code: 'HD-2026-0007', plate: '51A-123.45', scheduledStart: start, at: start - 5 * H, policy, money, shopName: 'Xe Tự Lái An Phát', shopPhone: '0909 000 111' };
+    const lost = cancelMessage({ ...base, keep: 3000000 });
+    expect(lost).toContain('Xe Tự Lái An Phát xác nhận đã hủy lượt thuê HD-2026-0007 – xe 51A-123.45, hẹn nhận xe lúc 08:00 20/10/2026.');
+    expect(lost).toContain('Thời điểm hủy: 03:00 20/10/2026 (trước giờ nhận xe 5 giờ).');
+    expect(lost).toContain('• Cửa hàng giữ lại: 3.000.000 đ (mất cọc theo chính sách hủy)');
+    expect(lost).toContain('• Hoàn lại anh/chị: 500.000 đ');
+    expect(lost).toContain('Mong anh/chị thông cảm');
+    expect(lost).toContain('Mọi thắc mắc xin liên hệ 0909 000 111.');
+    const eased = cancelMessage({ ...base, keep: 1000000 });
+    expect(eased).toContain('(theo thỏa thuận)');
+    expect(eased).toContain('Cửa hàng đã hỗ trợ anh/chị 2.000.000 đ so với chính sách.');
+    const none = cancelMessage({ ...base, money: summarizeMoney([], []), keep: 0 });
+    expect(none).toContain('chưa thanh toán khoản nào');
+    expect(none).toContain('Cảm ơn anh/chị đã báo');
   });
   it('câu chính sách', () => {
     expect(cancelPolicyText(policy)).toBe('Hủy trong vòng 72 giờ (3 ngày) trước giờ nhận xe hoặc không đến nhận xe: mất toàn bộ tiền cọc (tiền thuê đã trả được hoàn lại). Hủy sớm hơn: hoàn lại toàn bộ tiền cọc và tiền thuê đã trả.');

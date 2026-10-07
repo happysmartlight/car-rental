@@ -8,7 +8,8 @@
 //   out + deposit  mình hoàn cọc
 //   offset         cấn trừ: chuyển một phần cọc sang tiền thuê (không có tiền mặt đi lại)
 
-import { HOUR_MS } from './time.js';
+import { fmtVnd } from './text.js';
+import { HOUR_MS, fmtDateTime, fmtDuration } from './time.js';
 
 export type PaymentDirection = 'in' | 'out' | 'offset';
 export type PaymentPurpose = 'rent' | 'deposit';
@@ -117,4 +118,57 @@ export function cancelPolicyText(p: CancelPolicy): string {
   const h = p.cancelNoticeHours;
   const window = h >= 48 && h % 24 === 0 ? `${h} giờ (${h / 24} ngày)` : `${h} giờ`;
   return `Hủy trong vòng ${window} trước giờ nhận xe hoặc không đến nhận xe: ${lose}. Hủy sớm hơn: ${refundAll}.`;
+}
+
+export interface CancelMessageInput {
+  customerName: string;
+  code: string;
+  plate: string;
+  scheduledStart: number;
+  /** Lúc hủy. */
+  at: number;
+  policy: CancelPolicy | null;
+  money: MoneySummary;
+  /** Số tiền cửa hàng giữ lại (đã chọn trong hộp thoại). */
+  keep: number;
+  shopName?: string;
+  shopPhone?: string;
+}
+
+/** Tin nhắn báo khách khi hủy: thời điểm hủy, chính sách, tiền giữ / hoàn — lời lẽ nhẹ nhàng để khách thông cảm. */
+export function cancelMessage(i: CancelMessageInput): string {
+  const plan = planCancellation(i.money, i.keep);
+  const refund = plan.refundDeposit + plan.refundRent;
+  const deposit = Math.max(0, i.money.depositHeld);
+  const rent = Math.max(0, i.money.rentPaid);
+  const suggested = i.policy ? cancelForfeit(deposit, i.scheduledStart, i.at, i.policy) : 0;
+  const left = i.scheduledStart - i.at;
+  const shop = i.shopName?.trim() || 'Cửa hàng';
+  const lines = [
+    `Chào anh/chị ${i.customerName},`,
+    `${shop} xác nhận đã hủy lượt thuê ${i.code} – xe ${i.plate}, hẹn nhận xe lúc ${fmtDateTime(i.scheduledStart)}.`,
+    `Thời điểm hủy: ${fmtDateTime(i.at)} (${left > 0 ? `trước giờ nhận xe ${fmtDuration(left)}` : `sau giờ nhận xe ${fmtDuration(-left)}`}).`,
+  ];
+  if (i.policy) lines.push(`Chính sách hủy: ${cancelPolicyText(i.policy)}`);
+  lines.push('');
+  if (deposit + rent === 0) {
+    lines.push('Anh/chị chưa thanh toán khoản nào nên việc hủy không phát sinh phí.');
+  } else {
+    lines.push('Anh/chị đã thanh toán:');
+    if (deposit > 0) lines.push(`• Tiền cọc: ${fmtVnd(deposit)}`);
+    if (rent > 0) lines.push(`• Tiền thuê trả trước: ${fmtVnd(rent)}`);
+    lines.push('Kết quả:');
+    if (plan.keep > 0) lines.push(`• Cửa hàng giữ lại: ${fmtVnd(plan.keep)} ${plan.keep === suggested ? '(mất cọc theo chính sách hủy)' : '(theo thỏa thuận)'}`);
+    if (refund > 0) lines.push(`• Hoàn lại anh/chị: ${fmtVnd(refund)}`);
+    else lines.push('• Không có khoản hoàn lại.');
+    if (suggested > plan.keep) lines.push(`Cửa hàng đã hỗ trợ anh/chị ${fmtVnd(suggested - plan.keep)} so với chính sách.`);
+  }
+  lines.push('');
+  lines.push(
+    plan.keep > 0
+      ? 'Mong anh/chị thông cảm: xe đã được giữ riêng cho anh/chị trong thời gian này và cửa hàng đã từ chối các khách khác, nên khó cho thuê lại khi hủy sát giờ. Rất mong được phục vụ anh/chị lần sau!'
+      : 'Cảm ơn anh/chị đã báo cho cửa hàng. Rất mong được phục vụ anh/chị lần sau!',
+  );
+  if (i.shopPhone?.trim()) lines.push(`Mọi thắc mắc xin liên hệ ${i.shopPhone.trim()}.`);
+  return lines.join('\n');
 }

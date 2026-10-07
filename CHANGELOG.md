@@ -3,6 +3,13 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.6] - 2026-10-07
+
+### Cải tiến
+- **Nút "Hủy lượt" để ngay ngoài trang lượt thuê** (dưới nút Giao xe trên điện thoại, cạnh nút Giao xe trên máy tính) — không còn phải mở menu ⋯. Bấm nhầm không sao: phải nhập lý do và bấm xác nhận mới hủy.
+- Hộp thoại hủy ghi rõ: giờ hẹn nhận xe, lúc hủy (trước giờ nhận xe bao lâu), tiền cọc khách đã đặt, và kết luận to rõ **"Khách MẤT CỌC …"** hay **"Khách được HOÀN ĐỦ …"** kèm câu chính sách hủy.
+- **Tin nhắn gửi khách** soạn sẵn (thời điểm hủy, chính sách, tiền giữ lại / hoàn lại, lời xin thông cảm) — bấm "Gửi / chép tin nhắn cho khách" để gửi qua Zalo.
+
 ## [0.2.5] - 2026-10-07
 
 ### Mới

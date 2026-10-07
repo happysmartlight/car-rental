@@ -169,6 +169,13 @@ export default function RentalDetail() {
     setDialog('pay');
   };
 
+  // Hủy để ngoài (dưới nút Giao xe), không chỉ trong menu ⋯. Bấm mở hộp thoại hủy — phải nhập lý do và bấm xác nhận nên bấm nhầm không sao.
+  const cancelBtn =
+    r.status === 'booked' ? (
+      <Button size="lg" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/40" onClick={() => setDialog('cancel')}>
+        <Ban /> Hủy lượt
+      </Button>
+    ) : null;
   const primary =
     r.status === 'booked' ? (
       <ButtonLink to={`/rentals/${r.id}/pickup`} size="lg">
@@ -199,7 +206,10 @@ export default function RentalDetail() {
       back="/rentals"
       actions={
         <>
-          <span className="hidden sm:inline-flex">{primary}</span>
+          <span className="hidden gap-2 sm:inline-flex">
+            {cancelBtn}
+            {primary}
+          </span>
           <Menu trigger={<Button variant="outline" size="icon" aria-label="Thêm"><MoreHorizontal /></Button>}>
             {['booked', 'active'].includes(r.status) && (
               <MenuItem icon={Pencil} onSelect={() => setDialog('edit')}>
@@ -370,7 +380,10 @@ export default function RentalDetail() {
           </Card>
         </div>
 
-        <div className="sm:hidden">{primary && <div className="[&>*]:w-full">{primary}</div>}</div>
+        <div className="space-y-2 sm:hidden [&>*]:w-full">
+          {primary}
+          {cancelBtn}
+        </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
