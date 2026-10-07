@@ -22,7 +22,7 @@ function Expiry({ value }: { value: string | null }) {
   if (!value) return <span className="font-normal text-subtle">—</span>;
   const d = daysUntil(value);
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
       {fmtDateKey(value)}
       {d < 0 ? <Badge tone="red">Hết hạn</Badge> : d <= 30 ? <Badge tone="amber">Còn {d} ngày</Badge> : null}
     </span>
@@ -91,10 +91,10 @@ export default function VehicleDetail() {
       <div className="space-y-4">
         <Card>
           <CardBody className="flex flex-wrap items-center gap-4 pt-4">
-            <span className="flex size-12 items-center justify-center rounded-2xl bg-brand-soft text-brand">
+            <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-brand-soft text-brand">
               <Car className="size-6" />
             </span>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-[1_1_14rem]">
               {data.status && <VehicleStateBadge state={data.status.state} blockKind={data.status.block?.kind} />}
               <p className="mt-1 text-sm">
                 {data.status?.current ? (
@@ -115,14 +115,14 @@ export default function VehicleDetail() {
               </p>
             </div>
             {data.status?.block && (
-              <Button variant="outline" onClick={() => endBlock.mutate(data.status!.block!.id)} loading={endBlock.isPending}>
+              <Button variant="outline" className="w-full sm:w-auto" onClick={() => endBlock.mutate(data.status!.block!.id)} loading={endBlock.isPending}>
                 Xe đã về, sẵn sàng
               </Button>
             )}
           </CardBody>
         </Card>
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Card>
             <CardHeader title="Thông tin" />
             <CardBody className="divide-y divide-border">

@@ -164,7 +164,7 @@ export default function RentalNew() {
   };
 
   const summary = (
-    <Card className="lg:sticky lg:top-6">
+    <Card className="xl:sticky xl:top-6">
       <CardHeader title="Tóm tắt" action={checking && <Spinner className="size-4" />} />
       <CardBody className="space-y-3">
         {vehicle && validTime ? (
@@ -245,7 +245,7 @@ export default function RentalNew() {
 
   return (
     <Page title="Đặt xe mới" back width="default">
-      <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
           <Section n={1} title="Khách thuê">
             <CustomerPicker value={customer} onChange={setCustomer} />
@@ -327,7 +327,7 @@ export default function RentalNew() {
                     )}
                     <span className="min-w-0 flex-1">
                       <span className="block font-semibold">{v.plate}</span>
-                      <span className="block truncate text-xs text-muted">
+                      <span className="block text-xs text-muted">
                         {v.make} {v.model} · {fmtVnd(v.priceDay)}/ngày{v.priceMonth ? ` · ${fmtVnd(v.priceMonth)}/tháng` : ''}
                       </span>
                       <span className={cn('block text-xs font-medium', isBusy ? 'text-red-600' : 'text-emerald-600')}>{isBusy ? 'Trùng lịch' : validTime ? 'Trống' : ''}</span>
@@ -436,7 +436,7 @@ export default function RentalNew() {
         <div>{summary}</div>
       </div>
 
-      <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-border bg-surface/95 px-4 py-3 backdrop-blur-xl lg:hidden">
+      <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-border bg-surface/95 px-4 py-3 backdrop-blur-xl lg:bottom-0 lg:left-64 xl:hidden">
         <div className="mx-auto flex max-w-3xl items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-xs text-muted">Tổng tiền thuê</p>
@@ -447,7 +447,7 @@ export default function RentalNew() {
           </Button>
         </div>
       </div>
-      <div className="h-20 lg:hidden" />
+      <div className="h-20 xl:hidden" />
     </Page>
   );
 }

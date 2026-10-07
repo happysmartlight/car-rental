@@ -128,7 +128,7 @@ export function Dashboard() {
                         </span>
                       )}
                       <span className="min-w-0 flex-1">
-                        <span className="flex items-center justify-between gap-2">
+                        <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                           <span className="font-semibold tracking-wide">{v.plate}</span>
                           {v.status && <VehicleStateBadge state={v.status.state} blockKind={v.status.block?.kind} />}
                         </span>

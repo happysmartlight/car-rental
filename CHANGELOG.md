@@ -3,6 +3,14 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.3] - 2026-10-07
+
+### Sửa
+- **Điện thoại: các trang không còn bị tràn ra ngoài màn hình** (khung và ô nhập liệu bị cắt mất bên phải). Gặp ở Tổng quan, Đặt xe mới, Xe, hồ sơ khách và Mẫu hợp đồng — do dòng chữ dài (giá tháng, tên khách, danh sách tiện nghi) kéo rộng cả trang. Nay dòng dài tự xuống dòng hoặc rút gọn bằng "…".
+- Danh sách hợp đồng & biên bản trong lượt thuê, danh sách mẫu hợp đồng và thẻ xe đang bảo dưỡng: tên không còn bị bóp mỗi chữ một dòng — các nút tự xuống hàng dưới khi chật.
+- Đặt xe mới: dòng thông tin xe hiện đủ cả giá ngày và giá tháng.
+- Laptop màn nhỏ / iPad xoay ngang: Đặt xe mới, chi tiết lượt thuê, chi tiết xe và Cài đặt chỉ chia nhiều cột khi đủ rộng, không còn ô nhập bị bóp hẹp.
+
 ## [0.2.2] - 2026-10-07
 
 ### Sửa

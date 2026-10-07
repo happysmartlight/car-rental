@@ -265,7 +265,7 @@ export default function RentalDetail() {
           </Notice>
         ))}
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Card>
             <CardHeader title="Khách thuê" action={<Link to={`/customers/${d.customer.id}`} className="text-sm text-brand">Hồ sơ</Link>} />
             <CardBody>
@@ -440,15 +440,15 @@ export default function RentalDetail() {
               <ul className="divide-y divide-border rounded-2xl border border-border">
                 {d.documents.map((doc) => (
                   <li key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                    <FileText className="size-5 text-muted" />
-                    <div className="min-w-0 flex-1">
+                    <FileText className="size-5 shrink-0 text-muted" />
+                    <div className="min-w-0 flex-[1_1_14rem]">
                       <p className="text-sm font-medium">{doc.templateName}</p>
                       <p className="text-xs text-muted">
                         {fmtDateTime(doc.createdAt)} · mẫu v{doc.templateVersion}
                         {doc.scanFileIds.length > 0 && ` · đã lưu ${doc.scanFileIds.length} trang bản ký`}
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="ml-auto flex flex-wrap gap-1.5">
                       {doc.pdfFileId ? (
                         <a href={fileUrl(doc.pdfFileId)} target="_blank" rel="noreferrer" className="rounded-lg bg-surface-2 px-2.5 py-1.5 text-xs font-medium hover:bg-surface-3">
                           PDF

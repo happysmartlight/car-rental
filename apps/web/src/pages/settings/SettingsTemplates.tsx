@@ -57,8 +57,9 @@ export function SettingsTemplates() {
         <ul className="divide-y divide-border">
           {data.map((t) => (
             <li key={t.id} className="flex flex-wrap items-center gap-3 px-4 py-3 md:px-5">
-              <FileText className="size-5 text-muted" />
-              <div className="min-w-0 flex-1">
+              <FileText className="size-5 shrink-0 text-muted" />
+              {/* basis 14rem: điện thoại không đủ chỗ thì hàng nút xuống dòng, thay vì bóp tên mẫu mỗi chữ một dòng. */}
+              <div className="min-w-0 flex-[1_1_14rem]">
                 <p className="flex flex-wrap items-center gap-2 font-medium">
                   {t.name}
                   {t.isDefault && <Badge tone="blue">Mặc định</Badge>}
@@ -69,7 +70,7 @@ export function SettingsTemplates() {
                   {t.builtin && (/-v\d+$/.test(t.builtin) ? ' · mẫu dựng sẵn, tự cập nhật theo app' : ' · dựng sẵn, đã sửa')}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="ml-auto flex flex-wrap gap-1.5">
                 <a href={fileUrl(t.fileId, { download: true })} className="inline-flex h-8 items-center gap-1 rounded-lg bg-surface-2 px-2.5 text-xs font-medium hover:bg-surface-3">
                   <Download className="size-3.5" /> Tải về
                 </a>

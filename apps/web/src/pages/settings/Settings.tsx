@@ -44,7 +44,7 @@ const SECTIONS: Section[] = [
 export default function Settings() {
   const { isAdmin } = useAuth();
   const location = useLocation();
-  const isDesktop = useMediaQuery('(min-width: 1024px)');
+  const isDesktop = useMediaQuery('(min-width: 1280px)');
   const sections = SECTIONS.filter((s) => isAdmin || !s.admin);
   const sub = location.pathname.split('/')[2];
   const current = sections.find((s) => s.path === sub);
@@ -62,7 +62,7 @@ export default function Settings() {
             <span className="block text-sm font-medium">{s.label}</span>
             <span className="block truncate text-xs text-muted">{s.desc}</span>
           </span>
-          <ChevronRight className="size-4 text-subtle lg:hidden" />
+          <ChevronRight className="size-4 text-subtle xl:hidden" />
         </NavLink>
       ))}
     </nav>
@@ -79,8 +79,8 @@ export default function Settings() {
 
   return (
     <Page title={current?.label ?? 'Cài đặt'} subtitle={current?.desc} back={isDesktop ? undefined : '/settings'} width="default">
-      <div className="lg:grid lg:grid-cols-[260px_1fr] lg:gap-6">
-        <aside className="hidden lg:block">
+      <div className="xl:grid xl:grid-cols-[260px_1fr] xl:gap-6">
+        <aside className="hidden xl:block">
           <div className="sticky top-6">{nav}</div>
         </aside>
         <div className="min-w-0">

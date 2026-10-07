@@ -104,6 +104,12 @@
       font-size: 14px;
     }
   }
+  /* Ô lưới co được theo cột. Mặc định min-width:auto = bề rộng nội dung không xuống dòng (dòng truncate, biển số…),
+     nên lưới chưa khai báo grid-cols ở điện thoại (`grid sm:grid-cols-2`) phình theo nội dung và kéo cả trang
+     rộng hơn màn hình. :where() để class min-w-* vẫn ghi đè được. */
+  :where(.grid) > * {
+    min-width: 0;
+  }
   /* Ô ngày nằm trong lưới phải co được theo cột. */
   input:is([type='date'], [type='time'], [type='datetime-local'], [type='month'], [type='week']) {
     min-width: 0;
