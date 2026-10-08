@@ -2,10 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { formatPlate, numberToVietnameseWords, parseMoney, plateKey, unaccent, vndInWords } from './text.js';
 import { buildVietQrPayload, crc16, sanitizeTransferNote } from './vietqr.js';
 import { parseCccdQr } from './cccd.js';
-import { DEFAULT_PRICING_RULES, overKmCharge, overtimeCharge, quoteRental, type VehiclePricing } from './pricing.js';
+import {
+  DEFAULT_PRICING_RULES,
+  chargeDays,
+  chargingCharge,
+  chargingText,
+  freeChargesFor,
+  overKmCharge,
+  overtimeCharge,
+  quoteRental,
+  rentalChargingPolicy,
+  tripChargingText,
+  vehicleChargingPolicy,
+  type VehiclePricing,
+} from './pricing.js';
 import { cancelForfeit, cancelMessage, cancelPolicyText, planCancellation, planSettlement, summarizeMoney } from './money.js';
 import { CAR_MAKES, findCarMake, findCarModel } from './carModels.js';
 import { suggestBookingSlot } from './booking.js';
+import { buildRentalShare, rentalShareStages, rentalShareText, type RentalShareInput } from './rentalShare.js';
 import { addMonthsVn, fmtDateTime, msToVnLocalInput, vnDateLong, vnLocalInputToMs } from './time.js';
 
 describe('đọc số tiền bằng chữ', () => {
@@ -129,6 +143,47 @@ describe('tính giá', () => {
   it('vượt km', () => {
     expect(overKmCharge(10000, 10700, 600, 3000)?.amount).toBe(300000);
     expect(overKmCharge(10000, 10500, 600, 3000)).toBeNull();
+  });
+});
+
+describe('sạc pin xe điện', () => {
+  const policy = { baseFree: 1, fee: 30000 };
+  it('thuê đến 2 ngày được lượt cơ bản, từ ngày thứ 3 mỗi ngày thêm 1 lượt', () => {
+    expect([1, 2, 3, 4, 5, 7].map((d) => freeChargesFor(policy, d))).toEqual([1, 1, 2, 3, 4, 6]);
+    expect(freeChargesFor({ baseFree: 2, fee: 0 }, 4)).toBe(4);
+    expect(freeChargesFor({ baseFree: 0, fee: 30000 }, 5)).toBe(0);
+  });
+  it('số ngày thuê: khối 24 giờ, phần lẻ quá ân hạn tính thêm 1 ngày', () => {
+    const s = at('2026-10-05T08:00');
+    expect(chargeDays(s, at('2026-10-05T12:00'), 60)).toBe(1);
+    expect(chargeDays(s, at('2026-10-07T08:00'), 60)).toBe(2);
+    expect(chargeDays(s, at('2026-10-07T08:45'), 60)).toBe(2);
+    expect(chargeDays(s, at('2026-10-07T11:00'), 60)).toBe(3);
+  });
+  it('chỉ tính lượt vượt số lượt miễn phí của chuyến', () => {
+    expect(chargingCharge(1, policy, 2)).toBeNull();
+    expect(chargingCharge(2, policy, 2)).toMatchObject({ kind: 'fuel', amount: 30000, description: 'Sạc pin 2 lượt (chuyến 2 ngày miễn phí 1): 1 × 30.000' });
+    expect(chargingCharge(4, policy, 5)).toBeNull();
+    expect(chargingCharge(6, policy, 5)?.amount).toBe(60000);
+    expect(chargingCharge(1, { baseFree: 0, fee: 30000 }, 5)?.amount).toBe(30000);
+    expect(chargingCharge(9, { baseFree: 3, fee: 0 }, 2)).toBeNull();
+    expect(chargingCharge(9, null, 2)).toBeNull();
+  });
+  it('câu chữ cho bảng giá / hợp đồng', () => {
+    expect(chargingText(policy)).toBe('thuê đến 2 ngày miễn phí 1 lượt sạc, từ ngày thứ 3 mỗi ngày thêm 1 lượt (3 ngày: 2 lượt, 4 ngày: 3 lượt…); sạc vượt tính 30.000đ/lượt cắm-rút sạc');
+    expect(chargingText({ baseFree: 0, fee: 30000 })).toBe('30.000đ/lượt cắm-rút sạc');
+    expect(tripChargingText(policy, 5)).toBe('chuyến 5 ngày miễn phí 4 lượt sạc, từ lượt thứ 5 tính 30.000đ/lượt cắm-rút sạc');
+    expect(tripChargingText({ baseFree: 0, fee: 30000 }, 5)).toBe('30.000đ/lượt cắm-rút sạc');
+  });
+  it('chỉ xe điện; lượt thuê dùng giá đã chốt, lượt cũ lấy theo xe', () => {
+    expect(vehicleChargingPolicy({ fuel: 'gasoline', freeCharges: 2, chargeFee: 30000 })).toBeNull();
+    expect(vehicleChargingPolicy({ fuel: 'electric', freeCharges: null, chargeFee: null })).toBeNull();
+    expect(vehicleChargingPolicy({ fuel: 'electric', freeCharges: 0, chargeFee: 0 })).toBeNull();
+    const ev = { fuel: 'electric' as const, freeCharges: 2, chargeFee: 40000 };
+    const base = { priceDay: 1, priceHour: 0, priceWeekendDay: null, kmLimitDay: 0, overKmFee: 0, overHourFee: 0 };
+    expect(rentalChargingPolicy({ ...base, freeCharges: 1, chargeFee: 30000 }, ev)).toEqual(policy);
+    expect(rentalChargingPolicy({ ...base, freeCharges: null, chargeFee: null }, ev)).toBeNull();
+    expect(rentalChargingPolicy(base, ev)).toEqual({ baseFree: 2, fee: 40000 });
   });
 });
 
@@ -324,5 +379,116 @@ describe('gợi ý giờ đặt xe từ Lịch xe', () => {
     expect(slot('2026-10-10T00:00', [rental('2026-10-09T08:00', '2026-10-10T10:00', 'returned')])).toMatchObject({ start: '2026-10-10T08:30' });
     const block = { type: 'block' as const, status: 'garage', start: t('2026-10-09T00:00'), end: t('2026-10-10T09:00') };
     expect(suggestBookingSlot({ firstDay: t('2026-10-10T00:00'), items: [block], bufferMs: buffer, now }).start).toBe(t('2026-10-10T09:00'));
+  });
+});
+
+describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
+  const at = (s: string) => vnLocalInputToMs(s);
+  const pricing: VehiclePricing = { priceDay: 1000000, priceHour: 150000, priceWeekendDay: null, kmLimitDay: 300, overKmFee: 3000, overHourFee: 0, freeCharges: 1, chargeFee: 30000 };
+  const rent = [{ kind: 'rental' as const, description: 'Tiền thuê 3 ngày × 1.000.000', amount: 3000000 }];
+  const paid = [
+    { direction: 'in' as const, purpose: 'rent' as const, amount: 1000000 },
+    { direction: 'in' as const, purpose: 'deposit' as const, amount: 5000000 },
+  ];
+  const base: RentalShareInput = {
+    stage: 'pickup',
+    rental: {
+      code: 'HD-2026-0001',
+      status: 'active',
+      scheduledStart: at('2026-12-01T08:00'),
+      scheduledEnd: at('2026-12-04T08:00'),
+      kmLimit: 900,
+      pickupLocation: null,
+      returnLocation: null,
+      depositRequired: 5000000,
+      fineHoldUntil: null,
+      pricing: JSON.stringify(pricing),
+    },
+    customerName: 'Nguyễn Văn A',
+    vehicle: { plate: '51K-999.88', make: 'VinFast', model: 'VF 6', fuel: 'electric', freeCharges: 1, chargeFee: 30000 },
+    pickup: {
+      at: at('2026-12-01T08:10'),
+      odo: 1000,
+      fuelLevel: 90,
+      photos: [{ slot: 'front', fileId: 'f1' }],
+      damages: [{ zone: 'Cản trước', note: 'trầy 5cm' }],
+      accessories: [{ name: 'Cáp sạc', quantity: 1, present: true }],
+    },
+    ret: null,
+    charges: rent,
+    money: summarizeMoney(rent, paid),
+    graceMinutes: 60,
+    shopName: 'Xe Happy',
+  };
+  const shop = { name: 'Xe Happy', phone: '0901 234 567', bank: { name: 'Vietcombank', account: '0123456789', holder: 'NGUYEN VAN B' } };
+
+  it('giai đoạn gửi được theo trạng thái', () => {
+    expect(rentalShareStages('booked', false, false)).toEqual([]);
+    expect(rentalShareStages('active', true, false)).toEqual(['pickup']);
+    expect(rentalShareStages('returned', true, true)).toEqual(['pickup', 'return']);
+    expect(rentalShareStages('settled', true, true)).toEqual(['pickup', 'return', 'settle']);
+    expect(rentalShareStages('cancelled', false, false)).toEqual([]);
+  });
+
+  it('giao xe: hẹn trả, km tới ODO bao nhiêu, hiện trạng, lượt sạc, còn phải trả kèm chuyển khoản', () => {
+    const doc = buildRentalShare(base);
+    const text = rentalShareText(doc, shop);
+    expect(text).toContain('XÁC NHẬN GIAO XE — HD-2026-0001');
+    expect(text).toContain('• Hẹn trả: 08:00 04/12/2026');
+    expect(text).toContain('• Giới hạn quãng đường: 900 km (đến ODO 1.900)');
+    expect(text).toContain('• Hiện trạng có sẵn: Cản trước: trầy 5cm');
+    expect(text).toContain('• Còn phải trả: 2.000.000đ');
+    expect(text).toContain('trả trễ tính 150.000đ/giờ');
+    expect(text).toContain('chuyến 3 ngày miễn phí 2 lượt sạc');
+    expect(text).toContain('💳 Chuyển khoản 2.000.000đ (còn phải trả): Vietcombank 0123456789 — NGUYEN VAN B, nội dung: HD-2026-0001');
+    expect(doc.photos).toEqual(['f1']);
+  });
+
+  it('nhận xe: trễ giờ, km đã đi, thiếu phụ kiện, hư hỏng mới, phần trừ vào cọc', () => {
+    const charges = [...rent, { kind: 'over_time' as const, description: 'Trả xe trễ 3 giờ', amount: 450000 }];
+    const doc = buildRentalShare({
+      ...base,
+      stage: 'return',
+      rental: { ...base.rental, status: 'returned' },
+      ret: {
+        at: at('2026-12-04T11:00'),
+        odo: 2000,
+        fuelLevel: 40,
+        photos: [],
+        damages: [{ zone: 'Cản trước', note: 'trầy 5cm' }, { zone: 'Gương trái', note: 'nứt', isNew: true }],
+        accessories: [{ name: 'Cáp sạc', quantity: 1, present: false, note: 'quên ở nhà' }],
+      },
+      charges,
+      money: summarizeMoney(charges, paid),
+    });
+    const text = rentalShareText(doc, { ...shop, bank: null });
+    expect(text).toContain('• Trả xe: 11:00 04/12/2026 (trễ 3 giờ)');
+    expect(text).toContain('• Quãng đường: 1.000 km / giới hạn 900 km');
+    expect(text).toContain('• Mức pin: 40% (lúc giao 90%)');
+    expect(text).toContain('• Phụ kiện thiếu: Cáp sạc (quên ở nhà)');
+    expect(text).toContain('• Hư hỏng mới: Gương trái: nứt');
+    expect(text).not.toContain('Cản trước');
+    expect(text).toContain('• Tổng cộng: 3.450.000đ');
+    expect(text).toContain('Khoản 2.450.000đ còn phải trả sẽ được trừ vào tiền cọc khi quyết toán.');
+    expect(doc.pay).toBeNull();
+  });
+
+  it('quyết toán: cấn trừ cọc, hoàn cọc, giữ lại chờ phạt nguội đến ngày', () => {
+    const charges = [...rent, { kind: 'over_time' as const, description: 'Trả xe trễ 3 giờ', amount: 450000 }];
+    const money = summarizeMoney(charges, [
+      ...paid,
+      { direction: 'offset', purpose: 'deposit', amount: 2450000 },
+      { direction: 'out', purpose: 'deposit', amount: 1550000 },
+    ]);
+    const doc = buildRentalShare({ ...base, stage: 'settle', rental: { ...base.rental, status: 'settled', fineHoldUntil: at('2027-01-03T08:00') }, charges, money });
+    const text = rentalShareText(doc, shop);
+    expect(text).toContain('QUYẾT TOÁN LƯỢT THUÊ — HD-2026-0001');
+    expect(text).toContain('• Đã thanh toán: 1.000.000đ');
+    expect(text).toContain('• Trừ vào tiền cọc: 2.450.000đ');
+    expect(text).toContain('• Đã hoàn cọc: 1.550.000đ');
+    expect(text).toContain('• Cọc giữ chờ phạt nguội: 1.000.000đ');
+    expect(text).toContain('đến 03/01/2027');
+    expect(text).not.toContain('Chuyển khoản');
+    expect(doc.pay).toBeNull();
   });
 });

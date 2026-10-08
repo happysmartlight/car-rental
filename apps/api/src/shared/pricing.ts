@@ -10,7 +10,7 @@
 //   không phụ thu cuối tuần/lễ) và lấy phương án RẺ HƠN. Thuê chưa đủ tháng mà tính ngày
 //   đắt hơn giá tháng → áp giá 1 tháng.
 
-import type { ChargeKind } from './constants.js';
+import type { ChargeKind, FuelType } from './constants.js';
 import { DAY_MS, HOUR_MS, addMonthsVn, fmtDuration, vnDateKey, vnParts } from './time.js';
 import { fmtNumber } from './text.js';
 
@@ -25,6 +25,10 @@ export interface VehiclePricing {
   priceMonth?: number | null;
   /** Giới hạn km mỗi tháng (null/0 = 30 × km/ngày). */
   kmLimitMonth?: number | null;
+  /** Xe điện: số lượt sạc miễn phí cho chuyến đến 2 ngày (xem `freeChargesFor`). Bảng giá cũ chưa có trường này. */
+  freeCharges?: number | null;
+  /** Xe điện: phí mỗi lượt cắm-rút sạc vượt số lần miễn phí. */
+  chargeFee?: number | null;
 }
 
 export interface Holiday {
@@ -230,5 +234,82 @@ export function overKmCharge(odoStart: number, odoEnd: number, kmLimit: number, 
     kind: 'over_km',
     description: `Vượt ${fmtNumber(over)} km (đi ${fmtNumber(used)}/${fmtNumber(kmLimit)} km) × ${fmtNumber(feePerKm)}`,
     amount: over * feePerKm,
+  };
+}
+
+// ── Sạc pin xe điện ─────────────────────────────────────────────────────────
+// Mỗi lần cắm-rút sạc tính 1 lượt. Chuyến đến 2 ngày được miễn phí `baseFree` lượt, từ ngày
+// thứ 3 mỗi ngày thêm 1 lượt (1 lượt → 3 ngày: 2, 4 ngày: 3…): thuê dài không bị thiệt, còn sạc
+// lắt nhắt quá số lượt thì trả `fee` mỗi lượt. Nhân viên đếm số lượt khi nhận xe.
+
+/** Số ngày đầu chỉ được số lượt miễn phí cơ bản; từ ngày sau đó mỗi ngày thêm 1 lượt. */
+export const CHARGE_BASE_DAYS = 2;
+
+export interface ChargingPolicy {
+  /** Số lượt miễn phí cho chuyến đến `CHARGE_BASE_DAYS` ngày (0 = không miễn phí lượt nào). */
+  baseFree: number;
+  fee: number;
+}
+
+type ChargingFields = { freeCharges?: number | null; chargeFee?: number | null };
+
+export function chargingPolicy(p: ChargingFields): ChargingPolicy | null {
+  const baseFree = p.freeCharges ?? 0;
+  const fee = p.chargeFee ?? 0;
+  return baseFree > 0 || fee > 0 ? { baseFree, fee } : null;
+}
+
+/** Chỉ xe điện mới có chính sách sạc (xe đổi sang xăng thì bỏ qua số đã nhập). */
+export function vehicleChargingPolicy(v: ChargingFields & { fuel: FuelType | null }): ChargingPolicy | null {
+  return v.fuel === 'electric' ? chargingPolicy(v) : null;
+}
+
+/** Theo bảng giá đã chốt vào lượt thuê; lượt đặt trước khi có tính năng này thì lấy theo xe hiện tại. */
+export function rentalChargingPolicy(snapshot: VehiclePricing, vehicle: ChargingFields & { fuel: FuelType | null }): ChargingPolicy | null {
+  if (snapshot.chargeFee !== undefined || snapshot.freeCharges !== undefined) return chargingPolicy(snapshot);
+  return vehicleChargingPolicy(vehicle);
+}
+
+/** Số ngày thuê để tính lượt sạc: khối 24 giờ, phần lẻ quá ân hạn tính thêm 1 ngày. */
+export function chargeDays(start: number, end: number, graceMinutes: number): number {
+  return Math.max(1, Math.ceil((end - start - graceMinutes * 60_000) / DAY_MS));
+}
+
+export function freeChargesFor(c: ChargingPolicy, days: number): number {
+  return c.baseFree > 0 ? c.baseFree + Math.max(0, days - CHARGE_BASE_DAYS) : 0;
+}
+
+const vndShort = (n: number) => `${fmtNumber(n)}đ`;
+
+/** Quy định chung cho bảng giá (chữ thường đầu câu):
+ *  "thuê đến 2 ngày miễn phí 1 lượt sạc, từ ngày thứ 3 mỗi ngày thêm 1 lượt (3 ngày: 2 lượt, 4 ngày: 3 lượt…); sạc vượt tính 30.000đ/lượt cắm-rút sạc" */
+export function chargingText(c: ChargingPolicy, money: (n: number) => string = vndShort): string {
+  const fee = c.fee ? `${money(c.fee)}/lượt cắm-rút sạc` : '';
+  if (!c.baseFree) return fee;
+  const d = CHARGE_BASE_DAYS;
+  const examples = [d + 1, d + 2].map((n) => `${n} ngày: ${freeChargesFor(c, n)} lượt`).join(', ');
+  const free = `thuê đến ${d} ngày miễn phí ${c.baseFree} lượt sạc, từ ngày thứ ${d + 1} mỗi ngày thêm 1 lượt (${examples}…)`;
+  return fee ? `${free}; sạc vượt tính ${fee}` : free;
+}
+
+/** Cho một chuyến cụ thể (hợp đồng, nhận xe): "chuyến 5 ngày miễn phí 4 lượt sạc, từ lượt thứ 5 tính 30.000đ/lượt cắm-rút sạc". */
+export function tripChargingText(c: ChargingPolicy, days: number, money: (n: number) => string = vndShort): string {
+  const free = freeChargesFor(c, days);
+  const fee = c.fee ? `${money(c.fee)}/lượt cắm-rút sạc` : '';
+  if (!free) return fee;
+  const text = `chuyến ${days} ngày miễn phí ${free} lượt sạc`;
+  return fee ? `${text}, từ lượt thứ ${free + 1} tính ${fee}` : text;
+}
+
+/** Phụ phí sạc khi nhận xe: số lượt vượt quá số lượt miễn phí của chuyến × phí mỗi lượt. */
+export function chargingCharge(sessions: number, c: ChargingPolicy | null, days: number): PriceLine | null {
+  if (!c?.fee) return null;
+  const free = freeChargesFor(c, days);
+  const extra = sessions - free;
+  if (extra <= 0) return null;
+  return {
+    kind: 'fuel',
+    description: `Sạc pin ${sessions} lượt${free ? ` (chuyến ${days} ngày miễn phí ${free})` : ''}: ${extra} × ${fmtNumber(c.fee)}`,
+    amount: extra * c.fee,
   };
 }

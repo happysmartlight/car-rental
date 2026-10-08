@@ -36,6 +36,8 @@ const zVehicle = z.object({
   depositAmount: zMoney.default(0),
   priceMonth: zMoney.nullable().optional(),
   kmLimitMonth: z.coerce.number().int().min(0).nullable().optional(),
+  freeCharges: z.coerce.number().int().min(0).max(99).nullable().optional(),
+  chargeFee: zMoney.nullable().optional(),
   inspectionExpiry: zDateKey,
   insuranceTndsExpiry: zDateKey,
   insuranceBodyExpiry: zDateKey,

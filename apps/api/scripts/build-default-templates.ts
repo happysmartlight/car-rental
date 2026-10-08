@@ -202,6 +202,9 @@ const contract = doc([
   P(['– Tổng cộng: ', { b: '{tien.tong}' }, ' đồng (bằng chữ: ', { i: '{tien.tong_chu}' }, ').']),
   P(['– Đã thanh toán: ', '{tien.da_tra}', ' đồng. Còn lại: ', { b: '{tien.con_lai}' }, ' đồng.']),
   P(['– Phụ phí phát sinh: trả xe trễ ', '{gia.qua_gio}', ' đồng/giờ; vượt quãng đường ', '{gia.vuot_km}', ' đồng/km; xăng dầu, vệ sinh, phí cầu đường (nếu có) tính theo thực tế.']),
+  Tag('{#co_sac}'),
+  P(['– Sạc pin (xe điện): ', '{gia.sac}', '.']),
+  Tag('{/co_sac}'),
 
   H('Điều 4. Đặt cọc và tài sản bảo đảm'),
   P(['– Bên B đặt cọc cho Bên A số tiền ', { b: '{tien.coc}' }, ' đồng (bằng chữ: ', { i: '{tien.coc_chu}' }, ') để bảo đảm thực hiện hợp đồng.']),

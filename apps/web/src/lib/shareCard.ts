@@ -2,6 +2,7 @@
 // Vẽ bằng canvas ngay trên máy (khách không vào được app qua Tailscale nên không gửi link).
 
 import { FUEL_LABEL, TRANSMISSION_LABEL } from '@shared/constants';
+import { CHARGE_BASE_DAYS, chargingText, vehicleChargingPolicy } from '@shared/pricing';
 import { fmtNumber } from '@shared/text';
 import { daysUntil, fmtDate, fmtDateKey } from '@shared/time';
 import { fileUrl } from './api';
@@ -13,9 +14,11 @@ export interface ShareOptions {
   extras: boolean;
   highlights: boolean;
   note: boolean;
+  /** Xe điện: số lần sạc miễn phí, phí mỗi lượt sạc thêm. */
+  charging: boolean;
 }
 
-export const DEFAULT_SHARE_OPTIONS: ShareOptions = { plate: false, deposit: true, extras: true, highlights: true, note: true };
+export const DEFAULT_SHARE_OPTIONS: ShareOptions = { plate: false, deposit: true, extras: true, highlights: true, note: true, charging: true };
 
 export type ShareVehicle = Pick<
   Vehicle,
@@ -37,11 +40,14 @@ export type ShareVehicle = Pick<
   | 'depositAmount'
   | 'priceMonth'
   | 'kmLimitMonth'
+  | 'freeCharges'
+  | 'chargeFee'
 > & { highlights: string[] };
 
-const W = 1080;
-const P = 64;
-const C = {
+// Bộ vẽ dùng chung với ảnh gửi khách của lượt thuê (rentalCard.ts).
+export const W = 1080;
+export const P = 64;
+export const C = {
   brand: '#2563eb',
   brandSoft: '#e8efff',
   fg: '#0e1420',
@@ -56,7 +62,7 @@ const C = {
   footerMuted: '#aab3c5',
 };
 const FAMILY = '"Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif';
-const font = (weight: number, size: number) => `${weight} ${size}px ${FAMILY}`;
+export const font = (weight: number, size: number) => `${weight} ${size}px ${FAMILY}`;
 
 const vnd = (n: number) => `${fmtNumber(n)}đ`;
 const title = (v: ShareVehicle) => [v.make, v.model].filter(Boolean).join(' ') || v.plate;
@@ -66,6 +72,23 @@ const monthKm = (v: ShareVehicle) => (v.kmLimitMonth && v.kmLimitMonth > 0 ? v.k
 const monthLine = (v: ShareVehicle) => (v.priceMonth ? `Thuê tháng: ${vnd(v.priceMonth)}/tháng${monthKm(v) ? ` (${fmtNumber(monthKm(v))} km)` : ''}` : null);
 const weekendPrice = (v: ShareVehicle) => (v.priceWeekendDay && v.priceWeekendDay !== v.priceDay ? v.priceWeekendDay : null);
 const WEEKDAY_NAME = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+/** Chính sách sạc của đội xe, gộp các xe giống nhau: ["Xe điện: miễn phí…"] hoặc ["VinFast VF 3: …", "VinFast VF 8: …"]. */
+function fleetCharging(vehicles: ShareVehicle[]): string[] {
+  const groups = new Map<string, string[]>();
+  for (const v of vehicles) {
+    const c = vehicleChargingPolicy(v);
+    if (!c) continue;
+    const t = chargingText(c);
+    const names = groups.get(t) ?? [];
+    if (!names.includes(title(v))) names.push(title(v));
+    groups.set(t, names);
+  }
+  const evs = vehicles.filter((v) => v.fuel === 'electric').length;
+  const first = [...groups.keys()][0];
+  if (groups.size === 1 && vehicles.filter((v) => vehicleChargingPolicy(v)).length === evs) return [`Xe điện: ${first}`];
+  return [...groups].map(([t, names]) => `${names.join(', ')}: ${t}`);
+}
 const weekendLabel = (rules: RulesSettings) => (rules.weekendDays.length ? [...rules.weekendDays].sort((a, b) => (a || 7) - (b || 7)).map((d) => WEEKDAY_NAME[d]).join(', ') : 'Cuối tuần');
 
 /** Kỳ lễ còn hiệu lực trong 120 ngày tới — báo trước để khách khỏi bất ngờ. */
@@ -83,7 +106,7 @@ function requirements(rules: RulesSettings): string[] {
 
 // ── Vẽ ──────────────────────────────────────────────────────────────────────
 
-async function ensureFonts() {
+export async function ensureFonts() {
   const sample = 'Bảng giá thuê xe tự lái Ếấộữ 0123456789đ';
   try {
     await Promise.all([400, 500, 600, 700].map((w) => document.fonts.load(font(w, 32), sample)));
@@ -104,7 +127,7 @@ async function loadPlaceholder(): Promise<HTMLImageElement | null> {
   }
 }
 
-async function loadImage(fileId: string | null, thumb = false): Promise<ImageBitmap | null> {
+export async function loadImage(fileId: string | null, thumb = false): Promise<ImageBitmap | null> {
   if (!fileId) return null;
   try {
     const res = await fetch(fileUrl(fileId, { thumb }), { credentials: 'same-origin' });
@@ -114,13 +137,13 @@ async function loadImage(fileId: string | null, thumb = false): Promise<ImageBit
   }
 }
 
-function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+export function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
   if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
   else ctx.rect(x, y, w, h);
 }
 
-function drawCover(ctx: CanvasRenderingContext2D, img: ImageBitmap, x: number, y: number, w: number, h: number, radius = 0) {
+export function drawCover(ctx: CanvasRenderingContext2D, img: ImageBitmap, x: number, y: number, w: number, h: number, radius = 0) {
   const scale = Math.max(w / img.width, h / img.height);
   const sw = w / scale;
   const sh = h / scale;
@@ -131,7 +154,7 @@ function drawCover(ctx: CanvasRenderingContext2D, img: ImageBitmap, x: number, y
   ctx.restore();
 }
 
-function wrap(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+export function wrap(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
   const out: string[] = [];
   for (const para of text.split('\n')) {
     let line = '';
@@ -148,7 +171,7 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxW: number): string
 }
 
 /** Bút vẽ chạy dọc trang, tự cộng chiều cao. */
-class Pen {
+export class Pen {
   y = 0;
   constructor(public ctx: CanvasRenderingContext2D) {}
   text(t: string, opts: { size: number; weight?: number; color?: string; x?: number; maxW?: number; lh?: number }) {
@@ -166,7 +189,7 @@ class Pen {
   }
 }
 
-function drawHeader(pen: Pen, biz: BusinessSettings, label: string) {
+export function drawHeader(pen: Pen, biz: BusinessSettings, label: string) {
   const { ctx } = pen;
   ctx.fillStyle = C.brand;
   ctx.fillRect(0, pen.y, W, 132);
@@ -209,7 +232,7 @@ function drawChips(pen: Pen, items: string[]) {
   pen.y += h;
 }
 
-function drawSection(pen: Pen, heading: string) {
+export function drawSection(pen: Pen, heading: string) {
   pen.gap(44);
   pen.text(heading, { size: 36, weight: 700 });
   pen.gap(14);
@@ -239,14 +262,14 @@ function drawHolidays(pen: Pen, rules: RulesSettings) {
   pen.gap(16);
 }
 
-function drawFooter(pen: Pen, biz: BusinessSettings) {
+export function drawFooter(pen: Pen, biz: BusinessSettings, stamp = `Báo giá ngày ${fmtDate(Date.now())}`) {
   const { ctx } = pen;
   pen.gap(56);
   const top = pen.y;
   const lines: [string, number, number, string][] = [];
   if (biz.phone) lines.push([`Gọi / Zalo: ${biz.phone}`, 40, 700, '#ffffff']);
   if (biz.address) lines.push([biz.address, 28, 400, C.footerMuted]);
-  lines.push([`Báo giá ngày ${fmtDate(Date.now())}`, 24, 400, C.footerMuted]);
+  lines.push([stamp, 24, 400, C.footerMuted]);
   ctx.font = font(400, 28);
   const height = 56 + lines.reduce((s, [t, size]) => s + wrap(ctx, t, W - 2 * P).length * Math.round(size * 1.45), 0) + 40;
   ctx.fillStyle = C.footer;
@@ -256,7 +279,7 @@ function drawFooter(pen: Pen, biz: BusinessSettings) {
   pen.y = top + height;
 }
 
-async function finish(canvas: HTMLCanvasElement, height: number): Promise<Blob> {
+export async function finish(canvas: HTMLCanvasElement, height: number): Promise<Blob> {
   const out = document.createElement('canvas');
   out.width = W;
   out.height = Math.ceil(height);
@@ -264,7 +287,7 @@ async function finish(canvas: HTMLCanvasElement, height: number): Promise<Blob> 
   return new Promise((resolve, reject) => out.toBlob((b) => (b ? resolve(b) : reject(new Error('Không tạo được ảnh'))), 'image/jpeg', 0.92));
 }
 
-function newCanvas(height: number) {
+export function newCanvas(height: number) {
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = height;
@@ -326,6 +349,12 @@ export async function renderVehicleCard(v: ShareVehicle, biz: BusinessSettings, 
     if (v.kmLimitDay && v.overKmFee) rows.push(['Vượt km', `${vnd(v.overKmFee)}/km`]);
     if (v.overHourFee) rows.push(['Trả xe trễ', `${vnd(v.overHourFee)}/giờ`]);
   }
+  const ch = opt.charging ? vehicleChargingPolicy(v) : null;
+  if (ch?.baseFree) {
+    rows.push([`Sạc pin miễn phí (thuê ≤ ${CHARGE_BASE_DAYS} ngày)`, `${ch.baseFree} lượt`]);
+    rows.push([`Từ ngày thứ ${CHARGE_BASE_DAYS + 1}, mỗi ngày thêm`, '1 lượt miễn phí']);
+  }
+  if (ch?.fee) rows.push([ch.baseFree ? 'Sạc vượt (mỗi lần cắm-rút)' : 'Sạc pin (mỗi lần cắm-rút)', `${vnd(ch.fee)}/lượt`]);
   if (opt.deposit && v.depositAmount) rows.push(['Đặt cọc', vnd(v.depositAmount)]);
   if (rows.length) {
     pen.gap(20);
@@ -405,10 +434,12 @@ export async function renderFleetCard(vehicles: ShareVehicle[], biz: BusinessSet
 
   const limits = [...new Set(vehicles.map((v) => v.kmLimitDay))];
   const deposits = vehicles.map((v) => v.depositAmount).filter((d) => d > 0);
-  if (opt.extras || opt.deposit) {
+  const charging = opt.charging ? fleetCharging(vehicles) : [];
+  if (opt.extras || opt.deposit || charging.length) {
     drawSection(pen, 'Điều kiện');
     if (opt.extras) pen.text(`•  Giới hạn ${limits.length === 1 ? (limits[0] ? `${fmtNumber(limits[0])} km/ngày` : 'không giới hạn km') : 'km tùy xe'}`, { size: 30, color: C.muted, lh: 44 });
     if (opt.deposit && deposits.length) pen.text(`•  Đặt cọc từ ${vnd(Math.min(...deposits))}`, { size: 30, color: C.muted, lh: 44 });
+    for (const line of charging) pen.text(`•  ${line}`, { size: 30, color: C.muted, lh: 44 });
   }
   drawHolidays(pen, rules);
   drawNotes(pen, biz, rules, opt);
@@ -431,6 +462,8 @@ export function vehicleShareText(v: ShareVehicle, biz: BusinessSettings, rules: 
     const extraText = extra.join(' · ');
     lines.push(`⏱ ${extraText.charAt(0).toUpperCase()}${extraText.slice(1)}`);
   }
+  const ch = opt.charging ? vehicleChargingPolicy(v) : null;
+  if (ch) lines.push(`🔌 Sạc pin: ${chargingText(ch)}`);
   if (opt.deposit && v.depositAmount) lines.push(`🔒 Đặt cọc: ${vnd(v.depositAmount)}`);
   for (const h of upcomingHolidays(rules)) lines.push(`🎉 ${h.name} (${fmtDateKey(h.from).slice(0, 5)}–${fmtDateKey(h.to).slice(0, 5)}): phụ thu ${h.surchargePct}%`);
   if (opt.highlights && v.highlights.length) lines.push(`✨ Tiện nghi: ${v.highlights.join(', ')}`);
@@ -448,6 +481,7 @@ export function fleetShareText(vehicles: ShareVehicle[], biz: BusinessSettings, 
   lines.push('');
   const deposits = vehicles.map((v) => v.depositAmount).filter((d) => d > 0);
   if (opt.deposit && deposits.length) lines.push(`🔒 Đặt cọc từ ${vnd(Math.min(...deposits))}`);
+  if (opt.charging) for (const line of fleetCharging(vehicles)) lines.push(`🔌 ${line}`);
   for (const h of upcomingHolidays(rules)) lines.push(`🎉 ${h.name}: phụ thu ${h.surchargePct}%`);
   lines.push(...footerText(biz, rules, opt));
   return lines.join('\n');

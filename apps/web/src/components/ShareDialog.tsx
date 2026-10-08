@@ -1,7 +1,8 @@
-// Hộp chia sẻ bảng giá: xem trước ảnh, chọn thông tin hiển thị, gửi ảnh hoặc tin nhắn.
+// Hộp chia sẻ gửi khách: xem trước ảnh, chọn thông tin hiển thị, gửi ảnh hoặc tin nhắn.
+// `ShareSheet` là khung chung (bảng giá xe, phiếu giao/nhận xe, quyết toán).
 
 import { Copy, Download, ImageIcon, MessageSquareText, Share2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { toast } from 'sonner';
 import { useAuth, useSettings } from '@/lib/hooks';
@@ -18,58 +19,78 @@ import {
   type ShareVehicle,
 } from '@/lib/shareCard';
 import { errorMessage } from '@/lib/utils';
+import { vehicleChargingPolicy } from '@shared/pricing';
 import { plateKey } from '@shared/text';
 import { Button } from './ui/button';
 import { Dialog } from './ui/dialog';
 import { Checkbox, Segmented } from './ui/form';
 import { Notice, Spinner } from './ui/misc';
 
-const OPT_KEY = 'share-options';
-
-function loadOptions(): ShareOptions {
-  try {
-    return { ...DEFAULT_SHARE_OPTIONS, ...JSON.parse(localStorage.getItem(OPT_KEY) ?? '{}') };
-  } catch {
-    return DEFAULT_SHARE_OPTIONS;
-  }
+/** Tùy chọn hiển thị nhớ theo máy (localStorage), mỗi loại phiếu một khóa. */
+export function useShareOptions<T extends object>(key: string, defaults: T) {
+  const [opt, setOpt] = useState<T>(() => {
+    try {
+      return { ...defaults, ...JSON.parse(localStorage.getItem(key) ?? '{}') };
+    } catch {
+      return defaults;
+    }
+  });
+  const setOption = (k: keyof T, v: boolean) => {
+    const next = { ...opt, [k]: v };
+    setOpt(next);
+    try {
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      /* bỏ qua */
+    }
+  };
+  return [opt, setOption] as const;
 }
 
-export function ShareDialog({ open, onOpenChange, vehicles, mode }: { open: boolean; onOpenChange: (o: boolean) => void; vehicles: ShareVehicle[]; mode: 'vehicle' | 'fleet' }) {
+export function ShareSheet({
+  open,
+  onOpenChange,
+  title,
+  description = 'Gửi khách qua Zalo, Messenger… Khách không cần vào app.',
+  imageTab = 'Ảnh',
+  filename,
+  text,
+  render,
+  renderKey,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  title: string;
+  description?: string;
+  imageTab?: string;
+  filename: string;
+  text: string;
+  /** null = chưa đủ dữ liệu để vẽ. */
+  render: (() => Promise<Blob>) | null;
+  /** Vẽ lại ảnh khi khóa này đổi (trang cha tạo hàm mới mỗi lần render). */
+  renderKey: string;
+  /** Tùy chọn hiển thị (ô tick, chọn giai đoạn…). */
+  children?: ReactNode;
+}) {
   const { data: settings } = useSettings();
   const { isAdmin } = useAuth();
-  const [opt, setOpt] = useState<ShareOptions>(loadOptions);
   const [tab, setTab] = useState<'image' | 'text'>('image');
   const [blob, setBlob] = useState<Blob | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const setOption = (k: keyof ShareOptions, v: boolean) => {
-    const next = { ...opt, [k]: v };
-    setOpt(next);
-    try {
-      localStorage.setItem(OPT_KEY, JSON.stringify(next));
-    } catch {
-      /* bỏ qua */
-    }
-  };
-
-  const biz = settings?.business;
-  const rules = settings?.rules;
-  // So theo nội dung: trang cha tạo mảng mới mỗi lần render, không cần vẽ lại ảnh.
-  const vkey = JSON.stringify(vehicles);
-  const text = useMemo(() => {
-    if (!biz || !rules || !vehicles.length) return '';
-    return mode === 'vehicle' ? vehicleShareText(vehicles[0], biz, rules, opt) : fleetShareText(vehicles, biz, rules, opt);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [biz, rules, vkey, opt, mode]);
+  const renderRef = useRef(render);
+  renderRef.current = render;
+  const ready = !!render;
 
   useEffect(() => {
-    if (!open || !biz || !rules || !vehicles.length) return;
+    const draw = renderRef.current;
+    if (!open || !draw) return;
     let cancelled = false;
     setRendering(true);
     setError(null);
-    (mode === 'vehicle' ? renderVehicleCard(vehicles[0], biz, rules, opt) : renderFleetCard(vehicles, biz, rules, opt))
+    draw()
       .then((b) => {
         if (cancelled) return;
         setBlob(b);
@@ -83,10 +104,7 @@ export function ShareDialog({ open, onOpenChange, vehicles, mode }: { open: bool
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, biz, rules, vkey, opt, mode]);
-
-  const filename = mode === 'vehicle' ? `bang-gia-${plateKey(vehicles[0]?.plate ?? 'xe').toLowerCase()}.jpg` : 'bang-gia-thue-xe.jpg';
+  }, [open, ready, renderKey]);
 
   const sendImage = async () => {
     if (!blob) return;
@@ -110,12 +128,13 @@ export function ShareDialog({ open, onOpenChange, vehicles, mode }: { open: bool
     }
   };
 
+  const biz = settings?.business;
   return (
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title={mode === 'vehicle' ? 'Chia sẻ thông tin xe' : 'Chia sẻ bảng giá cả đội xe'}
-      description="Gửi khách qua Zalo, Messenger… Khách không cần vào app."
+      title={title}
+      description={description}
       size="lg"
       footer={
         tab === 'image' ? (
@@ -145,17 +164,11 @@ export function ShareDialog({ open, onOpenChange, vehicles, mode }: { open: bool
           onChange={setTab}
           className="flex w-full"
           options={[
-            { value: 'image', label: <span className="flex items-center justify-center gap-1.5"><ImageIcon className="size-4" /> Ảnh bảng giá</span> },
+            { value: 'image', label: <span className="flex items-center justify-center gap-1.5"><ImageIcon className="size-4" /> {imageTab}</span> },
             { value: 'text', label: <span className="flex items-center justify-center gap-1.5"><MessageSquareText className="size-4" /> Tin nhắn chữ</span> },
           ]}
         />
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3">
-          <Checkbox checked={opt.extras} onChange={(v) => setOption('extras', v)} label="Giờ lẻ, km, trễ giờ" />
-          <Checkbox checked={opt.deposit} onChange={(v) => setOption('deposit', v)} label="Tiền cọc" />
-          <Checkbox checked={opt.highlights} onChange={(v) => setOption('highlights', v)} label="Tiện nghi" />
-          <Checkbox checked={opt.note} onChange={(v) => setOption('note', v)} label="Ghi chú cửa hàng" />
-          <Checkbox checked={opt.plate} onChange={(v) => setOption('plate', v)} label="Biển số" />
-        </div>
+        {children}
         {biz && !biz.phone && (
           <Notice tone="amber">
             Chưa có số điện thoại cửa hàng để khách liên hệ.{' '}
@@ -170,7 +183,7 @@ export function ShareDialog({ open, onOpenChange, vehicles, mode }: { open: bool
         )}
         {tab === 'image' ? (
           <div className="relative overflow-hidden rounded-2xl border border-border bg-surface-2">
-            {url && <img src={url} alt="Ảnh bảng giá" className={rendering ? 'opacity-50' : ''} />}
+            {url && <img src={url} alt={imageTab} className={rendering ? 'opacity-50' : ''} />}
             {(rendering || !url) && !error && (
               <div className="flex min-h-60 items-center justify-center">
                 <Spinner className="size-7" />
@@ -183,5 +196,44 @@ export function ShareDialog({ open, onOpenChange, vehicles, mode }: { open: bool
         )}
       </div>
     </Dialog>
+  );
+}
+
+export function ShareDialog({ open, onOpenChange, vehicles, mode }: { open: boolean; onOpenChange: (o: boolean) => void; vehicles: ShareVehicle[]; mode: 'vehicle' | 'fleet' }) {
+  const { data: settings } = useSettings();
+  const [opt, setOption] = useShareOptions<ShareOptions>('share-options', DEFAULT_SHARE_OPTIONS);
+  const hasCharging = vehicles.some((v) => vehicleChargingPolicy(v));
+  const biz = settings?.business;
+  const rules = settings?.rules;
+  // So theo nội dung: trang cha tạo mảng mới mỗi lần render, không cần vẽ lại ảnh.
+  const vkey = JSON.stringify(vehicles);
+  const text = useMemo(() => {
+    if (!biz || !rules || !vehicles.length) return '';
+    return mode === 'vehicle' ? vehicleShareText(vehicles[0], biz, rules, opt) : fleetShareText(vehicles, biz, rules, opt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [biz, rules, vkey, opt, mode]);
+  const render =
+    biz && rules && vehicles.length ? () => (mode === 'vehicle' ? renderVehicleCard(vehicles[0], biz, rules, opt) : renderFleetCard(vehicles, biz, rules, opt)) : null;
+
+  return (
+    <ShareSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={mode === 'vehicle' ? 'Chia sẻ thông tin xe' : 'Chia sẻ bảng giá cả đội xe'}
+      imageTab="Ảnh bảng giá"
+      filename={mode === 'vehicle' ? `bang-gia-${plateKey(vehicles[0]?.plate ?? 'xe').toLowerCase()}.jpg` : 'bang-gia-thue-xe.jpg'}
+      text={text}
+      render={render}
+      renderKey={JSON.stringify([vkey, opt, mode, biz, rules])}
+    >
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3">
+        <Checkbox checked={opt.extras} onChange={(v) => setOption('extras', v)} label="Giờ lẻ, km, trễ giờ" />
+        <Checkbox checked={opt.deposit} onChange={(v) => setOption('deposit', v)} label="Tiền cọc" />
+        <Checkbox checked={opt.highlights} onChange={(v) => setOption('highlights', v)} label="Tiện nghi" />
+        <Checkbox checked={opt.note} onChange={(v) => setOption('note', v)} label="Ghi chú cửa hàng" />
+        <Checkbox checked={opt.plate} onChange={(v) => setOption('plate', v)} label="Biển số" />
+        {hasCharging && <Checkbox checked={opt.charging} onChange={(v) => setOption('charging', v)} label="Phí sạc (xe điện)" />}
+      </div>
+    </ShareSheet>
   );
 }

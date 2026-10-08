@@ -358,6 +358,28 @@ describe('phụ kiện trên xe', () => {
     expect(xml).toContain('theo tháng');
     expect(xml).toContain('18.000.000');
     expect(xml).toContain('3.500');
+    expect(xml).not.toContain('Sạc pin');
+  });
+
+  it('xe điện: lượt sạc miễn phí theo số ngày thuê + phí mỗi lượt chốt vào lượt thuê, hợp đồng ghi rõ', async () => {
+    const { db, schema } = await import('./db/index.js');
+    const { eq } = await import('drizzle-orm');
+    expect((await call('PATCH', `/api/vehicles/${ev}`, { freeCharges: 1, chargeFee: 30000 })).json).toMatchObject({ freeCharges: 1, chargeFee: 30000 });
+    const custId = (await call('POST', '/api/customers', { fullName: 'Phạm Xe Điện', idNumber: '079099000003' })).json.id;
+    const r = (await call('POST', '/api/rentals', { vehicleId: ev, customerId: custId, scheduledStart: at('2027-05-01T08:00'), scheduledEnd: at('2027-05-06T08:00') })).json;
+    expect(JSON.parse(r.pricing)).toMatchObject({ freeCharges: 1, chargeFee: 30000 });
+    const contractXml = async (id: number) => {
+      const doc = await call('POST', `/api/rentals/${id}/documents`, { kind: 'contract' });
+      const file = await app.inject({ method: 'GET', url: `/api/files/${doc.json.document.docxFileId}`, headers: { cookie: adminCookie } });
+      return new PizZip(file.rawPayload).file('word/document.xml')!.asText();
+    };
+    // Đổi giá sau khi đặt không ảnh hưởng lượt đã đặt.
+    await call('PATCH', `/api/vehicles/${ev}`, { chargeFee: 40000 });
+    expect(await contractXml(r.id)).toContain('chuyến 5 ngày miễn phí 4 lượt sạc, từ lượt thứ 5 tính 30.000 đồng/lượt cắm-rút sạc');
+    // Lượt đặt trước khi có tính năng (bảng giá chưa có trường sạc) → lấy theo xe hiện tại.
+    const { freeCharges: _f, chargeFee: _c, ...old } = JSON.parse(r.pricing);
+    db.update(schema.rentals).set({ pricing: JSON.stringify(old) }).where(eq(schema.rentals.id, r.id)).run();
+    expect(await contractXml(r.id)).toContain('từ lượt thứ 5 tính 40.000 đồng/lượt');
   });
 
   it('mẫu dựng sẵn cũ tự lên bản mới; mẫu người dùng đã thay thì giữ nguyên', async () => {
@@ -369,7 +391,7 @@ describe('phụ kiện trên xe', () => {
     db.update(schema.contractTemplates).set({ builtin: 'pickup-user' }).where(eq(schema.contractTemplates.id, pickupT.id)).run();
     ensureBuiltinTemplates();
     const c2 = db.select().from(schema.contractTemplates).where(eq(schema.contractTemplates.id, contract.id)).get()!;
-    expect(c2.builtin).toBe('contract-v4');
+    expect(c2.builtin).toBe('contract-v5');
     expect(c2.version).toBe(contract.version + 1);
     const p2 = db.select().from(schema.contractTemplates).where(eq(schema.contractTemplates.id, pickupT.id)).get()!;
     expect(p2.version).toBe(pickupT.version);

@@ -10,13 +10,14 @@ import { ageAt } from '../shared/cccd.js';
 import type { ChargeKind, CollateralKind, PaymentMethod, RentalStatus } from '../shared/constants.js';
 import { RENTAL_STATUS } from '../shared/constants.js';
 import { planCancellation, summarizeMoney, type PaymentPurpose } from '../shared/money.js';
-import { quoteRental, type Quote, type VehiclePricing } from '../shared/pricing.js';
+import { quoteRental, vehicleChargingPolicy, type Quote, type VehiclePricing } from '../shared/pricing.js';
 import { fmtNumber } from '../shared/text.js';
 import { DAY_MS, fmtDateTime, vnDateKey, vnParts } from '../shared/time.js';
 
 export const OPEN_STATUSES: RentalStatus[] = ['booked', 'active'];
 
 export function vehiclePricing(v: Vehicle): VehiclePricing {
+  const charging = vehicleChargingPolicy(v);
   return {
     priceDay: v.priceDay,
     priceHour: v.priceHour,
@@ -26,6 +27,8 @@ export function vehiclePricing(v: Vehicle): VehiclePricing {
     overHourFee: v.overHourFee,
     priceMonth: v.priceMonth,
     kmLimitMonth: v.kmLimitMonth,
+    freeCharges: charging?.baseFree ?? null,
+    chargeFee: charging?.fee ?? null,
   };
 }
 

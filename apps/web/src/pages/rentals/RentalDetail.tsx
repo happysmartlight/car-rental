@@ -18,6 +18,7 @@ import {
   QrCode,
   Receipt,
   RotateCcw,
+  Share2,
   ShieldCheck,
   Trash2,
   UserPlus,
@@ -40,8 +41,9 @@ import { CHARGE_KIND_LABEL, COLLATERAL_KIND_LABEL, PAYMENT_METHOD_LABEL, PHOTO_S
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { fmtDate, fmtDateTime, fmtDuration } from '@shared/time';
 import { CancelDialog, ChargeDialog, CollateralDialog, DriverDialog, EditRentalDialog, PaymentDialog, ReleaseHoldDialog, ScanDialog, SettleDialog } from './RentalDialogs';
+import { RentalShareDialog, rentalShareStagesOf } from './RentalShare';
 
-type DialogName = 'pay' | 'charge' | 'settle' | 'hold' | 'edit' | 'cancel' | 'collateral' | 'driver' | 'scan' | 'qr' | 'audit' | null;
+type DialogName = 'pay' | 'charge' | 'settle' | 'hold' | 'edit' | 'cancel' | 'collateral' | 'driver' | 'scan' | 'qr' | 'audit' | 'share' | null;
 
 function HandoverCard({ h, title, prev }: { h: Handover; title: string; prev?: Handover }) {
   const photos = h.photos.map((p) => ({ fileId: p.fileId, label: PHOTO_SLOTS.find((s) => s.key === p.slot)?.label ?? p.slot }));
@@ -146,6 +148,7 @@ export default function RentalDetail() {
   const pickupHo = d.handovers.find((h) => h.kind === 'pickup');
   const returnHo = [...d.handovers].reverse().find((h) => h.kind === 'return');
   const userName = (uid: number | null) => d.users.find((u) => u.id === uid)?.displayName ?? '—';
+  const canShare = rentalShareStagesOf(d).length > 0;
 
   const generate = async (kind: TemplateKind) => {
     setGenerating(kind);
@@ -210,6 +213,11 @@ export default function RentalDetail() {
             {cancelBtn}
             {primary}
           </span>
+          {canShare && (
+            <Button variant="outline" onClick={() => setDialog('share')} aria-label="Gửi khách">
+              <Share2 /> <span className="hidden sm:inline">Gửi khách</span>
+            </Button>
+          )}
           <Menu trigger={<Button variant="outline" size="icon" aria-label="Thêm"><MoreHorizontal /></Button>}>
             {['booked', 'active'].includes(r.status) && (
               <MenuItem icon={Pencil} onSelect={() => setDialog('edit')}>
@@ -570,6 +578,7 @@ export default function RentalDetail() {
         }}
       />
       <ReleaseHoldDialog d={d} open={dialog === 'hold'} onOpenChange={(o) => setDialog(o ? 'hold' : null)} />
+      {canShare && <RentalShareDialog d={d} open={dialog === 'share'} onOpenChange={(o) => setDialog(o ? 'share' : null)} />}
       <EditRentalDialog d={d} open={dialog === 'edit'} onOpenChange={(o) => setDialog(o ? 'edit' : null)} />
       <CancelDialog d={d} open={dialog === 'cancel'} onOpenChange={(o) => setDialog(o ? 'cancel' : null)} />
       <CollateralDialog d={d} open={dialog === 'collateral'} onOpenChange={(o) => setDialog(o ? 'collateral' : null)} />

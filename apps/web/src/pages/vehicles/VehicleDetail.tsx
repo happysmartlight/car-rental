@@ -15,6 +15,7 @@ import { api } from '@/lib/api';
 import { useAction, useAuth } from '@/lib/hooks';
 import type { VehicleDetail as Detail } from '@/lib/types';
 import { BLOCK_KINDS, BLOCK_KIND_LABEL, FUEL_LABEL, TRANSMISSION_LABEL, type BlockKind } from '@shared/constants';
+import { CHARGE_BASE_DAYS, vehicleChargingPolicy } from '@shared/pricing';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { daysUntil, fmtDateKey, fmtDateTime } from '@shared/time';
 
@@ -45,6 +46,7 @@ export default function VehicleDetail() {
 
   if (isLoading || !data) return <PageLoader />;
   const v = data.vehicle;
+  const charging = vehicleChargingPolicy(v);
   const shareVehicles = [{ ...v, highlights: data.accessories.filter((a) => a.showInShare).map((a) => a.name) }];
   const photos = [v.photoFileId && { fileId: v.photoFileId, label: 'Ảnh xe' }, v.registrationFileId && { fileId: v.registrationFileId, label: 'Đăng ký xe' }].filter(Boolean) as { fileId: string; label: string }[];
 
@@ -148,6 +150,12 @@ export default function VehicleDetail() {
               {!!v.priceMonth && <InfoRow label="Thuê tháng">{fmtVnd(v.priceMonth)}</InfoRow>}
               {!!v.priceMonth && (
                 <InfoRow label="Km/tháng">{v.kmLimitMonth ? `${fmtNumber(v.kmLimitMonth)} km` : v.kmLimitDay ? `${fmtNumber(v.kmLimitDay * 30)} km` : 'Không giới hạn'}</InfoRow>
+              )}
+              {charging && (
+                <>
+                  <InfoRow label="Sạc miễn phí">{charging.baseFree ? `${charging.baseFree} lượt (≤ ${CHARGE_BASE_DAYS} ngày), +1 lượt/ngày` : 'Không'}</InfoRow>
+                  {!!charging.fee && <InfoRow label="Sạc vượt">{fmtVnd(charging.fee)}/lượt</InfoRow>}
+                </>
               )}
               <InfoRow label="Cọc mặc định">{fmtVnd(v.depositAmount)}</InfoRow>
               {data.revenue != null && <InfoRow label="Tổng doanh thu">{fmtVnd(data.revenue)}</InfoRow>}

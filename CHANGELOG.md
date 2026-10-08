@@ -3,6 +3,20 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.9] - 2026-10-08
+
+### Mới
+- **Gửi khách thông tin sau khi giao xe, nhận xe, quyết toán** — nút **Gửi khách** trên trang lượt thuê soạn sẵn phiếu (ảnh hoặc tin nhắn chữ) để gửi qua Zalo/Messenger:
+  - *Giao xe*: giờ nhận, **giờ hẹn trả**, ODO, mức xăng/pin, được đi tới ODO bao nhiêu, phụ kiện kèm theo, vết có sẵn, tiền đã trả / còn phải trả, cọc đã nhận.
+  - *Nhận xe*: giờ trả (trễ bao lâu), số km đã đi, **phụ kiện thiếu và hư hỏng mới**, từng khoản phụ phí, phần sẽ trừ vào cọc.
+  - *Quyết toán*: các khoản phí, phần trừ vào cọc, đã hoàn cọc, **số cọc giữ chờ phạt nguội đến ngày nào**.
+  - Ảnh phiếu kèm được ảnh xe lúc giao/nhận và **mã QR chuyển khoản** đúng số tiền khách còn phải trả.
+- **Xe điện: chính sách sạc pin** — trong **Sửa xe** có mục **Sạc pin**: số lượt sạc miễn phí cho chuyến đến 2 ngày (mặc định 1), từ ngày thứ 3 mỗi ngày thêm 1 lượt (3 ngày: 2 lượt, 5 ngày: 4 lượt…). Sạc quá số lượt thì tính phí mỗi lượt cắm-rút sạc (mặc định 30.000đ, chỉnh riêng từng xe). Đổi giá chỉ áp cho lượt đặt mới.
+  - Hiện trên ảnh và tin nhắn chia sẻ thông tin xe / bảng giá (ô tick "Phí sạc (xe điện)").
+  - Hợp đồng dựng sẵn ghi rõ số lượt sạc miễn phí của chuyến (mẫu tự cập nhật). Mẫu Word riêng của bạn: thêm `{#co_sac}{gia.sac}{/co_sac}` nếu muốn in.
+  - **Nhận xe**: nhập số lượt sạc trong chuyến, app tự tính phụ phí sạc.
+  - Xe điện đang có: mở **Sửa xe**, kiểm tra mục Sạc pin (app điền sẵn 1 lượt / 30.000đ) rồi bấm Lưu.
+
 ## [0.2.8] - 2026-10-08
 
 ### Cải tiến

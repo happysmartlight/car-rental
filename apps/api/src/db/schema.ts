@@ -121,6 +121,10 @@ export const vehicles = sqliteTable('vehicles', {
   priceMonth: integer('price_month'),
   /** Giới hạn km mỗi tháng (null = 30 × km/ngày). */
   kmLimitMonth: integer('km_limit_month'),
+  /** Xe điện: số lượt sạc miễn phí cho chuyến đến 2 ngày, từ ngày thứ 3 mỗi ngày thêm 1 lượt (null = 0). */
+  freeCharges: integer('free_charges'),
+  /** Xe điện: phí mỗi lượt cắm-rút sạc vượt số lần miễn phí (null/0 = không thu). */
+  chargeFee: integer('charge_fee'),
   inspectionExpiry: text('inspection_expiry'),
   insuranceTndsExpiry: text('insurance_tnds_expiry'),
   insuranceBodyExpiry: text('insurance_body_expiry'),

@@ -12,10 +12,11 @@ import type { Vehicle, VehicleDetail } from '@/lib/types';
 import { errorMessage } from '@/lib/utils';
 import { CAR_MAKES, findCarMake, findCarModel } from '@shared/carModels';
 import { FUEL_LABEL, FUEL_TYPES, TRANSMISSIONS, TRANSMISSION_LABEL } from '@shared/constants';
+import { CHARGE_BASE_DAYS, freeChargesFor } from '@shared/pricing';
 
 type Form = Partial<Omit<Vehicle, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt' | 'plateKey'>>;
 
-const EMPTY: Form = { plate: '', make: '', model: '', odo: 0, active: true, ownerType: 'own', priceDay: 0, priceHour: 0, kmLimitDay: 300, overKmFee: 0, overHourFee: 0, depositAmount: 0, transmission: 'AT', fuel: 'gasoline', seats: 5 };
+const EMPTY: Form = { plate: '', make: '', model: '', odo: 0, active: true, ownerType: 'own', priceDay: 0, priceHour: 0, kmLimitDay: 300, overKmFee: 0, overHourFee: 0, depositAmount: 0, transmission: 'AT', fuel: 'gasoline', seats: 5, freeCharges: null, chargeFee: null };
 
 function Group({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
@@ -29,6 +30,8 @@ function Group({ title, description, children }: { title: string; description?: 
 }
 
 const OTHER = '__other';
+/** Xe điện chưa cấu hình sạc: gợi ý 1 lượt miễn phí (chuyến ≤ 2 ngày), 30.000đ mỗi lượt vượt. Xóa ô = lưu 0 nên không tự điền lại. */
+const evDefaults = (s: Form) => ({ freeCharges: s.freeCharges ?? 1, chargeFee: s.chargeFee ?? 30_000 });
 
 /** Hãng → dòng xe chọn từ danh mục (VinFast đầu tiên); "Khác" để tự nhập. */
 function MakeModelFields({ make, model, onMake, onModel, onElectric }: { make: string; model: string; onMake: (v: string) => void; onModel: (v: string) => void; onElectric: () => void }) {
@@ -127,9 +130,12 @@ export default function VehicleEdit() {
     if (!data) return;
     // Khớp tên đã lưu với danh mục ("Vinfast" → "VinFast", "VF3" → "VF 3").
     const mk = findCarMake(data.vehicle.make);
-    setF({ ...data.vehicle, make: mk?.name ?? data.vehicle.make, model: findCarModel(mk, data.vehicle.model) ?? data.vehicle.model });
+    const v = data.vehicle;
+    setF({ ...v, make: mk?.name ?? v.make, model: findCarModel(mk, v.model) ?? v.model, ...(v.fuel === 'electric' ? evDefaults(v) : {}) });
   }, [data]);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((s) => ({ ...s, [k]: v }));
+  const setFuel = (fuel: Form['fuel']) => setF((s) => ({ ...s, fuel, ...(fuel === 'electric' ? evDefaults(s) : {}) }));
+  const freeFor = (days: number) => freeChargesFor({ baseFree: f.freeCharges ?? 0, fee: 0 }, days);
   const text = (k: keyof Form) => ({ value: (f[k] as string | null | undefined) ?? '', onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => set(k, e.target.value as never) });
 
   const save = async () => {
@@ -157,7 +163,7 @@ export default function VehicleEdit() {
           <Field label="Biển số" required>
             <Input {...text('plate')} placeholder="51K-123.45" autoCapitalize="characters" />
           </Field>
-          <MakeModelFields make={f.make ?? ''} model={f.model ?? ''} onMake={(v) => set('make', v)} onModel={(v) => set('model', v)} onElectric={() => set('fuel', 'electric')} />
+          <MakeModelFields make={f.make ?? ''} model={f.model ?? ''} onMake={(v) => set('make', v)} onModel={(v) => set('model', v)} onElectric={() => setFuel('electric')} />
           <Field label="Năm sản xuất">
             <NumberInput value={f.year} onChange={(v) => set('year', v)} placeholder="2022" plain maxDigits={4} />
           </Field>
@@ -177,7 +183,7 @@ export default function VehicleEdit() {
             </Select>
           </Field>
           <Field label="Nhiên liệu">
-            <Select value={f.fuel ?? ''} onChange={(e) => set('fuel', (e.target.value || null) as never)}>
+            <Select value={f.fuel ?? ''} onChange={(e) => setFuel((e.target.value || null) as Form['fuel'])}>
               {FUEL_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {FUEL_LABEL[t]}
@@ -228,6 +234,17 @@ export default function VehicleEdit() {
             <NumberInput value={f.kmLimitMonth} onChange={(v) => set('kmLimitMonth', v)} suffix="km" />
           </Field>
         </Group>
+
+        {f.fuel === 'electric' && (
+          <Group title="Sạc pin" description="Mỗi lần cắm-rút sạc tính 1 lượt. Thuê càng nhiều ngày càng được thêm lượt miễn phí; sạc lắt nhắt quá số lượt thì tính phí. Đổi ở đây chỉ áp cho lượt đặt mới.">
+            <Field label={`Lượt sạc miễn phí (thuê ≤ ${CHARGE_BASE_DAYS} ngày)`} hint={f.freeCharges ? `Từ ngày thứ ${CHARGE_BASE_DAYS + 1} mỗi ngày thêm 1 lượt (3 ngày → ${freeFor(3)}, 5 ngày → ${freeFor(5)}, 7 ngày → ${freeFor(7)} lượt)` : '0 = không miễn phí lượt nào'}>
+              <NumberInput value={f.freeCharges} onChange={(v) => set('freeCharges', v ?? 0)} suffix="lượt" />
+            </Field>
+            <Field label="Phí mỗi lượt sạc vượt" hint="Lượt vượt quá số lượt miễn phí của chuyến">
+              <MoneyInput value={f.chargeFee} onChange={(v) => set('chargeFee', v ?? 0)} />
+            </Field>
+          </Group>
+        )}
 
         <Group title="Giấy tờ & hạn" description="App nhắc trước 30 ngày khi sắp hết hạn">
           <Field label="Hạn đăng kiểm">

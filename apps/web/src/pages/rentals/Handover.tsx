@@ -16,6 +16,7 @@ import { useSettings } from '@/lib/hooks';
 import type { HandoverAccessory, RentalDetail, VehicleAccessoriesData } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
 import { CHARGE_KINDS, CHARGE_KIND_LABEL, DAMAGE_ZONES, PHOTO_SLOTS, type ChargeKind } from '@shared/constants';
+import { chargeDays, chargingCharge, rentalChargingPolicy, tripChargingText, type VehiclePricing } from '@shared/pricing';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { fmtDateTime, fmtDuration } from '@shared/time';
 import { useQueryClient } from '@tanstack/react-query';
@@ -30,7 +31,7 @@ interface ChargeRow {
   kind: ChargeKind;
   description: string;
   amount: number | null;
-  /** Dòng tự sinh từ phụ kiện thiếu ("acc:<tên>") — tự gỡ khi tick lại. */
+  /** Dòng tự sinh: phụ kiện thiếu ("acc:<tên>", tự gỡ khi tick lại) hoặc sạc pin ("charging"). */
   auto?: string;
 }
 interface Suggestion {
@@ -76,6 +77,7 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
   const [charges, setCharges] = useState<ChargeRow[]>([]);
   const [acc, setAcc] = useState<HandoverAccessory[]>([]);
   const [accReady, setAccReady] = useState(false);
+  const [chargeSessions, setChargeSessions] = useState<number | null>(null);
   const [collect, setCollect] = useState<{ amount: number | null; method: 'cash' | 'transfer' }>({ amount: null, method: 'transfer' });
   const [collectDeposit, setCollectDeposit] = useState<{ amount: number | null; method: 'cash' | 'transfer' }>({ amount: null, method: 'transfer' });
   const [saving, setSaving] = useState(false);
@@ -106,7 +108,7 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
     if (isPickup) return;
     const missing = acc.filter((a) => !a.present);
     setCharges((rows) => {
-      const keep = rows.filter((r) => !r.auto || missing.some((m) => `acc:${m.name}` === r.auto));
+      const keep = rows.filter((r) => !r.auto?.startsWith('acc:') || missing.some((m) => `acc:${m.name}` === r.auto));
       const add = missing
         .filter((m) => !keep.some((r) => r.auto === `acc:${m.name}`))
         .map((m) => ({ kind: 'accessory' as ChargeKind, description: `Thiếu phụ kiện: ${m.name}${m.quantity > 1 ? ` (×${m.quantity})` : ''}`, amount: m.value ? m.value * m.quantity : null, auto: `acc:${m.name}` }));
@@ -145,6 +147,19 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
     setCharges((rows) => [...rows.filter((r) => r.kind !== 'over_time' && r.kind !== 'over_km'), ...preview.suggestions.map((s) => ({ ...s }))]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestionKey]);
+
+  // Xe điện: sạc quá số lần miễn phí → tự thêm khoản phí sạc theo số lượt nhân viên nhập.
+  // Số lượt miễn phí theo số ngày thuê đã đặt (khớp hợp đồng).
+  const charging = useMemo(() => {
+    if (!d || isPickup || !settings) return null;
+    const policy = rentalChargingPolicy(JSON.parse(d.rental.pricing) as VehiclePricing, d.vehicle);
+    return policy && { policy, days: chargeDays(d.rental.scheduledStart, d.rental.scheduledEnd, settings.rules.graceMinutes) };
+  }, [d, isPickup, settings]);
+  useEffect(() => {
+    if (!charging) return;
+    const line = chargingCharge(chargeSessions ?? 0, charging.policy, charging.days);
+    setCharges((rows) => [...rows.filter((r) => r.auto !== 'charging'), ...(line ? [{ ...line, auto: 'charging' }] : [])]);
+  }, [chargeSessions, charging]);
 
   const stamp = useMemo(() => () => `${d?.vehicle.plate ?? ''} • ${fmtDateTime(Date.now())} • ${isPickup ? 'Giao xe' : 'Nhận xe'} ${d?.rental.code ?? ''}`, [d, isPickup]);
 
@@ -351,7 +366,14 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
               <p className="mt-2 text-xs text-muted">Để trống nếu chưa thu. Có thể ghi nhận sau ở trang lượt thuê. Tài sản thế chấp thêm ở trang lượt thuê.</p>
             </Step>
           ) : (
-            <Step n={5} title="Phụ phí" description="Tự gợi ý trễ giờ & vượt km — sửa được. Thêm xăng, vệ sinh, hư hỏng nếu có.">
+            <Step n={5} title="Phụ phí" description={`Tự gợi ý trễ giờ, vượt km${charging ? ', sạc pin' : ''} — sửa được. Thêm xăng, vệ sinh, hư hỏng nếu có.`}>
+              {charging && (
+                <div className="mb-4 sm:max-w-sm">
+                  <Field label="Số lượt sạc pin trong chuyến" hint={`${tripChargingText(charging.policy, charging.days).replace(/^./, (c) => c.toUpperCase())} (xem lịch sử sạc trên app của xe)`}>
+                    <NumberInput value={chargeSessions} onChange={setChargeSessions} suffix="lượt" />
+                  </Field>
+                </div>
+              )}
               <div className="space-y-2">
                 {charges.map((c, i) => (
                   <div key={i} className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[160px_1fr_140px_auto]">
