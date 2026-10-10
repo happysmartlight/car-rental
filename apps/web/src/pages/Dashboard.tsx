@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Car, CheckCircle2, CircleAlert, Info, KeyRound, PiggyBank, Plus, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Car, CheckCircle2, CircleAlert, Info, KeyRound, PiggyBank, Plus, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { Link } from 'react-router';
 import { Page } from '@/components/layout/AppShell';
 import { Thumb } from '@/components/images';
@@ -42,8 +42,18 @@ export function Dashboard() {
         <div className="space-y-5">
           {isAdmin && data.finance ? (
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Stat label="Doanh thu tháng" value={fmtVnd(data.finance.revenue)} sub={`${data.finance.rentals} lượt thuê`} icon={Wallet} tone="blue" />
-              <Stat label="Đã thu tháng" value={fmtVnd(data.finance.received)} icon={CheckCircle2} tone="green" />
+              <Link to="/cashflow" className="block rounded-2xl transition-shadow hover:shadow-pop [&>*]:h-full">
+                <Stat label="Doanh thu tháng" value={fmtVnd(data.finance.revenue)} sub={`${data.finance.rentals} lượt thuê`} icon={Wallet} tone="blue" />
+              </Link>
+              <Link to="/cashflow" className="block rounded-2xl transition-shadow hover:shadow-pop [&>*]:h-full">
+                <Stat
+                  label="Lãi tháng"
+                  value={<span className={data.finance.profit < 0 ? 'text-red-600 dark:text-red-400' : undefined}>{fmtVnd(data.finance.profit)}</span>}
+                  sub={`Đã thu ${fmtVnd(data.finance.income)} · chi ${fmtVnd(data.finance.expense)}`}
+                  icon={data.finance.profit < 0 ? TrendingDown : TrendingUp}
+                  tone={data.finance.profit < 0 ? 'red' : 'green'}
+                />
+              </Link>
               <Stat label="Cọc đang giữ" value={fmtVnd(data.finance.depositsHeld)} sub="Tiền của khách" icon={PiggyBank} tone="amber" />
               <Stat label="Đang cho thuê" value={`${data.counts.active ?? 0}/${data.vehicles.length} xe`} sub={`${data.counts.booked ?? 0} lượt đã đặt`} icon={KeyRound} tone="violet" />
             </div>

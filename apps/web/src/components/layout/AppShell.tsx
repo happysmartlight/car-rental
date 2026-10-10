@@ -8,6 +8,7 @@ import {
   Monitor,
   Moon,
   Plus,
+  Receipt,
   ScanLine,
   Search,
   Settings,
@@ -15,6 +16,7 @@ import {
   Sun,
   UserPlus,
   Users,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -24,6 +26,7 @@ import { api } from '@/lib/api';
 import { useAuth, useTheme, type Theme } from '@/lib/hooks';
 import { bootVersion } from '@/lib/pwa';
 import { cn, initials } from '@/lib/utils';
+import { CashEntryDialog, type CashDialogState } from '../CashEntryDialog';
 import { Dialog } from '../ui/dialog';
 import { Menu, MenuItem, MenuSeparator } from '../ui/misc';
 import { CommandPalette, useCommandPalette } from './CommandPalette';
@@ -43,13 +46,15 @@ const NAV: NavItem[] = [
   { to: '/rentals', label: 'Lượt thuê', icon: KeyRound },
   { to: '/customers', label: 'Khách hàng', icon: Users },
   { to: '/vehicles', label: 'Xe', icon: Car },
+  { to: '/cashflow', label: 'Thu chi', icon: Wallet, admin: true },
   { to: '/fines', label: 'Phạt nguội', icon: ShieldAlert },
   { to: '/settings', label: 'Cài đặt', icon: Settings },
 ];
 
-const QUICK = [
+const QUICK: { to: string; label: string; desc: string; icon: LucideIcon }[] = [
   { to: '/rentals/new', label: 'Đặt xe mới', desc: 'Chọn khách, xe, giờ — tự tính giá', icon: KeyRound },
   { to: '/customers/new?scan=1', label: 'Thêm khách bằng CCCD', desc: 'Quét mã QR trên căn cước', icon: ScanLine },
+  { to: '#cash', label: 'Ghi chi phí', desc: 'Xăng, rửa xe, sửa chữa, bến bãi…', icon: Receipt },
   { to: '/fines', label: 'Tra phạt nguội', desc: 'Biển số + giờ vi phạm → ai giữ xe', icon: ShieldAlert },
   { to: '/customers/new', label: 'Thêm khách nhập tay', desc: 'Khi không quét được QR', icon: UserPlus },
 ];
@@ -70,9 +75,11 @@ function useLogout() {
 }
 
 export function AppShell() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
+  const nav = NAV.filter((n) => !n.admin || isAdmin);
   const [theme, setTheme] = useTheme();
   const [quickOpen, setQuickOpen] = useState(false);
+  const [cash, setCash] = useState<CashDialogState | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const palette = useCommandPalette();
   const logout = useLogout();
@@ -102,7 +109,7 @@ export function AppShell() {
           </button>
         </div>
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
@@ -183,7 +190,8 @@ export function AppShell() {
               key={q.to}
               onClick={() => {
                 setQuickOpen(false);
-                navigate(q.to);
+                if (q.to === '#cash') setCash({ mode: 'new' });
+                else navigate(q.to);
               }}
               className="flex w-full items-center gap-3 rounded-2xl border border-border p-3 text-left hover:bg-surface-2"
             >
@@ -201,7 +209,7 @@ export function AppShell() {
 
       <Dialog open={moreOpen} onOpenChange={setMoreOpen} title={user.displayName} description={user.role === 'admin' ? 'Quản trị' : 'Nhân viên'} size="sm">
         <div className="grid grid-cols-3 gap-2">
-          {NAV.slice(3).map((n) => (
+          {nav.slice(3).map((n) => (
             <button
               key={n.to}
               onClick={() => {
@@ -244,6 +252,7 @@ export function AppShell() {
       </Dialog>
 
       <CommandPalette open={palette.open} onOpenChange={palette.setOpen} />
+      <CashEntryDialog state={cash} onClose={() => setCash(null)} />
     </div>
   );
 }

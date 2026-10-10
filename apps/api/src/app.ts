@@ -11,6 +11,7 @@ import { loadSession } from './lib/auth.js';
 import { HttpError, sendError } from './lib/http.js';
 import { accessoryRoutes } from './routes/accessories.js';
 import { authRoutes } from './routes/auth.js';
+import { cashflowRoutes } from './routes/cashflow.js';
 import { customerRoutes } from './routes/customers.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { fileRoutes } from './routes/files.js';
@@ -68,6 +69,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(fineRoutes);
   await app.register(settingsRoutes);
   await app.register(dashboardRoutes);
+  await app.register(cashflowRoutes);
   await app.register(systemRoutes);
 
   // Giao diện web (bản build của apps/web). Đường dẫn lạ → index.html (SPA).

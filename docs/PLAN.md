@@ -12,7 +12,7 @@ Cập nhật: 2026-10-06
 | 0 | Khung repo, Docker, CI → GHCR, updater + trang cập nhật, sao lưu + khôi phục, đăng nhập | ✅ v0.1.0 |
 | 1 | Xe · Khách (QR CCCD) · Đặt xe, tính giá, lái phụ · Lịch xe · Hợp đồng tự động · Giao/nhận · Tiền, cọc, VietQR · Tra phạt nguội | ✅ v0.1.0 |
 | 2 | Hồ sơ phạt nguội + giữ cọc · Nhắc hạn giấy tờ · Telegram · Backup ra ngoài Pi | ✅ v0.1.0 (làm sớm) |
-| 3 | Bảo dưỡng & chi phí · Báo cáo · Excel | ⬜ Một phần (mốc bảo dưỡng + nhắc, tổng quan tháng) |
+| 3 | Bảo dưỡng & chi phí · Báo cáo · Excel | ✅ Phần lớn v0.3.0 (trang Thu chi: chi phí xe/chung, khoản định kỳ, lãi theo xe/tháng, xuất Excel) · ⬜ lịch bảo dưỡng theo hạng mục, nhập Excel |
 | 4 | Chữ ký màn hình ✅ · Lễ Tết ✅ · Danh sách đen ✅ · Phân quyền ✅ · Đổi xe giữa chừng ⬜ · 2FA ⬜ · Bot tra cứu ⬜ | ⬜ Một phần |
 | 5 | Ký gửi · Web Push · Đặt xe công khai · OCR AI · Tự tra phạt nguội | ⬜ |
 | 6 | Xe có tài | ⬜ Để sau |

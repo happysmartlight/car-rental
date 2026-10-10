@@ -39,6 +39,7 @@ const VehiclesList = lazy(() => import('./pages/vehicles/VehiclesList'));
 const VehicleEdit = lazy(() => import('./pages/vehicles/VehicleEdit'));
 const VehicleDetail = lazy(() => import('./pages/vehicles/VehicleDetail'));
 const Fines = lazy(() => import('./pages/Fines'));
+const Cashflow = lazy(() => import('./pages/cashflow/Cashflow'));
 const Settings = lazy(() => import('./pages/settings/Settings'));
 
 export function App() {
@@ -85,6 +86,7 @@ export function App() {
             <Route path="vehicles/:id" element={<VehicleDetail />} />
             <Route path="vehicles/:id/edit" element={<VehicleEdit />} />
             <Route path="fines" element={<Fines />} />
+            <Route path="cashflow" element={<Cashflow />} />
             <Route path="settings/*" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

@@ -24,6 +24,7 @@ import type {
   Transmission,
 } from '../shared/constants.js';
 import type { IdCardType } from '../shared/cccd.js';
+import type { CashCategory, CashDirection, CashMethod } from '../shared/cashflow.js';
 import type { PaymentDirection, PaymentPurpose } from '../shared/money.js';
 
 const createdAt = () => integer('created_at').notNull();
@@ -463,6 +464,65 @@ export const trafficFines = sqliteTable(
   (t) => [index('fines_plate_idx').on(t.plateKey, t.violatedAt), index('fines_customer_idx').on(t.customerId)],
 );
 
+/**
+ * Sổ thu chi ngoài lượt thuê: chi phí xe, chi phí chung (bến bãi, lương…), thu khác.
+ * Tiền thuê KHÔNG ghi ở đây — lấy từ bảng payments. Không xóa: hủy phiếu bằng voidedAt.
+ */
+export const cashEntries = sqliteTable(
+  'cash_entries',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    direction: text('direction').$type<CashDirection>().notNull(),
+    category: text('category').$type<CashCategory>().notNull(),
+    amount: integer('amount').notNull(),
+    /** Ngày chi/thu. */
+    at: integer('at').notNull(),
+    /** null = chi phí chung của cửa hàng. */
+    vehicleId: integer('vehicle_id'),
+    method: text('method').$type<CashMethod>().notNull().default('cash'),
+    description: text('description'),
+    /** Nơi chi / người nhận (gara, cây xăng…). */
+    vendor: text('vendor'),
+    /** ODO lúc bảo dưỡng / sửa chữa. */
+    odo: integer('odo'),
+    receiptFileIds: text('receipt_file_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** Khoản tự ghi từ khoản định kỳ nào, cho kỳ nào ("YYYY-MM"). */
+    recurringId: integer('recurring_id'),
+    period: text('period'),
+    createdBy: integer('created_by'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    voidedAt: integer('voided_at'),
+    voidReason: text('void_reason'),
+  },
+  (t) => [
+    index('cash_entries_at_idx').on(t.at),
+    index('cash_entries_vehicle_idx').on(t.vehicleId, t.at),
+    uniqueIndex('cash_entries_recurring_uq').on(t.recurringId, t.period),
+  ],
+);
+
+/** Khoản thu chi định kỳ (bến bãi, lương, trả góp, bảo hiểm năm…): app tự ghi vào sổ khi đến kỳ. */
+export const recurringCosts = sqliteTable('recurring_costs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  category: text('category').$type<CashCategory>().notNull(),
+  amount: integer('amount').notNull(),
+  vehicleId: integer('vehicle_id'),
+  method: text('method').$type<CashMethod>().notNull().default('cash'),
+  description: text('description'),
+  vendor: text('vendor'),
+  dayOfMonth: integer('day_of_month').notNull().default(1),
+  intervalMonths: integer('interval_months').notNull().default(1),
+  /** Kỳ đầu tiên "YYYY-MM". */
+  startMonth: text('start_month').notNull(),
+  /** Kỳ cuối (null = không hạn). */
+  endMonth: text('end_month'),
+  active: integer('active', { mode: 'boolean' }).notNull().default(true),
+  createdBy: integer('created_by'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
 /** Bộ đếm số hợp đồng theo năm: "rental-2026" → 17. */
 export const sequences = sqliteTable('sequences', {
   name: text('name').primaryKey(),
@@ -492,3 +552,5 @@ export type DocumentRow = typeof documents.$inferSelect;
 export type TrafficFine = typeof trafficFines.$inferSelect;
 export type FileRow = typeof files.$inferSelect;
 export type AuditRow = typeof auditLog.$inferSelect;
+export type CashEntry = typeof cashEntries.$inferSelect;
+export type RecurringCost = typeof recurringCosts.$inferSelect;

@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Car, ChevronDown, Clock, ExternalLink, MessageCircle, Phone, Plus, Search, ShieldAlert, UserRound, Wrench } from 'lucide-react';
+import { AlertTriangle, Car, ChevronDown, Clock, ExternalLink, MessageCircle, Phone, Plus, Receipt, Search, ShieldAlert, UserRound, Wrench } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
+import { CashEntryDialog, type CashDialogState } from '@/components/CashEntryDialog';
 import { Page } from '@/components/layout/AppShell';
 import { FineStatusBadge, Money } from '@/components/common';
 import { PhotoInput } from '@/components/images';
@@ -150,6 +151,7 @@ export default function Fines() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'open' | 'all'>('open');
   const [form, setForm] = useState<FineForm | null>(null);
+  const [cash, setCash] = useState<CashDialogState | null>(null);
   const [timeOpen, setTimeOpen] = useState(false);
 
   const { data: vehicles } = useQuery({ queryKey: ['vehicles'], queryFn: () => api.get<VehicleWithStatus[]>('/api/vehicles') });
@@ -287,7 +289,22 @@ export default function Fines() {
         </Card>
       </div>
 
-      <FineDialog form={form} onClose={() => setForm(null)} vehicles={vehicles ?? []} />
+      <FineDialog
+        form={form}
+        onClose={() => setForm(null)}
+        vehicles={vehicles ?? []}
+        onExpense={(x) => {
+          setForm(null);
+          setCash({
+            mode: 'new',
+            category: 'fine',
+            vehicleId: vehicles?.find((v) => plateKey(v.plate) === plateKey(x.plate))?.id ?? null,
+            amount: x.amount,
+            description: `Nộp phạt ${x.plate}${x.violation ? ` · ${x.violation}` : ''}${x.violatedAt ? ` (${fmtDateTime(x.violatedAt)})` : ''}`,
+          });
+        }}
+      />
+      <CashEntryDialog state={cash} onClose={() => setCash(null)} />
     </Page>
   );
 }
@@ -390,7 +407,7 @@ function HolderPanel({ plate, at, rentalId, onPick, autoPick }: { plate: string;
   );
 }
 
-function FineDialog({ form, onClose, vehicles }: { form: FineForm | null; onClose: () => void; vehicles: VehicleWithStatus[] }) {
+function FineDialog({ form, onClose, vehicles, onExpense }: { form: FineForm | null; onClose: () => void; vehicles: VehicleWithStatus[]; onExpense: (f: FineForm) => void }) {
   const [f, setF] = useState<FineForm | null>(form);
   const [otherPlate, setOtherPlate] = useState(false);
   const [touched, setTouched] = useState(false);
@@ -433,9 +450,16 @@ function FineDialog({ form, onClose, vehicles }: { form: FineForm | null; onClos
       description={!f.id ? 'Chọn xe và giờ vi phạm — app tra ngay ai đang giữ xe lúc đó' : undefined}
       size="lg"
       footer={
-        <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!plateOk || !f.violatedAt}>
-          Lưu
-        </Button>
+        <>
+          {f.id && (
+            <Button variant="outline" className="mr-auto" onClick={() => onExpense(f)}>
+              <Receipt /> Ghi chi nộp phạt
+            </Button>
+          )}
+          <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!plateOk || !f.violatedAt}>
+            Lưu
+          </Button>
+        </>
       }
     >
       <div className="space-y-4">

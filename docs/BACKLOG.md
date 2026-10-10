@@ -1,6 +1,6 @@
 # Việc còn treo
 
-Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 2026-10-06.
+Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 2026-10-10.
 
 ## Câu hỏi chưa trả lời (từ PLAN mục 10)
 
@@ -25,8 +25,10 @@ Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 
 
 ### Phase 2–3
 - [ ] Đổi xe giữa chừng (dữ liệu `rental_segments` đã sẵn, thiếu giao diện + API).
-- [ ] Chi phí xe (sửa chữa, xăng, rửa xe…), lịch bảo dưỡng đầy đủ — hiện mới có mốc bảo dưỡng km/ngày + nhắc.
-- [ ] Báo cáo doanh thu / lợi nhuận theo xe, theo tháng; biểu đồ; xuất Excel. Nhập Excel dữ liệu khách/xe cũ.
+- [x] Chi phí xe, chi phí chung, khoản định kỳ; báo cáo thu chi / lãi theo xe, theo tháng; biểu đồ; xuất Excel — trang Thu chi (v0.3.0).
+- [ ] Lịch bảo dưỡng đầy đủ theo hạng mục (dầu, lốp, má phanh… mỗi thứ một chu kỳ km/tháng) — hiện có một mốc bảo dưỡng km/ngày + nhắc, ghi chi phí bảo dưỡng thì đặt được mốc mới.
+- [ ] Nhập Excel dữ liệu khách/xe cũ. Báo cáo top khách.
+- [ ] Ghi chi phí từ Telegram (gửi ảnh hóa đơn + số tiền).
 - [ ] Biên bản nhận xe in SAU khi quyết toán: số liệu quyết toán đang là gợi ý tính lại, nên lấy từ các phiếu đã ghi.
 
 ### Ý tưởng thêm
@@ -41,7 +43,7 @@ Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 
 - [ ] Kênh cập nhật thử nghiệm (beta) — hiện chỉ theo bản phát hành chính thức.
 
 ### Phase 5
-- [ ] Chủ xe ký gửi: đối soát chia doanh thu theo tháng (đã có trường % ở xe).
+- [ ] Chủ xe ký gửi: đối soát chia doanh thu theo tháng (đã có trường % ở xe; tiền trả chủ xe ghi được bằng hạng mục "Trả chủ xe ký gửi" trong Thu chi).
 - [ ] Web Push (thông báo trên iPhone không qua Telegram).
 - [ ] Trang đặt xe công khai (cần mở ra Internet: Cloudflare Tunnel / Tailscale Funnel).
 - [ ] OCR GPLX bằng AI (Gemini) — chỉ khi bạn đồng ý gửi ảnh ra ngoài.

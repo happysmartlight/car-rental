@@ -26,6 +26,10 @@
   --ring: #2563eb55;
   --shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.06);
   --shadow-lg: 0 12px 32px -8px rgb(16 24 40 / 0.18), 0 4px 8px -4px rgb(16 24 40 / 0.08);
+  /* Biểu đồ thu chi: thu / chi / lãi (đã kiểm tra phân biệt được với người mù màu, cả sáng lẫn tối). */
+  --chart-in: #2a78d6;
+  --chart-out: #eb6834;
+  --chart-profit: #1baf7a;
   color-scheme: light;
 }
 
@@ -49,6 +53,9 @@
   --ring: #4f8dfd55;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
   --shadow-lg: 0 16px 40px -8px rgb(0 0 0 / 0.6);
+  --chart-in: #3987e5;
+  --chart-out: #d95926;
+  --chart-profit: #199e70;
   color-scheme: dark;
 }
 
@@ -70,6 +77,9 @@
   --color-brand-soft: var(--brand-soft);
   --color-brand-fg: var(--brand-fg);
   --color-ring: var(--ring);
+  --color-chart-in: var(--chart-in);
+  --color-chart-out: var(--chart-out);
+  --color-chart-profit: var(--chart-profit);
   --shadow-card: var(--shadow);
   --shadow-pop: var(--shadow-lg);
 }

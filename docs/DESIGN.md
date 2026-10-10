@@ -18,6 +18,7 @@ cho nền/chữ/viền:
 | `bg-brand`, `text-brand`, `bg-brand-soft` | Màu nhấn (xanh dương), mục đang chọn |
 | `bg-popover` | Lớp nổi: menu, danh sách xổ xuống, ô tìm nhanh (giao diện tối sáng hơn thẻ phía sau) |
 | `bg-hover` | Dòng đang trỏ/chọn trong menu và danh sách |
+| `bg-chart-in` / `bg-chart-out` / `bg-chart-profit` | Biểu đồ thu chi: thu (xanh) / chi (cam) / lãi (xanh ngọc). Trong SVG dùng `var(--chart-in)`… Đã kiểm tra phân biệt được với người mù màu, cả sáng lẫn tối |
 
 Ô chọn `<select>` dùng component `Select` (class `select-chevron` vẽ mũi tên). Không viết `bg-[…]` tùy ý cạnh `bg-surface`
 — tailwind-merge sẽ xóa mất màu nền. Danh sách lựa chọn bên trong lấy màu `--popover` từ CSS gốc.
@@ -39,7 +40,8 @@ Theme: sáng / tối / theo máy, lưu `localStorage.theme`, áp trước khi Re
 `InfoRow`, `Stat`, `Empty`, `Dialog` (điện thoại = bottom sheet, máy tính = giữa màn hình), `useConfirm()`,
 `Menu`. Form: `Field`, `Input`, `Select` (native — đẹp trên iOS), `MoneyInput` (tự nhóm nghìn), `NumberInput`,
 `DateTimeInput`, `DateInput`, `Checkbox`, `Switch`, `Segmented`.
-Ảnh: `PhotoInput` (nén trên máy trước khi gửi, đóng dấu giờ), `Gallery`. Khác: `VietQr`, `SignaturePad`, `FuelGauge`, `CccdScanner`.
+Ảnh: `PhotoInput` (nén trên máy trước khi gửi, đóng dấu giờ), `Gallery`. Khác: `VietQr`, `SignaturePad`, `FuelGauge`, `CccdScanner`,
+`CashEntryDialog` (ghi khoản thu chi / khoản định kỳ — dùng lại ở mọi nơi cần ghi chi phí).
 
 ## Bố cục
 

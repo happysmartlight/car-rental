@@ -3,6 +3,33 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.3.0] - 2026-10-10
+
+### Mới
+- **Trang Thu chi** (menu **Thu chi**, chỉ quản trị) — tiền vào, tiền ra và lãi của từng xe và cả cửa hàng, xem theo tháng hoặc theo năm:
+  - 4 con số chính: **Tổng thu** (tiền thuê khách đã trả + thu khác), **Chi vận hành**, **Lãi vận hành**, **Dòng tiền ròng** (sau mua xe, trả góp). Kèm **khách còn nợ**, **sắp thu** và **cọc đang giữ**.
+  - **Biểu đồ 12 tháng** thu – chi – lãi: chạm vào một tháng để xem số, bấm để mở tháng đó. Nút **Xem bảng** để xem dạng bảng số.
+  - **Theo xe**: lãi/lỗ, số lượt thuê, % thời gian có khách của từng xe. Bật **Chia chi phí chung** để chia đều tiền bến bãi, lương… cho các xe khi so xe nào lời, xe nào lỗ. Bấm vào một xe để xem riêng xe đó, kèm các lượt thuê và khoản khách còn nợ.
+  - **Theo hạng mục**: tiền đi đâu nhiều nhất (lương, bến bãi, sửa chữa…). Bấm vào hạng mục để lọc sổ.
+  - **Sổ thu chi**: mọi khoản tiền thuê và chi phí theo từng ngày, lọc thu/chi và hạng mục.
+  - **Xuất Excel**: tổng hợp theo xe, sổ thu chi, theo hạng mục, theo tháng — gửi kế toán hoặc lưu trữ.
+- **Ghi chi phí** — nút **+ → Ghi chi phí** (nhân viên cũng dùng được, ví dụ đổ xăng, rửa xe), nút **Ghi khoản** trên trang Thu chi, hoặc **⋯ → Ghi chi phí cho xe** trong trang xe:
+  - Hơn 20 hạng mục: xăng/sạc, rửa xe, bến bãi, phí cầu đường, đi lại giao xe, bảo dưỡng, sửa chữa, lốp – ắc quy, phụ kiện, đăng kiểm, bảo hiểm, phạt nguội, lương, mặt bằng, quảng cáo, thuế, trả chủ xe ký gửi, trả góp, mua xe… và khoản thu khác (bảo hiểm bồi thường, bán xe, thanh lý).
+  - Gắn với một xe, hoặc để **Chung** cho chi phí của cả cửa hàng.
+  - Chụp **ảnh hóa đơn**, ghi nơi chi, ODO lúc bảo dưỡng / sửa chữa.
+  - Ghi chi phí **đăng kiểm, bảo hiểm, phí đường bộ, bảo dưỡng** thì cập nhật luôn hạn mới cho xe (nút nhanh +12 tháng, +1 năm, +10.000 km…) — app thôi nhắc hạn cũ.
+  - Ghi nhầm: bấm vào khoản đó → **Hủy phiếu**. Phiếu hủy vẫn lưu để đối chiếu, không tính vào tổng.
+- **Khoản định kỳ** — bến bãi, lương, trả góp, internet, bảo hiểm năm… nhập một lần (hằng tháng, 3 tháng, 6 tháng hoặc hằng năm), app tự ghi vào sổ khi đến ngày. Chọn ngày bắt đầu trong quá khứ thì app ghi bù các kỳ đã qua. Sửa số tiền hoặc tạm ngưng bất cứ lúc nào.
+- **Trang xe**: thẻ **Thu chi năm nay** — thu, chi, lãi của riêng xe đó và vài khoản gần nhất.
+- **Phạt nguội**: nút **Ghi chi nộp phạt** trong hồ sơ vi phạm, điền sẵn xe, số tiền, nội dung.
+
+### Cải tiến
+- **Tổng quan**: thẻ "Đã thu tháng" đổi thành **Lãi tháng** (đã thu − chi trong tháng). Bấm vào thẻ Doanh thu / Lãi để mở trang Thu chi. Số đã thu nay tính cả phần cọc cấn trừ sang tiền thuê và phí hủy giữ lại (trước đây bị sót).
+
+### Cách tính
+- Thu chi tính theo **ngày nhận / chi tiền thật**. Cọc đang giữ là tiền của khách, chưa tính là thu. "Doanh thu tháng" ở Tổng quan vẫn là giá trị các lượt nhận xe trong tháng (kể cả phần khách chưa trả), nên có thể khác số thu.
+- Mua xe, trả góp, bán xe tính riêng vào **dòng tiền ròng**, không làm sai lãi vận hành của tháng.
+
 ## [0.2.10] - 2026-10-10
 
 ### Mới

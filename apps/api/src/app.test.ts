@@ -568,3 +568,121 @@ describe('cọc chờ phạt nguội & phụ kiện theo từng lượt', () => 
     expect((await call('PATCH', `/api/rentals/${r.id}`, { vehicleId: other })).json.accessories).toBeNull();
   });
 });
+
+describe('thu chi: chi phí xe, chi phí chung, khoản định kỳ', () => {
+  const H = 3_600_000;
+  let vid = 0;
+  let rid = 0;
+  const day = (s: string) => at(`${s}T10:00`);
+  const entry = (body: object, cookie = adminCookie) => call('POST', '/api/cash-entries', body, cookie);
+  const report = async (p: string, v = 'all') => {
+    const r = await call('GET', `/api/cashflow?p=${p}&v=${v}`);
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    return r.json;
+  };
+
+  it('chuẩn bị xe + lượt thuê có tiền thuê trả vào tháng 03/2025', async () => {
+    vid = (await call('POST', '/api/vehicles', { plate: '51A-246.81', make: 'Toyota', model: 'Veloz', priceDay: 900000, odo: 5000, inspectionExpiry: '2025-03-30' })).json.id;
+    const cust = (await call('POST', '/api/customers', { fullName: 'Lý Thu Chi', idNumber: '079099000123' })).json.id;
+    const start = Date.now() + 200 * 24 * H;
+    rid = (await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, scheduledStart: start, scheduledEnd: start + 48 * H, depositRequired: 2000000 })).json.id;
+    for (const p of [
+      { direction: 'in', purpose: 'rent', method: 'transfer', amount: 1000000, at: day('2025-03-10') },
+      { direction: 'in', purpose: 'deposit', method: 'transfer', amount: 2000000, at: day('2025-03-10') },
+      { direction: 'out', purpose: 'rent', method: 'cash', amount: 200000, at: day('2025-03-12') },
+      { direction: 'offset', purpose: 'deposit', method: 'offset', amount: 300000, at: day('2025-03-14') },
+    ]) {
+      expect((await call('POST', `/api/rentals/${rid}/payments`, p)).status).toBe(200);
+    }
+  });
+
+  it('nhân viên ghi được khoản chi, không xem được báo cáo, không ghi thu', async () => {
+    expect((await call('GET', '/api/cashflow', undefined, staffCookie)).status).toBe(403);
+    const ok = await entry({ category: 'cleaning', amount: 80000, at: Date.now(), vehicleId: vid, description: 'Rửa xe' }, staffCookie);
+    expect(ok.status, JSON.stringify(ok.json)).toBe(200);
+    expect(ok.json.entry.direction).toBe('out');
+    expect((await entry({ category: 'other_income', amount: 50000, at: Date.now() }, staffCookie)).status).toBe(403);
+    expect((await entry({ category: 'inspection', amount: 50000, at: Date.now(), vehicleId: vid, renewal: { inspectionExpiry: '2026-03-30' } }, staffCookie)).status).toBe(403);
+    expect((await entry({ category: 'fuel', amount: 0, at: Date.now() })).status).toBe(400);
+  });
+
+  it('ghi chi phí theo xe, chi phí chung, thu khác, vốn; đăng kiểm gia hạn luôn cho xe', async () => {
+    for (const b of [
+      { category: 'fuel', amount: 500000, at: day('2025-03-02'), vehicleId: vid },
+      { category: 'parking', amount: 3000000, at: day('2025-03-01'), vehicleId: null, description: 'Bãi xe tháng 3' },
+      { category: 'insurance_claim', amount: 2000000, at: day('2025-03-20'), vehicleId: vid },
+      { category: 'loan', amount: 5000000, at: day('2025-03-15'), vehicleId: vid },
+    ]) {
+      expect((await entry(b)).status).toBe(200);
+    }
+    const insp = await entry({ category: 'inspection', amount: 300000, at: day('2025-03-25'), vehicleId: vid, renewal: { inspectionExpiry: '2026-03-30', insuranceBodyExpiry: null } });
+    expect(insp.json.renewed).toEqual({ inspectionExpiry: '2026-03-30' });
+    expect((await call('GET', `/api/vehicles/${vid}`)).json.vehicle.inspectionExpiry).toBe('2026-03-30');
+    // Phiếu ghi nhầm: hủy (không xóa), không còn tính vào tổng.
+    const wrong = (await entry({ category: 'repair', amount: 9000000, at: day('2025-03-05'), vehicleId: vid })).json.entry;
+    expect((await call('POST', `/api/cash-entries/${wrong.id}/void`, { reason: 'x' })).status).toBe(400);
+    expect((await call('POST', `/api/cash-entries/${wrong.id}/void`, { reason: 'Ghi nhầm xe' })).json.voidedAt).toBeTruthy();
+    expect((await call('PUT', `/api/cash-entries/${wrong.id}`, { category: 'repair', amount: 1, at: day('2025-03-05') })).status).toBe(400);
+  });
+
+  it('khoản định kỳ: tự ghi đủ các kỳ đã qua, chạy lại không trùng', async () => {
+    const body = { category: 'parking', amount: 3000000, vehicleId: null, dayOfMonth: 5, intervalMonths: 1, startMonth: '2025-01', endMonth: '2025-03', description: 'Bãi đậu xe' };
+    expect((await call('POST', '/api/recurring-costs', { ...body, endMonth: '2024-12' })).status).toBe(400);
+    const r = await call('POST', '/api/recurring-costs', body);
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(r.json.created).toBe(3);
+    const again = await call('PUT', `/api/recurring-costs/${r.json.recurring.id}`, { ...body, amount: 3500000 });
+    expect(again.json.created).toBe(0);
+    const list = (await call('GET', '/api/recurring-costs')).json;
+    expect(list.find((x: any) => x.id === r.json.recurring.id)).toMatchObject({ amount: 3500000, plate: null });
+  });
+
+  it('báo cáo tháng: tiền thuê thực nhận (trừ hoàn, cộng cọc cấn trừ), lãi vận hành tách vốn', async () => {
+    const r = await report('2025-03');
+    // 1.000.000 − 200.000 + 300.000 cấn trừ; cọc 2.000.000 không tính là thu.
+    expect(r.totals).toMatchObject({ rent: 1100000, otherIncome: 2000000, income: 3100000, expense: 6800000, profit: -3700000, capitalOut: 5000000, net: -8700000 });
+    const car = r.vehicles.find((v: any) => v.vehicleId === vid);
+    expect(car).toMatchObject({ rent: 1100000, otherIncome: 2000000, expense: 800000, capitalOut: 5000000 });
+    expect(r.shared).toMatchObject({ expense: 6000000 });
+    expect(r.categories.find((c: any) => c.category === 'parking')).toMatchObject({ amount: 6000000, count: 2 });
+    expect(r.trend.map((m: any) => m.key)).toEqual(['2024-04', '2024-05', '2024-06', '2024-07', '2024-08', '2024-09', '2024-10', '2024-11', '2024-12', '2025-01', '2025-02', '2025-03']);
+    expect(r.trend.slice(-3).map((m: any) => m.expense)).toEqual([3000000, 3000000, 6800000]);
+    expect(r.ledger.filter((l: any) => l.kind === 'entry' && l.entry.voidedAt)).toHaveLength(1);
+    expect(r.ledger.filter((l: any) => l.kind === 'rent').map((l: any) => [l.direction, l.amount])).toEqual([
+      ['in', 300000],
+      ['out', 200000],
+      ['in', 1000000],
+    ]);
+  });
+
+  it('báo cáo năm, theo một xe, chỉ chi phí chung', async () => {
+    expect((await report('2025')).totals.expense).toBe(12800000);
+    const one = await report('2025-03', String(vid));
+    expect(one.totals).toMatchObject({ rent: 1100000, expense: 800000 });
+    expect(one.allocation.sharedExpense).toBe(6000000);
+    expect(one.vehicles).toEqual([]);
+    expect(one.ledger.every((l: any) => l.plate === '51A-246.81')).toBe(true);
+    const shared = await report('2025-03', 'shared');
+    expect(shared.totals).toMatchObject({ rent: 0, expense: 6000000 });
+    expect((await call('GET', '/api/cashflow?p=2025-13')).status).toBe(400);
+    expect((await call('GET', '/api/cashflow?p=2025-03&v=abc')).status).toBe(400);
+  });
+
+  it('xuất Excel đủ các trang', async () => {
+    const r = await call('GET', '/api/cashflow/export?p=2025-03');
+    expect(r.status).toBe(200);
+    expect(r.res.headers['content-type']).toContain('spreadsheetml');
+    const zip = new PizZip(r.res.rawPayload);
+    const wb = zip.file('xl/workbook.xml')!.asText();
+    for (const name of ['Tổng hợp theo xe', 'Sổ thu chi', 'Theo hạng mục', 'Theo tháng']) expect(wb).toContain(name);
+    expect(zip.file('xl/worksheets/sheet2.xml')!.asText()).toContain('Bãi xe tháng 3');
+    const one = await call('GET', `/api/cashflow/export?p=2025-03&v=${vid}`);
+    expect(one.res.headers['content-disposition']).toContain('51A24681');
+  });
+
+  it('trang tổng quan: lãi tháng = thu − chi của tháng hiện tại', async () => {
+    const f = (await call('GET', '/api/dashboard')).json.finance;
+    expect(f.profit).toBe(f.income - f.expense);
+    expect(f.expense).toBeGreaterThanOrEqual(80000);
+  });
+});

@@ -22,6 +22,20 @@ import { CAR_MAKES, findCarMake, findCarModel } from './carModels.js';
 import { suggestBookingSlot } from './booking.js';
 import { buildRentalShare, rentalShareStages, rentalShareText, type RentalShareInput } from './rentalShare.js';
 import { addMonthsVn, fmtDateTime, msToVnLocalInput, vnDateLong, vnLocalInputToMs } from './time.js';
+import {
+  CASH_CATEGORY,
+  dueRecurringMonths,
+  fmtCompactVnd,
+  groupedCategories,
+  monthKeyOf,
+  nextRecurringDate,
+  parsePeriod,
+  recurringDate,
+  recurringText,
+  shiftPeriod,
+  splitEvenly,
+  switchPeriodKind,
+} from './cashflow.js';
 
 describe('đọc số tiền bằng chữ', () => {
   const cases: [number, string][] = [
@@ -519,5 +533,54 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
     expect(text).toContain('đến 03/01/2027');
     expect(text).not.toContain('Chuyển khoản');
     expect(doc.pay).toBeNull();
+  });
+});
+
+describe('thu chi: kỳ báo cáo, khoản định kỳ, chia chi phí chung', () => {
+  it('kỳ tháng / năm theo giờ VN, 12 tháng biểu đồ', () => {
+    const m = parsePeriod('2026-01')!;
+    expect(m.start).toBe(vnLocalInputToMs('2026-01-01T00:00'));
+    expect(m.end).toBe(vnLocalInputToMs('2026-02-01T00:00'));
+    expect(m.trend[0]).toBe('2025-02');
+    expect(m.trend[11]).toBe('2026-01');
+    const y = parsePeriod('2026')!;
+    expect(y.end).toBe(vnLocalInputToMs('2027-01-01T00:00'));
+    expect(y.trend).toHaveLength(12);
+    expect(parsePeriod('2026-13')).toBeNull();
+    expect(shiftPeriod('2026-01', -1)).toBe('2025-12');
+    expect(shiftPeriod('2026', 1)).toBe('2027');
+    const now = vnLocalInputToMs('2026-10-10T08:00');
+    expect(switchPeriodKind('2026', 'month', now)).toBe('2026-10');
+    expect(switchPeriodKind('2025', 'month', now)).toBe('2025-12');
+    expect(switchPeriodKind('2025-04', 'year', now)).toBe('2025');
+    expect(monthKeyOf(vnLocalInputToMs('2026-10-31T23:30'))).toBe('2026-10');
+  });
+
+  it('khoản định kỳ: đến ngày mới ghi, ngày 31 lùi về cuối tháng, chu kỳ quý / năm', () => {
+    const rule = { startMonth: '2026-01', endMonth: null, intervalMonths: 1, dayOfMonth: 31 };
+    expect(dueRecurringMonths(rule, vnLocalInputToMs('2026-03-30T12:00'))).toEqual(['2026-01', '2026-02']);
+    expect(recurringDate('2026-02', 31)).toBe(vnLocalInputToMs('2026-02-28T09:00'));
+    expect(dueRecurringMonths({ ...rule, dayOfMonth: 5 }, vnLocalInputToMs('2026-03-05T08:59'))).toEqual(['2026-01', '2026-02']);
+    expect(dueRecurringMonths({ ...rule, dayOfMonth: 5 }, vnLocalInputToMs('2026-03-05T09:00'))).toEqual(['2026-01', '2026-02', '2026-03']);
+    expect(dueRecurringMonths({ ...rule, intervalMonths: 3, dayOfMonth: 1 }, vnLocalInputToMs('2026-10-10T00:00'))).toEqual(['2026-01', '2026-04', '2026-07', '2026-10']);
+    expect(dueRecurringMonths({ ...rule, endMonth: '2026-02', dayOfMonth: 1 }, vnLocalInputToMs('2026-10-10T00:00'))).toEqual(['2026-01', '2026-02']);
+    expect(nextRecurringDate({ ...rule, intervalMonths: 12, dayOfMonth: 15 }, vnLocalInputToMs('2026-10-10T00:00'))).toBe(vnLocalInputToMs('2027-01-15T09:00'));
+    expect(nextRecurringDate({ ...rule, endMonth: '2026-02', dayOfMonth: 1 }, vnLocalInputToMs('2026-10-10T00:00'))).toBeNull();
+    expect(recurringText({ intervalMonths: 1, dayOfMonth: 5 })).toBe('Hằng tháng, ngày 5');
+  });
+
+  it('chia đều chi phí chung, tổng luôn khớp', () => {
+    expect(splitEvenly(1000000, 3)).toEqual([333334, 333333, 333333]);
+    expect(splitEvenly(10, 0)).toEqual([]);
+    expect(splitEvenly(-7, 2)).toEqual([-4, -3]);
+  });
+
+  it('hạng mục: chiều thu/chi, nhóm vốn, số gọn cho trục biểu đồ', () => {
+    expect(CASH_CATEGORY.loan).toMatchObject({ dir: 'out', capital: true });
+    expect(CASH_CATEGORY.insurance_claim.dir).toBe('in');
+    expect(groupedCategories('in').flatMap((g) => g.items)).toEqual(['insurance_claim', 'other_income', 'asset_sale']);
+    expect(fmtCompactVnd(12_500_000)).toBe('12,5tr');
+    expect(fmtCompactVnd(950_000)).toBe('950k');
+    expect(fmtCompactVnd(-1_200_000_000)).toBe('−1,2 tỷ');
   });
 });

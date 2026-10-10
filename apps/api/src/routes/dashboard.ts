@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import { parse, requireRole } from '../lib/http.js';
 import { computeAlerts } from '../services/alerts.js';
+import { cashTotals, materializeRecurring } from '../services/cashflow.js';
 import { occupiedRange } from '../services/rentals.js';
 import { plateKey, unaccent } from '../shared/text.js';
 import { DAY_MS, VN_OFFSET_MS, vnParts } from '../shared/time.js';
@@ -65,12 +66,9 @@ export async function dashboardRoutes(app: FastifyInstance) {
           .from(schema.charges)
           .where(and(eq(schema.charges.kind, 'cancel_fee'), gte(schema.charges.createdAt, start), lt(schema.charges.createdAt, end)))
           .get()?.total ?? 0);
-      const pays = db
-        .select()
-        .from(schema.payments)
-        .where(and(isNull(schema.payments.voidedAt), eq(schema.payments.purpose, 'rent'), gte(schema.payments.at, start), lt(schema.payments.at, end)))
-        .all();
-      const received = pays.reduce((s, p) => s + (p.direction === 'in' ? p.amount : p.direction === 'out' ? -p.amount : 0), 0);
+      // Thu chi thực tế trong tháng (cùng cách tính với trang Thu chi): tiền thuê đã nhận, kể cả phần cọc cấn trừ.
+      materializeRecurring(now);
+      const cash = cashTotals(start, end);
       const depositsHeld =
         db
           .select({
@@ -95,7 +93,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
           }, 0);
         return { vehicleId: v.id, plate: v.plate, pct: Math.round((used / span) * 100) };
       });
-      finance = { monthStart: start, revenue, received, depositsHeld, rentals: monthRentals.length, utilization };
+      finance = { monthStart: start, revenue, received: cash.rent, income: cash.income, expense: cash.expense, profit: cash.profit, depositsHeld, rentals: monthRentals.length, utilization };
     }
 
     return {

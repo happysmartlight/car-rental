@@ -1,14 +1,18 @@
 // Dữ liệu mẫu để thử app / chụp ảnh màn hình. KHÔNG chạy trên máy thật đang dùng.
 //   DATA_DIR=./data-demo npx tsx scripts/seed-demo.ts
 //
-// Tạo: tài khoản admin/demo12345 + nv1/demo12345, 5 xe, 8 khách, các lượt thuê ở đủ trạng thái.
+// Tạo: tài khoản admin/demo12345 + nv1/demo12345, 5 xe, 8 khách, các lượt thuê ở đủ trạng thái,
+// lịch sử 6 tháng (lượt đã xong, chi phí xe, chi phí chung, khoản định kỳ) cho trang Thu chi.
 
+import { and, eq, ne } from 'drizzle-orm';
 import { closeDb, db, openDb, schema } from '../src/db/index.js';
 import { hashPassword } from '../src/lib/auth.js';
 import { setSetting, getSetting } from '../src/lib/settings.js';
 import { addAccessories, ensureAccessoryCatalog, handoverAccessoryTemplate } from '../src/services/accessories.js';
 import { ensureBuiltinTemplates } from '../src/services/documents.js';
-import { cancelRental, createRental, pickup, returnVehicle, settle } from '../src/services/rentals.js';
+import { createEntry, createRecurring } from '../src/services/cashflow.js';
+import { cancelRental, createRental, pickup, rentalMoney, returnVehicle, settle } from '../src/services/rentals.js';
+import { addMonthKey, monthKeyOf, type CashCategory } from '../src/shared/cashflow.js';
 import { DAY_MS, HOUR_MS, vnStartOfDay } from '../src/shared/time.js';
 import { plateKey } from '../src/shared/text.js';
 
@@ -127,6 +131,39 @@ for (const [fullName, idNumber, phone, dob, gender] of people) {
 const base = { pickupMethod: 'at_shop' as const, pickupLocation: null, returnLocation: null, deliveryFee: 0, discount: 0, discountNote: null, driverIds: [], notes: null, collaterals: [], allowConflict: true, allowBlacklisted: true };
 const ho = (t: number, odo: number, vehicleId = 0) => ({ at: t, odo, fuelLevel: 100, checklist: {}, photos: [], damages: [], accessories: vehicleId ? handoverAccessoryTemplate(vehicleId) : [], notes: null, signatureFileId: null });
 
+// ── Lịch sử 6 tháng: lượt đã xong (tiền trả đúng ngày) để trang Thu chi có số liệu ──
+let seed = 7;
+const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+const between = (a: number, b: number) => a + Math.floor(rnd() * (b - a + 1));
+const regulars = customerIds.filter((_, i) => i !== 5);
+const histStart = today - 180 * DAY_MS;
+const histEnd = today - 14 * DAY_MS;
+cars.forEach((car, ci) => {
+  const vid = vehicleIds[ci];
+  let odo = car.odo - 9000;
+  db.update(schema.vehicles).set({ odo }).where(eq(schema.vehicles.id, vid)).run();
+  let cursor = histStart + between(0, 3) * DAY_MS;
+  for (;;) {
+    const start = cursor + between(1, 4) * DAY_MS + 8 * HOUR_MS;
+    const days = between(1, 3);
+    const end = start + days * DAY_MS;
+    if (end > histEnd) break;
+    const r = createRental({ ...base, customerId: regulars[between(0, regulars.length - 1)], vehicleId: vid, scheduledStart: start, scheduledEnd: end, depositRequired: 5000000, payments: [{ purpose: 'deposit', method: 'transfer', amount: 5000000 }] }, admin.id);
+    const total = rentalMoney(r.id).totalCharges;
+    pickup(r.id, { ...ho(start + 0.2 * HOUR_MS, odo, vid), payments: [{ purpose: 'rent', method: rnd() < 0.6 ? 'transfer' : 'cash', amount: total }], collaterals: [] }, admin.id);
+    odo = Math.min(odo + between(120, 300) * days, car.odo - 100);
+    const extra = rnd();
+    const charges = extra < 0.15 ? [{ kind: 'cleaning' as const, description: 'Vệ sinh xe (xe bẩn)', amount: 150000 }] : extra < 0.27 ? [{ kind: 'over_time' as const, description: 'Trả xe trễ 1 giờ', amount: Math.round(car.priceDay / 8 / 1000) * 1000 }] : [];
+    returnVehicle(r.id, { ...ho(end, odo, vid), charges }, admin.id);
+    const due = rentalMoney(r.id).due;
+    settle(r.id, { collect: null, refundRent: null, offset: due, refundDeposit: { amount: 5000000 - due, method: 'transfer' }, fineHoldDays: 15, returnCollaterals: true, note: null }, admin.id);
+    db.update(schema.payments).set({ at: start }).where(and(eq(schema.payments.rentalId, r.id), eq(schema.payments.direction, 'in'))).run();
+    db.update(schema.payments).set({ at: end + HOUR_MS }).where(and(eq(schema.payments.rentalId, r.id), ne(schema.payments.direction, 'in'))).run();
+    cursor = vnStartOfDay(end);
+  }
+  db.update(schema.vehicles).set({ odo: car.odo }).where(eq(schema.vehicles.id, vid)).run();
+});
+
 // Đã xong, đang giữ cọc phạt nguội
 const r1 = createRental({ ...base, customerId: customerIds[0], vehicleId: vehicleIds[0], scheduledStart: at(-9, 8), scheduledEnd: at(-6, 8), depositRequired: 5000000, payments: [{ purpose: 'deposit', method: 'transfer', amount: 5000000 }, { purpose: 'rent', method: 'cash', amount: 2550000 }] }, admin.id);
 pickup(r1.id, { ...ho(at(-9, 8.2), 31200, vehicleIds[0]), payments: [], collaterals: [] }, admin.id);
@@ -146,7 +183,7 @@ createRental({ ...base, customerId: customerIds[3], vehicleId: vehicleIds[2], sc
 createRental({ ...base, customerId: customerIds[4], vehicleId: vehicleIds[0], scheduledStart: at(2, 8), scheduledEnd: at(4, 8), depositRequired: 5000000, payments: [] }, admin.id);
 createRental({ ...base, customerId: customerIds[6], vehicleId: vehicleIds[4], scheduledStart: at(4, 7), scheduledEnd: at(7, 19), depositRequired: 5000000, payments: [] }, admin.id);
 const rc = createRental({ ...base, customerId: customerIds[7], vehicleId: vehicleIds[4], scheduledStart: at(-5, 8), scheduledEnd: at(-4, 8), depositRequired: 0, payments: [] }, admin.id);
-cancelRental(rc.id, 'Khách đổi lịch', admin.id);
+cancelRental(rc.id, { reason: 'Khách đổi lịch', keep: 0, refund: null }, admin.id);
 
 // Xe vào gara
 db.insert(schema.vehicleBlocks).values({ vehicleId: vehicleIds[4], kind: 'maintenance', startAt: at(-1, 9), endAt: at(1, 17), location: 'VinFast Thảo Điền', notes: 'Bảo dưỡng 10.000 km', createdBy: admin.id, createdAt: now }).run();
@@ -155,6 +192,33 @@ db.insert(schema.vehicleBlocks).values({ vehicleId: vehicleIds[4], kind: 'mainte
 db.insert(schema.trafficFines)
   .values({ vehicleId: vehicleIds[0], plate: '51K-123.45', plateKey: '51K12345', violatedAt: at(-8, 14.5), location: 'Cao tốc TP.HCM – Long Thành', violation: 'Chạy quá tốc độ 10–20 km/h', amount: 4000000, source: 'csgt', rentalId: r1.id, customerId: customerIds[0], status: 'notified', createdBy: admin.id, createdAt: now, updatedAt: now })
   .run();
+
+// ── Chi phí xe, chi phí chung, khoản định kỳ ──
+const spend = (category: CashCategory, amount: number, dayOffset: number, vehicleId: number | null, description: string | null, vendor: string | null = null, odo: number | null = null) =>
+  createEntry({ category, amount, at: Math.min(now - HOUR_MS, at(Math.min(0, dayOffset), 10 + between(0, 8))), vehicleId, method: rnd() < 0.5 ? 'cash' : 'transfer', description, vendor, odo, receiptFileIds: [] }, admin.id);
+for (let d = -178; d < 0; d += 7) {
+  cars.forEach((car, ci) => {
+    if (rnd() < 0.7) spend('cleaning', between(8, 12) * 10000, d + between(0, 6), vehicleIds[ci], 'Rửa xe, hút bụi', 'Tiệm rửa xe Bảo Ngọc');
+    if (rnd() < 0.35) spend('fuel', car.fuel === 'electric' ? between(15, 25) * 10000 : between(30, 55) * 10000, d + between(0, 6), vehicleIds[ci], car.fuel === 'electric' ? 'Sạc đầy trước khi giao xe' : 'Đổ đầy bình trước khi giao xe', car.fuel === 'electric' ? 'Trạm sạc V-Green' : 'Petrolimex');
+  });
+  if (rnd() < 0.5) spend('delivery', between(6, 12) * 10000, d + between(0, 6), null, 'Grab về sau khi giao xe tận nơi');
+}
+for (let m = 0; m < 6; m++) spend('marketing', between(10, 16) * 100000, -170 + m * 30, null, 'Quảng cáo Facebook', 'Meta');
+spend('maintenance', 1850000, -120, vehicleIds[0], 'Bảo dưỡng 30.000 km: thay dầu, lọc dầu, lọc gió', 'Toyota Lý Thường Kiệt', 25500);
+spend('maintenance', 950000, -60, vehicleIds[3], 'Thay dầu, lọc nhớt', 'Gara Minh Phát', 63000);
+spend('repair', 2500000, -95, vehicleIds[1], 'Gò sơn cản sau (khách va chạm)', 'Gara Hoàng Long');
+spend('insurance_claim', 2000000, -80, vehicleIds[1], 'Bảo hiểm bồi thường sửa cản sau', 'Bảo Việt');
+spend('parts', 3200000, -40, vehicleIds[3], 'Thay 2 lốp trước Michelin', 'Lốp Thành Công', 64800);
+spend('inspection', 560000, -150, vehicleIds[2], 'Đăng kiểm định kỳ', 'Trung tâm đăng kiểm 50-03V');
+spend('insurance', 9800000, -170, vehicleIds[4], 'Bảo hiểm thân vỏ 1 năm', 'PVI');
+spend('insurance', 480700, -30, vehicleIds[0], 'Bảo hiểm TNDS 1 năm', 'Bảo Việt');
+spend('accessory', 1650000, -100, vehicleIds[2], 'Camera hành trình 70mai', 'Shopee');
+spend('toll', 500000, -75, vehicleIds[1], 'Nạp tiền thẻ ETC', 'VETC');
+const startMonth = monthKeyOf(today - 175 * DAY_MS);
+createRecurring({ category: 'parking', amount: 4500000, vehicleId: null, method: 'transfer', description: 'Thuê bãi đậu 5 xe', vendor: 'Bãi xe Nguyễn Văn Linh', dayOfMonth: 1, intervalMonths: 1, startMonth, endMonth: null, active: true }, admin.id);
+createRecurring({ category: 'salary', amount: 7000000, vehicleId: null, method: 'transfer', description: 'Lương Tuấn giao xe', vendor: null, dayOfMonth: 5, intervalMonths: 1, startMonth, endMonth: null, active: true }, admin.id);
+createRecurring({ category: 'loan', amount: 9200000, vehicleId: vehicleIds[4], method: 'transfer', description: 'Trả góp VinFast VF 6', vendor: 'VPBank', dayOfMonth: 15, intervalMonths: 1, startMonth, endMonth: addMonthKey(startMonth, 35), active: true }, admin.id);
+createRecurring({ category: 'premises', amount: 300000, vehicleId: null, method: 'transfer', description: 'Internet + điện thoại cửa hàng', vendor: 'Viettel', dayOfMonth: 10, intervalMonths: 1, startMonth, endMonth: null, active: true }, admin.id);
 
 closeDb();
 console.log('✓ Đã tạo dữ liệu mẫu. Đăng nhập admin / demo12345');

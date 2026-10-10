@@ -114,6 +114,7 @@ export const FILE_KINDS = [
   'document_pdf',
   'document_scan',
   'fine_notice',
+  'receipt',
   'template',
   'other',
 ] as const;

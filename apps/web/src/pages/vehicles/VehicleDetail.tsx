@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { Archive, Car, KeyRound, MoreHorizontal, Pencil, Share2, Wrench } from 'lucide-react';
+import { Archive, ArrowRight, Car, KeyRound, MoreHorizontal, Pencil, Receipt, Share2, Wrench } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { AccessoryManager } from '@/components/AccessoryManager';
+import { CashEntryDialog, type CashDialogState } from '@/components/CashEntryDialog';
 import { Page } from '@/components/layout/AppShell';
 import { ShareDialog } from '@/components/ShareDialog';
 import { FineStatusBadge, Money, RentalStatusBadge, VehicleStateBadge } from '@/components/common';
@@ -11,13 +12,15 @@ import { Button, ButtonLink } from '@/components/ui/button';
 import { Dialog, useConfirm } from '@/components/ui/dialog';
 import { DateTimeInput, Field, Input, Select, Textarea } from '@/components/ui/form';
 import { Badge, Card, CardBody, CardHeader, Empty, InfoRow, Menu, MenuItem, PageLoader } from '@/components/ui/misc';
-import { api } from '@/lib/api';
+import { api, qs } from '@/lib/api';
 import { useAction, useAuth } from '@/lib/hooks';
-import type { VehicleDetail as Detail } from '@/lib/types';
+import type { CashflowReport, VehicleDetail as Detail } from '@/lib/types';
+import { cn } from '@/lib/utils';
 import { BLOCK_KINDS, BLOCK_KIND_LABEL, FUEL_LABEL, TRANSMISSION_LABEL, type BlockKind } from '@shared/constants';
+import { CASH_CATEGORY, currentPeriodKey } from '@shared/cashflow';
 import { CHARGE_BASE_DAYS, vehicleChargingPolicy } from '@shared/pricing';
 import { fmtNumber, fmtVnd } from '@shared/text';
-import { daysUntil, fmtDateKey, fmtDateTime } from '@shared/time';
+import { daysUntil, fmtDate, fmtDateKey, fmtDateTime } from '@shared/time';
 
 function Expiry({ value }: { value: string | null }) {
   if (!value) return <span className="font-normal text-subtle">—</span>;
@@ -37,6 +40,7 @@ export default function VehicleDetail() {
   const confirm = useConfirm();
   const [blockOpen, setBlockOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [cash, setCash] = useState<CashDialogState | null>(null);
   const [block, setBlock] = useState<{ kind: BlockKind; startAt: number | null; endAt: number | null; location: string; notes: string }>({ kind: 'maintenance', startAt: Date.now(), endAt: null, location: '', notes: '' });
   const { data, isLoading } = useQuery({ queryKey: ['vehicle', id], queryFn: () => api.get<Detail>(`/api/vehicles/${id}`) });
   const inv = { invalidate: [['vehicle', id], ['vehicles'], ['dashboard'], ['calendar']] };
@@ -69,6 +73,9 @@ export default function VehicleDetail() {
             </MenuItem>
             <MenuItem icon={Wrench} onSelect={() => setBlockOpen(true)}>
               Đưa vào gara / tạm ngưng
+            </MenuItem>
+            <MenuItem icon={Receipt} onSelect={() => setCash({ mode: 'new', vehicleId: v.id })}>
+              Ghi chi phí cho xe
             </MenuItem>
             {isAdmin && (
               <MenuItem icon={Pencil} onSelect={() => navigate(`/vehicles/${v.id}/edit`)}>
@@ -186,6 +193,8 @@ export default function VehicleDetail() {
           </Card>
         </div>
 
+        {isAdmin && <VehicleCash vehicleId={v.id} onAdd={() => setCash({ mode: 'new', vehicleId: v.id })} />}
+
         <AccessoryManager vehicleId={v.id} />
 
         <Card>
@@ -263,6 +272,7 @@ export default function VehicleDetail() {
       </div>
 
       <ShareDialog open={shareOpen} onOpenChange={setShareOpen} mode="vehicle" vehicles={shareVehicles} />
+      <CashEntryDialog state={cash} onClose={() => setCash(null)} />
 
       <Dialog
         open={blockOpen}
@@ -302,5 +312,66 @@ export default function VehicleDetail() {
         </div>
       </Dialog>
     </Page>
+  );
+}
+
+/** Thu chi của xe trong năm nay: tiền thuê thực nhận, chi phí, lãi + vài khoản gần nhất. */
+function VehicleCash({ vehicleId, onAdd }: { vehicleId: number; onAdd: () => void }) {
+  const year = currentPeriodKey('year');
+  const { data } = useQuery({
+    queryKey: ['cashflow', year, String(vehicleId)],
+    queryFn: () => api.get<CashflowReport>(`/api/cashflow${qs({ p: year, v: vehicleId })}`),
+  });
+  const t = data?.totals;
+  const recent = data?.ledger.filter((l) => !(l.kind === 'entry' && l.entry.voidedAt)).slice(0, 5) ?? [];
+  const cell = (label: string, value: number, cls?: string) => (
+    <div className="flex min-w-0 items-baseline justify-between gap-3 sm:block">
+      <p className="text-sm text-muted sm:text-xs">{label}</p>
+      <p className={cn('tabular font-semibold whitespace-nowrap', cls)}>{fmtVnd(value)}</p>
+    </div>
+  );
+  return (
+    <Card>
+      <CardHeader
+        title={`Thu chi năm ${year}`}
+        description="Tiền thuê đã nhận và chi phí của riêng xe này"
+        action={
+          <Button variant="outline" size="sm" onClick={onAdd}>
+            <Receipt /> Ghi chi phí
+          </Button>
+        }
+      />
+      <CardBody className="space-y-3">
+        {t ? (
+          <div className="grid gap-1.5 rounded-xl bg-surface-2/60 p-3 sm:grid-cols-3 sm:gap-3">
+            {cell('Thu', t.income)}
+            {cell('Chi', t.expense)}
+            {cell('Lãi', t.profit, t.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}
+          </div>
+        ) : (
+          <div className="h-[68px] animate-pulse rounded-xl bg-surface-2" />
+        )}
+        {t && t.capitalOut > 0 && <p className="text-xs text-muted">Mua xe, trả góp năm nay: {fmtVnd(t.capitalOut)} · dòng tiền ròng {fmtVnd(t.net)}</p>}
+        {recent.length > 0 && (
+          <ul className="divide-y divide-border text-sm">
+            {recent.map((l) => (
+              <li key={l.key} className="flex items-center gap-3 py-2">
+                <span className="w-20 shrink-0 text-xs text-muted">{fmtDate(l.at)}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {l.kind === 'rent' ? `Tiền thuê · ${l.flow.code}` : l.entry.description || CASH_CATEGORY[l.entry.category].label}
+                </span>
+                <span className={cn('tabular shrink-0 font-medium', l.direction === 'in' && 'text-emerald-600 dark:text-emerald-400')}>
+                  {l.direction === 'in' ? '+' : '−'}
+                  {fmtVnd(l.amount)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Link to={`/cashflow?p=${year}&v=${vehicleId}`} className="inline-flex items-center gap-1 text-sm font-medium text-brand">
+          Xem toàn bộ thu chi của xe <ArrowRight className="size-4" />
+        </Link>
+      </CardBody>
+    </Card>
   );
 }

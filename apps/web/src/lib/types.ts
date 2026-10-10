@@ -2,6 +2,7 @@
 
 import type {
   AccessoryCatalogItem,
+  CashEntry,
   Charge,
   Collateral,
   ContractTemplate,
@@ -10,6 +11,7 @@ import type {
   Handover,
   HandoverAccessory,
   Payment,
+  RecurringCost,
   Rental,
   RentalSegment,
   TrafficFine,
@@ -17,11 +19,12 @@ import type {
   VehicleAccessory,
   VehicleBlock,
 } from '@api/db/schema';
-import type { MoneySummary } from '@shared/money';
+import type { CashCategory, Period } from '@shared/cashflow';
+import type { MoneySummary, PaymentDirection } from '@shared/money';
 import type { Quote } from '@shared/pricing';
-import type { AccessoryCategory, Role } from '@shared/constants';
+import type { AccessoryCategory, PaymentMethod, RentalStatus, Role } from '@shared/constants';
 
-export type { AccessoryCatalogItem, HandoverAccessory, VehicleAccessory, Charge, Collateral, ContractTemplate, Customer, DocumentRow, Handover, Payment, Rental, RentalSegment, TrafficFine, Vehicle, VehicleBlock, MoneySummary, Quote };
+export type { AccessoryCatalogItem, CashEntry, RecurringCost, HandoverAccessory, VehicleAccessory, Charge, Collateral, ContractTemplate, Customer, DocumentRow, Handover, Payment, Rental, RentalSegment, TrafficFine, Vehicle, VehicleBlock, MoneySummary, Quote };
 
 export interface SessionUser {
   id: number;
@@ -153,6 +156,10 @@ export interface Dashboard {
     revenue: number;
     received: number;
     depositsHeld: number;
+    /** Thu chi thực tế trong tháng (như trang Thu chi). */
+    income: number;
+    expense: number;
+    profit: number;
     rentals: number;
     utilization: { vehicleId: number; plate: string; pct: number }[];
   };
@@ -280,3 +287,64 @@ export interface FleetCheckResult {
   recorded: number;
   vehicles: { plate: string; ok: boolean; error?: string; found: number; recorded: number }[];
 }
+
+// ── Thu chi ──────────────────────────────────────────────────────────────────
+
+export interface CashTotals {
+  /** Tiền thuê thực nhận. */
+  rent: number;
+  otherIncome: number;
+  income: number;
+  /** Chi vận hành. */
+  expense: number;
+  /** Lãi vận hành. */
+  profit: number;
+  capitalIn: number;
+  capitalOut: number;
+  /** Dòng tiền ròng. */
+  net: number;
+}
+
+export interface VehicleCashRow extends CashTotals {
+  vehicleId: number;
+  plate: string;
+  make: string;
+  model: string;
+  archived: boolean;
+  rentals: number;
+  utilization: number | null;
+}
+
+export interface RentFlow {
+  paymentId: number;
+  at: number;
+  amount: number;
+  direction: PaymentDirection;
+  method: PaymentMethod;
+  note: string | null;
+  rentalId: number;
+  code: string;
+  vehicleId: number;
+  customerName: string;
+}
+
+export type LedgerRow =
+  | { kind: 'rent'; key: string; at: number; direction: 'in' | 'out'; amount: number; flow: RentFlow; plate: string | null }
+  | { kind: 'entry'; key: string; at: number; direction: 'in' | 'out'; amount: number; entry: CashEntry; plate: string | null; recurring: { id: number; description: string | null } | null };
+
+export interface CashflowReport {
+  period: Period;
+  filter: 'all' | 'shared' | number;
+  totals: CashTotals;
+  receivables: { owed: number; owedCount: number; upcoming: number; upcomingCount: number; depositsHeld: number };
+  trend: (CashTotals & { key: string })[];
+  categories: { category: CashCategory; amount: number; count: number }[];
+  vehicles: VehicleCashRow[];
+  shared: CashTotals | null;
+  rentals: { id: number; code: string; status: RentalStatus; customerName: string; start: number; end: number; total: number; paid: number; due: number }[];
+  ledger: LedgerRow[];
+  allocation: { sharedExpense: number; fleet: number };
+  vehicleOptions: { id: number; plate: string; make: string; model: string; archived: boolean }[];
+}
+
+export type RecurringRow = RecurringCost & { plate: string | null };

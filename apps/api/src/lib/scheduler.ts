@@ -4,6 +4,7 @@ import { and, eq, lt } from 'drizzle-orm';
 import { config } from '../config.js';
 import { db, schema } from '../db/index.js';
 import { buildDigest, handoversSoon } from '../services/alerts.js';
+import { materializeRecurring } from '../services/cashflow.js';
 import { runFleetFineCheck } from '../services/fineCheck.js';
 import { startUpdate } from '../services/updateFlow.js';
 import { HOUR_MS, fmtDateTime, vnDateKey, vnParts } from '../shared/time.js';
@@ -102,6 +103,14 @@ async function fineCheck(now: number) {
   await runFleetFineCheck(null);
 }
 
+/** Ghi các khoản thu chi định kỳ đến hạn (khoản định kỳ ghi theo ngày, mỗi giờ kiểm tra một lần là đủ). */
+let recurringCheckedAt = 0;
+function recurringCosts(now: number) {
+  if (now - recurringCheckedAt < HOUR_MS) return;
+  recurringCheckedAt = now;
+  materializeRecurring(now);
+}
+
 let running = false;
 
 export async function tick(now = Date.now()) {
@@ -114,6 +123,7 @@ export async function tick(now = Date.now()) {
       await runNightlyBackup();
       purgeExpiredSessions();
     }
+    recurringCosts(now);
     await digest(now);
     await overdueReturns(now);
     await updateCheck(now);
