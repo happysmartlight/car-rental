@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { Page } from '@/components/layout/AppShell';
 import { FuelGauge, SignaturePad } from '@/components/common';
 import { Gallery, PhotoInput } from '@/components/images';
+import { AccessoryAdder, handoverItems } from '@/components/RentalAccessories';
 import { Button } from '@/components/ui/button';
 import { Checkbox, DateTimeInput, Field, Input, MoneyInput, NumberInput, Select, Textarea } from '@/components/ui/form';
 import { Card, CardBody, CardHeader, Notice, PageLoader } from '@/components/ui/misc';
@@ -15,6 +16,7 @@ import { api, uploadFile } from '@/lib/api';
 import { useSettings } from '@/lib/hooks';
 import type { HandoverAccessory, RentalDetail, VehicleAccessoriesData } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
+import { mergeAccessoryPlan } from '@shared/accessories';
 import { CHARGE_KINDS, CHARGE_KIND_LABEL, DAMAGE_ZONES, PHOTO_SLOTS, type ChargeKind } from '@shared/constants';
 import { chargeDays, chargingCharge, rentalChargingPolicy, tripChargingText, type VehiclePricing } from '@shared/pricing';
 import { fmtNumber, fmtVnd } from '@shared/text';
@@ -90,12 +92,13 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
     enabled: isPickup && !!d,
   });
 
-  // Phụ kiện cần kiểm: lúc giao lấy từ thông tin xe; lúc nhận lấy đúng danh sách đã có lúc giao.
+  // Phụ kiện cần kiểm: lúc giao lấy theo danh sách thỏa thuận khi đặt xe (chưa chỉnh thì theo xe);
+  // lúc nhận lấy đúng danh sách đã có lúc giao.
   useEffect(() => {
     if (accReady || !d) return;
     if (isPickup) {
       if (!vehAcc) return;
-      setAcc(vehAcc.items.filter((a) => a.checkOnHandover).map((a) => ({ id: a.id, name: a.name, quantity: a.quantity, value: a.effectiveValue, present: true, note: a.note })));
+      setAcc(mergeAccessoryPlan(d.rental.accessories, handoverItems(vehAcc.items)));
     } else {
       setAcc((pickupHo?.accessories ?? []).filter((a) => a.present).map((a) => ({ ...a, present: true, note: null })));
     }
@@ -289,7 +292,7 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
             </div>
           </Step>
 
-          <Step n={4} title="Giấy tờ & phụ kiện" description={isPickup ? 'Bỏ tick món không có trên xe lúc giao' : 'Bỏ tick món khách trả thiếu — app tự thêm khoản đền bù'}>
+          <Step n={4} title="Giấy tờ & phụ kiện" description={isPickup ? 'Bỏ tick món không có trên xe lúc giao, thêm món giao kèm' : 'Bỏ tick món khách trả thiếu — app tự thêm khoản đền bù'}>
             <p className="mb-2 text-xs font-semibold tracking-wide text-muted uppercase">Giấy tờ</p>
             <div className="grid gap-2.5 sm:grid-cols-2">
               {Object.keys(checklist).map((item) => (
@@ -342,6 +345,11 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
                   'Lúc giao xe không ghi phụ kiện nào.'
                 )}
               </p>
+            )}
+            {isPickup && accReady && (
+              <div className="mt-3">
+                <AccessoryAdder items={acc} onChange={setAcc} catalog={vehAcc?.catalog ?? []} />
+              </div>
             )}
           </Step>
 

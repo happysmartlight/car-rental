@@ -57,6 +57,19 @@ export interface SettlementPlan {
   refundDeposit: number;
 }
 
+/** Mức giữ cọc chờ phạt nguội gợi ý khi đặt xe: theo cài đặt nhưng không vượt tiền cọc của lượt. */
+export function defaultFineHold(deposit: number, rules: { fineHoldAmount: number }): number {
+  return Math.max(0, Math.min(rules.fineHoldAmount, deposit));
+}
+
+/** Cọc giữ chờ phạt nguội đã thỏa thuận cho một lượt (lượt tạo trước khi có trường này: theo cài đặt). */
+export function rentalFineHold(
+  r: { depositRequired: number; fineHoldRequired: number | null; fineHoldDays: number | null },
+  rules: { fineHoldAmount: number; fineHoldDays: number },
+): { amount: number; days: number } {
+  return { amount: r.fineHoldRequired ?? defaultFineHold(r.depositRequired, rules), days: r.fineHoldDays ?? rules.fineHoldDays };
+}
+
 /** Gợi ý quyết toán: cấn trừ cọc trước, giữ một phần cọc chờ phạt nguội, hoàn phần còn lại. */
 export function planSettlement(s: MoneySummary, fineHoldAmount: number): SettlementPlan {
   const due = Math.max(0, s.due);
@@ -109,8 +122,9 @@ export function planCancellation(s: MoneySummary, keep: number): CancelPlan {
   return { keep: k, offset, refundDeposit: deposit - offset, refundRent: rent - (k - offset) };
 }
 
-/** Câu chính sách hủy (in hợp đồng, nhắc khi đặt xe). */
-export function cancelPolicyText(p: CancelPolicy): string {
+/** Câu chính sách hủy (in hợp đồng, nhắc khi đặt xe). Lượt không cọc thì không có gì để mất. */
+export function cancelPolicyText(p: CancelPolicy, hasDeposit = true): string {
+  if (!hasDeposit) return 'Hủy trước giờ nhận xe: hoàn lại toàn bộ tiền thuê đã trả.';
   const refundAll = 'hoàn lại toàn bộ tiền cọc và tiền thuê đã trả';
   if (p.cancelForfeitPct <= 0) return `Hủy trước giờ nhận xe: ${refundAll}.`;
   const lose = `mất ${p.cancelForfeitPct >= 100 ? 'toàn bộ' : `${p.cancelForfeitPct}%`} tiền cọc (tiền thuê đã trả được hoàn lại)`;

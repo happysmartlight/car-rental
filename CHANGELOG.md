@@ -3,6 +3,20 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.2.10] - 2026-10-10
+
+### Mới
+- **Chỉnh phụ kiện, tiện nghi ngay khi đặt xe** — chọn xe xong, form **Đặt xe mới** hiện mục **Phụ kiện & tiện nghi kèm xe**:
+  - Bỏ tick món đang thiếu (đem sửa, bị hỏng…) → hợp đồng và biên bản giao xe không ghi món đó.
+  - Thêm món riêng cho lượt này (ghế trẻ em, áo mưa…) — gõ tên, app gợi ý theo danh mục và điền sẵn giá trị đền bù.
+  - Chỉ áp dụng cho lượt đó, danh sách gốc của xe giữ nguyên. Chưa giao xe thì sửa lại được trong **Sửa lịch, đổi xe**.
+  - **Giao xe**: checklist phụ kiện lấy đúng danh sách đã chỉnh, và thêm được món giao kèm ngay lúc giao.
+- **Tiền giữ chờ phạt nguội chỉnh được cho từng lượt** — form Đặt xe có ô **Giữ lại chờ phạt nguội** (số tiền + số ngày), mặc định theo **Cài đặt → Giá & quy định** nhưng không vượt tiền cọc của lượt. Quyết toán gợi ý đúng mức đã ghi trong hợp đồng.
+
+### Sửa
+- **Hợp đồng — Điều 4 (Đặt cọc):** lượt **không cọc** không còn ghi "Bên A được giữ lại 2.000.000 đồng". Nay ghi "Bên B không phải đặt cọc bằng tiền", nhắc phạt nguội sau khi trả xe vẫn do Bên B chịu, và chính sách hủy chỉ còn hoàn tiền thuê. Lượt có cọc ít hơn mức cài đặt thì giữ tối đa bằng tiền cọc. Mẫu dựng sẵn tự cập nhật; hợp đồng đã in trước đó giữ nguyên — in lại nếu cần.
+- Đổi sang xe khác trong form Đặt xe: tiền cọc tự theo xe mới (trước đây giữ mức cọc của xe chọn đầu tiên), trừ khi đã sửa tay.
+
 ## [0.2.9] - 2026-10-08
 
 ### Mới

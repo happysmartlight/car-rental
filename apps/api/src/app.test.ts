@@ -391,7 +391,7 @@ describe('phụ kiện trên xe', () => {
     db.update(schema.contractTemplates).set({ builtin: 'pickup-user' }).where(eq(schema.contractTemplates.id, pickupT.id)).run();
     ensureBuiltinTemplates();
     const c2 = db.select().from(schema.contractTemplates).where(eq(schema.contractTemplates.id, contract.id)).get()!;
-    expect(c2.builtin).toBe('contract-v5');
+    expect(c2.builtin).toBe('contract-v6');
     expect(c2.version).toBe(contract.version + 1);
     const p2 = db.select().from(schema.contractTemplates).where(eq(schema.contractTemplates.id, pickupT.id)).get()!;
     expect(p2.version).toBe(pickupT.version);
@@ -474,5 +474,97 @@ describe('khách hủy đặt xe', () => {
     expect((await call('PUT', '/api/settings/rules', { ...rules, defaultPickupTime: '07:45' })).status).toBe(200);
     expect((await call('GET', '/api/settings')).json.rules.defaultPickupTime).toBe('07:45');
     expect((await call('PUT', '/api/settings/rules', { ...rules, defaultPickupTime: '8h30' })).status).toBe(400);
+  });
+});
+
+describe('cọc chờ phạt nguội & phụ kiện theo từng lượt', () => {
+  let vid = 0;
+  let cust = 0;
+  const times = (day: number) => ({ scheduledStart: at(`2027-07-${String(day).padStart(2, '0')}T08:00`), scheduledEnd: at(`2027-07-${String(day + 1).padStart(2, '0')}T08:00`) });
+  /** Chữ trong hợp đồng/biên bản (bỏ thẻ XML để dò cả câu). */
+  const docText = async (id: number, kind = 'contract') => {
+    const doc = await call('POST', `/api/rentals/${id}/documents`, { kind });
+    expect(doc.status, JSON.stringify(doc.json)).toBe(200);
+    const file = await app.inject({ method: 'GET', url: `/api/files/${doc.json.document.docxFileId}`, headers: { cookie: adminCookie } });
+    const xml = new PizZip(file.rawPayload).file('word/document.xml')!.asText();
+    expect(xml).not.toMatch(/\{[#/^]?[a-z_.]+\}/);
+    return xml.replace(/<[^>]+>/g, '');
+  };
+
+  it('không cọc: hợp đồng không nhắc giữ 2.000.000, chính sách hủy chỉ hoàn tiền thuê', async () => {
+    vid = (await call('POST', '/api/vehicles', { plate: '51G-888.88', make: 'Hyundai', model: 'Accent', priceDay: 700000, odo: 500 })).json.id;
+    cust = (await call('POST', '/api/customers', { fullName: 'Vũ Không Cọc', idNumber: '079099000088' })).json.id;
+    const r = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, ...times(1), depositRequired: 0 });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(r.json).toMatchObject({ fineHoldRequired: 0, fineHoldDays: 15, accessories: null });
+    const text = await docText(r.json.id);
+    expect(text).toContain('Bên B không phải đặt cọc bằng tiền.');
+    expect(text).toContain('phạt nguội) sau khi trả xe vẫn do Bên B chịu trách nhiệm theo khoản 3 Điều 6');
+    expect(text).toContain('Hủy trước giờ nhận xe: hoàn lại toàn bộ tiền thuê đã trả.');
+    expect(text).not.toContain('2.000.000');
+    expect(text).not.toContain('được giữ lại');
+  });
+
+  it('cọc ít hơn mức cài đặt: tự giữ bằng tiền cọc; tự nhập mức giữ + số ngày cho từng lượt', async () => {
+    const small = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, ...times(3), depositRequired: 1000000 });
+    expect(small.json).toMatchObject({ fineHoldRequired: 1000000, fineHoldDays: 15 });
+    expect(await docText(small.json.id)).toContain('Bên A được giữ lại 1.000.000 đồng tiền cọc trong 15 ngày');
+
+    expect((await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, ...times(5), depositRequired: 5000000, fineHoldRequired: 6000000 })).status).toBe(400);
+    const r = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, ...times(5), depositRequired: 5000000, fineHoldRequired: 3000000, fineHoldDays: 30 });
+    expect(r.json).toMatchObject({ fineHoldRequired: 3000000, fineHoldDays: 30 });
+    const text = await docText(r.json.id);
+    expect(text).toContain('Bên B đặt cọc cho Bên A số tiền 5.000.000 đồng');
+    expect(text).toContain('Bên A được giữ lại 3.000.000 đồng tiền cọc trong 30 ngày');
+
+    // Hạ tiền cọc → mức giữ tự hạ theo; nhập mức giữ lớn hơn cọc thì chặn.
+    expect((await call('PATCH', `/api/rentals/${r.json.id}`, { depositRequired: 2000000 })).json.fineHoldRequired).toBe(2000000);
+    expect((await call('PATCH', `/api/rentals/${r.json.id}`, { fineHoldRequired: 2500000 })).status).toBe(400);
+    expect((await call('PATCH', `/api/rentals/${r.json.id}`, { depositRequired: 4000000, fineHoldRequired: 2500000 })).json.fineHoldRequired).toBe(2500000);
+
+    // Quyết toán: mặc định giữ theo số ngày đã thỏa thuận của lượt (30), không theo cài đặt (15).
+    await call('POST', `/api/rentals/${r.json.id}/payments`, { direction: 'in', purpose: 'deposit', method: 'cash', amount: 4000000 });
+    await call('POST', `/api/rentals/${r.json.id}/pickup`, { at: times(5).scheduledStart, odo: 600, fuelLevel: 100 });
+    await call('POST', `/api/rentals/${r.json.id}/return`, { at: times(5).scheduledEnd, odo: 700, fuelLevel: 100 });
+    const d = (await call('GET', `/api/rentals/${r.json.id}`)).json;
+    const s = await call('POST', `/api/rentals/${r.json.id}/settle`, { offset: d.money.due, refundDeposit: { amount: 4000000 - d.money.due - 2500000, method: 'cash' } });
+    expect(s.status, JSON.stringify(s.json)).toBe(200);
+    expect(s.json.fineHoldAmount).toBe(2500000);
+    expect(s.json.fineHoldUntil).toBe(times(5).scheduledEnd + 30 * 86_400_000);
+    expect(await docText(r.json.id, 'return')).toContain('Bên A giữ lại 2.500.000 đồng trong 30 ngày');
+  });
+
+  it('phụ kiện: bỏ món đang thiếu, thêm món riêng cho lượt; xe thêm món sau vẫn vào; giao xe rồi thì khóa', async () => {
+    const items = (await call('POST', `/api/vehicles/${vid}/accessories`, { items: [{ name: 'Camera hành trình' }, { name: 'Sạc dự phòng' }] })).json.added;
+    const plan = items.map((a: any) => ({ id: a.id, name: a.name, quantity: a.quantity, value: 0, present: a.name !== 'Camera hành trình' }));
+    plan.push({ id: null, name: 'Ghế trẻ em', quantity: 1, value: 2000000, present: true });
+    const r = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, ...times(10), accessories: plan });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(r.json.accessories).toHaveLength(3);
+    await call('POST', `/api/vehicles/${vid}/accessories`, { items: [{ name: 'Ô / dù' }] });
+    for (const kind of ['contract', 'pickup']) {
+      const text = await docText(r.json.id, kind);
+      expect(text).toContain('Sạc dự phòng');
+      expect(text).toContain('Ghế trẻ em');
+      expect(text).toContain('Ô / dù');
+      expect(text).not.toContain('Camera hành trình');
+    }
+    // Lượt không chỉnh thì theo xe (có camera).
+    const plain = (await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, ...times(13) })).json;
+    expect(await docText(plain.id)).toContain('Camera hành trình');
+
+    // Sửa lại trước khi giao xe: camera đã về.
+    const back = plan.map((a: any) => ({ ...a, present: true }));
+    expect((await call('PATCH', `/api/rentals/${r.json.id}`, { accessories: back })).json.accessories.every((a: any) => a.present)).toBe(true);
+    expect(await docText(r.json.id)).toContain('Camera hành trình');
+    await call('POST', `/api/rentals/${r.json.id}/pickup`, { at: times(10).scheduledStart, odo: 800, fuelLevel: 100, accessories: back });
+    expect((await call('PATCH', `/api/rentals/${r.json.id}`, { accessories: null })).status).toBe(400);
+  });
+
+  it('đổi xe khi chưa giao: bỏ danh sách phụ kiện đã chỉnh của xe cũ', async () => {
+    const other = (await call('POST', '/api/vehicles', { plate: '51G-999.99', make: 'Kia', model: 'Soluto', priceDay: 600000, odo: 100 })).json.id;
+    const plan = [{ id: null, name: 'Ghế trẻ em', quantity: 1, value: 0, present: true }];
+    const r = (await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, ...times(20), accessories: plan })).json;
+    expect((await call('PATCH', `/api/rentals/${r.id}`, { vehicleId: other })).json.accessories).toBeNull();
   });
 });

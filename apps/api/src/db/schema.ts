@@ -261,6 +261,11 @@ export const rentals = sqliteTable(
     depositRequired: integer('deposit_required').notNull().default(0),
     fineHoldAmount: integer('fine_hold_amount').notNull().default(0),
     fineHoldUntil: integer('fine_hold_until'),
+    /** Cọc giữ lại chờ phạt nguội đã thỏa thuận khi đặt xe — in vào hợp đồng (null = lượt cũ, theo cài đặt). */
+    fineHoldRequired: integer('fine_hold_required'),
+    fineHoldDays: integer('fine_hold_days'),
+    /** Phụ kiện kèm lượt này, chỉnh lúc đặt xe; present=false = lượt này không kèm (null = theo danh sách của xe). */
+    accessories: text('accessories', { mode: 'json' }).$type<HandoverAccessory[]>(),
     notes: text('notes'),
     cancelReason: text('cancel_reason'),
     createdBy: integer('created_by'),

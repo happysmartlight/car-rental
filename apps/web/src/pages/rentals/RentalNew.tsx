@@ -6,15 +6,16 @@ import { toast } from 'sonner';
 import { Page } from '@/components/layout/AppShell';
 import { CustomerPicker } from '@/components/CustomerPicker';
 import { MultiPhotoInput } from '@/components/images';
+import { RentalAccessoriesEditor, useRentalAccessories } from '@/components/RentalAccessories';
 import { Button } from '@/components/ui/button';
 import { useConfirm } from '@/components/ui/dialog';
-import { DateTimeInput, Field, Input, MoneyInput, Segmented, Select, Textarea } from '@/components/ui/form';
+import { DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select, Textarea } from '@/components/ui/form';
 import { Card, CardBody, CardHeader, Notice, Spinner } from '@/components/ui/misc';
 import { ApiError, api, fileUrl, qs } from '@/lib/api';
 import { useAuth, useSettings } from '@/lib/hooks';
 import type { CalendarData, Customer, Precheck, Rental, VehicleWithStatus } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
-import { cancelPolicyText } from '@shared/money';
+import { cancelPolicyText, defaultFineHold } from '@shared/money';
 import { COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, type CollateralKind } from '@shared/constants';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { DAY_MS, HOUR_MS, addMonthsVn, fmtDateTime, fmtDuration } from '@shared/time';
@@ -35,7 +36,7 @@ function nextHalfHour(ms: number) {
   return Math.ceil(ms / step) * step;
 }
 
-function Section({ n, title, children, action }: { n: number; title: string; children: ReactNode; action?: ReactNode }) {
+function Section({ n, title, children, action, description }: { n: number; title: string; children: ReactNode; action?: ReactNode; description?: ReactNode }) {
   return (
     <Card>
       <CardHeader
@@ -45,6 +46,7 @@ function Section({ n, title, children, action }: { n: number; title: string; chi
             {title}
           </span>
         }
+        description={description}
         action={action}
       />
       <CardBody>{children}</CardBody>
@@ -81,6 +83,10 @@ export default function RentalNew() {
   const [discount, setDiscount] = useState<number | null>(null);
   const [discountNote, setDiscountNote] = useState('');
   const [deposit, setDeposit] = useState<number | null>(null);
+  const [depositTouched, setDepositTouched] = useState(false);
+  /** null = theo cài đặt (không vượt tiền cọc) cho tới khi người dùng sửa. */
+  const [fineHold, setFineHold] = useState<number | null>(null);
+  const [holdDays, setHoldDays] = useState<number | null>(null);
   const [payments, setPayments] = useState<PayRow[]>([]);
   const [collaterals, setCollaterals] = useState<CollRow[]>([]);
   const [notes, setNotes] = useState('');
@@ -97,9 +103,18 @@ export default function RentalNew() {
   const vehicle = vehicles?.find((v) => v.id === vehicleId) ?? null;
   const activeVehicles = (vehicles ?? []).filter((v) => v.active);
 
+  // Mỗi xe một mức cọc: đổi xe thì cọc theo xe mới, trừ khi đã sửa tay.
   useEffect(() => {
-    if (vehicle && deposit == null) setDeposit(vehicle.depositAmount);
-  }, [vehicle, deposit]);
+    if (vehicle && !depositTouched) setDeposit(vehicle.depositAmount);
+  }, [vehicle, depositTouched]);
+  const acc = useRentalAccessories(vehicleId, null);
+  const excluded = acc.items.filter((a) => !a.present);
+  const added = acc.items.filter((a) => a.id == null && a.present);
+
+  const hasDeposit = (deposit ?? 0) > 0;
+  const hold = hasDeposit ? (fineHold ?? (settings ? defaultFineHold(deposit ?? 0, settings.rules) : 0)) : 0;
+  const days = holdDays ?? settings?.rules.fineHoldDays ?? 15;
+  const holdError = hold > (deposit ?? 0) ? 'Không được lớn hơn tiền cọc' : null;
 
   const validTime = start != null && end != null && end > start;
   const { data: cal } = useQuery({
@@ -137,6 +152,7 @@ export default function RentalNew() {
     if (!customer) return toast.error('Chọn khách thuê');
     if (!vehicleId) return toast.error('Chọn xe');
     if (!validTime) return toast.error('Kiểm tra lại giờ nhận / trả');
+    if (holdError) return toast.error(`Tiền giữ chờ phạt nguội: ${holdError.toLowerCase()}`);
     setSaving(true);
     try {
       const r = await api.post<Rental>('/api/rentals', {
@@ -151,6 +167,9 @@ export default function RentalNew() {
         discount: discount ?? 0,
         discountNote: discountNote || null,
         depositRequired: deposit ?? 0,
+        fineHoldRequired: hold,
+        fineHoldDays: days,
+        accessories: acc.edited,
         driverIds,
         notes: notes || null,
         payments: payments.filter((p) => p.amount && p.amount > 0),
@@ -210,6 +229,12 @@ export default function RentalNew() {
               )}
             </div>
             {pre?.quote.mode === 'month' && <Notice tone="violet">Tính theo tháng — rẻ hơn tính theo ngày ({fmtVnd(vehicle.priceMonth ?? 0)}/tháng).</Notice>}
+            {(excluded.length > 0 || added.length > 0) && (
+              <div className="space-y-0.5 text-sm">
+                {excluded.length > 0 && <p className="text-amber-600">Không kèm: {excluded.map((a) => a.name).join(', ')}</p>}
+                {added.length > 0 && <p className="text-muted">Thêm: {added.map((a) => a.name).join(', ')}</p>}
+              </div>
+            )}
             <div className="flex items-baseline justify-between border-t border-border pt-3">
               <span className="font-medium">Tổng tiền thuê</span>
               <span className="tabular text-xl font-semibold">{fmtVnd(total)}</span>
@@ -219,6 +244,14 @@ export default function RentalNew() {
                 <span className="text-muted">Cọc thỏa thuận</span>
                 <span className="tabular">{fmtVnd(deposit ?? 0)}</span>
               </div>
+              {hold > 0 && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted">Giữ chờ phạt nguội</span>
+                  <span className="tabular">
+                    {fmtVnd(hold)} · {days} ngày
+                  </span>
+                </div>
+              )}
               {(paidRent > 0 || paidDeposit > 0) && (
                 <div className="flex justify-between">
                   <span className="text-muted">Thu ngay</span>
@@ -355,7 +388,13 @@ export default function RentalNew() {
             </div>
           </Section>
 
-          <Section n={3} title="Giao nhận xe">
+          {vehicle && (
+            <Section n={3} title="Phụ kiện & tiện nghi kèm xe" description="Bỏ tick món đang thiếu, thêm món khách cần — chỉ áp dụng cho lượt này, in vào hợp đồng và biên bản giao xe">
+              <RentalAccessoriesEditor items={acc.items} onChange={acc.setItems} catalog={acc.catalog} loading={acc.loading} />
+            </Section>
+          )}
+
+          <Section n={vehicle ? 4 : 3} title="Giao nhận xe">
             <Segmented
               value={pickupMethod}
               onChange={setPickupMethod}
@@ -379,7 +418,7 @@ export default function RentalNew() {
             )}
           </Section>
 
-          <Section n={4} title="Giá, cọc & thanh toán">
+          <Section n={vehicle ? 5 : 4} title="Giá, cọc & thanh toán">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Giảm giá">
                 <MoneyInput value={discount} onChange={setDiscount} />
@@ -388,13 +427,29 @@ export default function RentalNew() {
                 <Input value={discountNote} onChange={(e) => setDiscountNote(e.target.value)} placeholder="Khách quen, thuê dài ngày…" />
               </Field>
               <Field label="Tiền cọc thỏa thuận" hint={vehicle ? `Mặc định của xe: ${fmtVnd(vehicle.depositAmount)}` : undefined}>
-                <MoneyInput value={deposit} onChange={setDeposit} />
+                <MoneyInput
+                  value={deposit}
+                  onChange={(v) => {
+                    setDeposit(v);
+                    setDepositTouched(true);
+                  }}
+                />
               </Field>
+              {hasDeposit ? (
+                <Field label="Giữ lại chờ phạt nguội" error={holdError} hint="Sau khi trả xe, giữ lại trong số tiền cọc — in vào hợp đồng">
+                  <div className="grid grid-cols-[1fr_7rem] gap-2">
+                    <MoneyInput value={hold} onChange={(v) => setFineHold(v ?? 0)} />
+                    <NumberInput value={days} onChange={setHoldDays} suffix="ngày" />
+                  </div>
+                </Field>
+              ) : (
+                <p className="self-end pb-2 text-sm text-muted">Không cọc → hợp đồng ghi không đặt cọc, không giữ tiền chờ phạt nguội.</p>
+              )}
             </div>
 
             <div className="mt-5 space-y-2">
               <p className="text-sm font-medium">Tiền nhận ngay (cọc giữ chỗ, trả trước)</p>
-              {settings && <p className="text-xs text-muted">Chính sách hủy: {cancelPolicyText(settings.rules)}</p>}
+              {settings && <p className="text-xs text-muted">Chính sách hủy: {cancelPolicyText(settings.rules, hasDeposit)}</p>}
               {payments.map((p, i) => (
                 <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:grid-cols-[140px_140px_1fr_auto]">
                   <Select value={p.purpose} onChange={(e) => setPayments(payments.map((x, j) => (j === i ? { ...x, purpose: e.target.value as PayRow['purpose'] } : x)))}>
@@ -444,7 +499,7 @@ export default function RentalNew() {
             </div>
           </Section>
 
-          <Section n={5} title="Ghi chú">
+          <Section n={vehicle ? 6 : 5} title="Ghi chú">
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Yêu cầu riêng, ghế trẻ em, đi tỉnh…" />
           </Section>
         </div>

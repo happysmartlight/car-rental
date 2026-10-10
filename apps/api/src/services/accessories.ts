@@ -8,8 +8,9 @@
 
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import type { AccessoryCatalogItem, HandoverAccessory, Vehicle, VehicleAccessory } from '../db/schema.js';
+import type { AccessoryCatalogItem, HandoverAccessory, Rental, Vehicle, VehicleAccessory } from '../db/schema.js';
 import { badRequest, notFound } from '../lib/http.js';
+import { mergeAccessoryPlan } from '../shared/accessories.js';
 import { DEFAULT_ACCESSORY_CATALOG, type AccessoryCategory } from '../shared/constants.js';
 import { unaccent } from '../shared/text.js';
 import { getVehicle } from './rentals.js';
@@ -103,6 +104,11 @@ export function handoverAccessoryTemplate(vehicleId: number): HandoverAccessory[
   return vehicleAccessories(vehicleId)
     .filter((a) => a.checkOnHandover)
     .map((a) => ({ id: a.id, name: a.name, quantity: a.quantity, value: a.effectiveValue, present: true, note: a.note }));
+}
+
+/** Phụ kiện kèm một lượt thuê (đã chỉnh lúc đặt xe, hoặc theo xe); present=false = lượt này không kèm. */
+export function rentalAccessoryPlan(r: Pick<Rental, 'vehicleId' | 'accessories'>): HandoverAccessory[] {
+  return mergeAccessoryPlan(r.accessories, handoverAccessoryTemplate(r.vehicleId));
 }
 
 export interface AddAccessoryInput {

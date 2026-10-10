@@ -9,7 +9,7 @@ import { getSetting } from '../lib/settings.js';
 import { ageAt } from '../shared/cccd.js';
 import type { ChargeKind, CollateralKind, PaymentMethod, RentalStatus } from '../shared/constants.js';
 import { RENTAL_STATUS } from '../shared/constants.js';
-import { planCancellation, summarizeMoney, type PaymentPurpose } from '../shared/money.js';
+import { defaultFineHold, planCancellation, summarizeMoney, type PaymentPurpose } from '../shared/money.js';
 import { quoteRental, vehicleChargingPolicy, type Quote, type VehiclePricing } from '../shared/pricing.js';
 import { fmtNumber } from '../shared/text.js';
 import { DAY_MS, fmtDateTime, vnDateKey, vnParts } from '../shared/time.js';
@@ -175,6 +175,11 @@ export interface CreateRentalInput {
   discount: number;
   discountNote: string | null;
   depositRequired: number;
+  /** Cọc giữ chờ phạt nguội; bỏ trống = theo cài đặt (không vượt tiền cọc). */
+  fineHoldRequired?: number | null;
+  fineHoldDays?: number | null;
+  /** Phụ kiện kèm lượt này đã chỉnh; null = theo danh sách của xe. */
+  accessories?: HandoverAccessory[] | null;
   driverIds: number[];
   notes: string | null;
   payments: NewPayment[];
@@ -195,8 +200,11 @@ export function createRental(input: CreateRentalInput, userId: number): Rental {
   if (conflicts.length && !input.allowConflict) {
     throw conflict('Xe đã có lịch trùng thời gian này', 'conflict', { conflicts });
   }
+  const rules = getSetting('rules');
+  const fineHold = input.fineHoldRequired ?? defaultFineHold(input.depositRequired, rules);
+  if (fineHold > input.depositRequired) throw badRequest('Tiền giữ chờ phạt nguội không được lớn hơn tiền cọc');
   const pricing = vehiclePricing(vehicle);
-  const quote = quoteRental(input.scheduledStart, input.scheduledEnd, pricing, getSetting('rules'));
+  const quote = quoteRental(input.scheduledStart, input.scheduledEnd, pricing, rules);
   const now = Date.now();
 
   return db.transaction(() => {
@@ -218,6 +226,9 @@ export function createRental(input: CreateRentalInput, userId: number): Rental {
         kmLimit: quote.kmLimit,
         depositRequired: input.depositRequired,
         fineHoldAmount: 0,
+        fineHoldRequired: fineHold,
+        fineHoldDays: input.fineHoldDays ?? rules.fineHoldDays,
+        accessories: input.accessories ?? null,
         notes: input.notes,
         createdBy: userId,
         handledBy: userId,
@@ -268,6 +279,10 @@ export interface UpdateRentalInput {
   pickupLocation?: string | null;
   returnLocation?: string | null;
   depositRequired?: number;
+  fineHoldRequired?: number;
+  fineHoldDays?: number;
+  /** null = bỏ chỉnh, theo lại danh sách của xe. */
+  accessories?: HandoverAccessory[] | null;
   notes?: string | null;
   allowConflict?: boolean;
 }
@@ -289,6 +304,11 @@ export function updateRental(id: number, input: UpdateRentalInput, userId: numbe
     scheduledEnd: input.scheduledEnd ?? r.scheduledEnd,
   };
   if (next.scheduledEnd <= next.scheduledStart) throw badRequest('Giờ trả phải sau giờ nhận');
+  if (input.accessories !== undefined && r.status !== 'booked') throw badRequest('Đã giao xe — phụ kiện ghi theo biên bản giao xe');
+  const deposit = input.depositRequired ?? r.depositRequired;
+  // Hạ tiền cọc mà không sửa mức giữ → tự hạ theo; nhập mức giữ lớn hơn cọc thì báo lỗi.
+  const fineHold = input.fineHoldRequired ?? (r.fineHoldRequired == null ? null : Math.min(r.fineHoldRequired, deposit));
+  if (fineHold != null && fineHold > deposit) throw badRequest('Tiền giữ chờ phạt nguội không được lớn hơn tiền cọc');
   const scheduleChanged = next.vehicleId !== r.vehicleId || next.scheduledStart !== r.scheduledStart || next.scheduledEnd !== r.scheduledEnd;
   if (scheduleChanged && OPEN_STATUSES.includes(r.status)) {
     const conflicts = findConflicts(next.vehicleId, next.scheduledStart, next.scheduledEnd, r.id);
@@ -302,7 +322,11 @@ export function updateRental(id: number, input: UpdateRentalInput, userId: numbe
       pickupMethod: input.pickupMethod ?? r.pickupMethod,
       pickupLocation: input.pickupLocation !== undefined ? input.pickupLocation : r.pickupLocation,
       returnLocation: input.returnLocation !== undefined ? input.returnLocation : r.returnLocation,
-      depositRequired: input.depositRequired ?? r.depositRequired,
+      depositRequired: deposit,
+      fineHoldRequired: fineHold,
+      fineHoldDays: input.fineHoldDays ?? r.fineHoldDays,
+      // Đổi xe: danh sách phụ kiện đã chỉnh là của xe cũ → bỏ, trừ khi gửi kèm danh sách mới.
+      accessories: input.accessories !== undefined ? input.accessories : next.vehicleId !== r.vehicleId ? null : r.accessories,
       notes: input.notes !== undefined ? input.notes : r.notes,
       pricing: JSON.stringify(pricing),
       updatedAt: Date.now(),

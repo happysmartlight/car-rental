@@ -7,7 +7,7 @@ Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 
 | # | Câu hỏi | Đang tạm làm |
 |---|---|---|
 | 2 | Có mẫu hợp đồng Word sẵn không? Bên cho thuê là cá nhân, hộ kinh doanh hay công ty? | Dùng 3 mẫu dựng sẵn. Gửi file Word thật → chuyển thành mẫu có biến. Thông tin bên A nhập ở Cài đặt → Cửa hàng. |
-| 3 | Thế chấp kiểu gì, cọc bao nhiêu, giữ cọc phạt nguội bao nhiêu ngày? | Hỗ trợ cả cọc tiền lẫn tài sản (xe máy + cà vẹt, giấy tờ). Mặc định giữ 2.000.000 đ trong 15 ngày — sửa ở Cài đặt → Giá & quy định. |
+| 3 | Thế chấp kiểu gì, cọc bao nhiêu, giữ cọc phạt nguội bao nhiêu ngày? | Hỗ trợ cả cọc tiền lẫn tài sản (xe máy + cà vẹt, giấy tờ). Mặc định giữ 2.000.000 đ trong 15 ngày (sửa ở Cài đặt → Giá & quy định), không vượt tiền cọc của lượt; sửa được cho từng lượt lúc đặt xe. |
 | 7 | Pi 5 bao nhiêu RAM? | Giới hạn: app 768MB, Gotenberg 1GB (chỉ dùng khi in PDF). Pi 4GB vẫn chạy được nếu Immich không quá nặng. |
 | 8 | Có cần khách mở link từ Internet (ký online, đặt xe)? | Chỉ qua Tailscale. Nhân viên giao xe cần cài Tailscale trên điện thoại. |
 | — | Repo public hay private? | Tài liệu giả định public (như Family-Organizer): runner ARM64 miễn phí + Pi kéo image không cần đăng nhập. |

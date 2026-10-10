@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { VietQr } from '@/components/common';
 import { CustomerPicker } from '@/components/CustomerPicker';
 import { MultiPhotoInput } from '@/components/images';
+import { RentalAccessoriesEditor, useRentalAccessories } from '@/components/RentalAccessories';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Checkbox, DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select, Textarea } from '@/components/ui/form';
@@ -16,7 +17,7 @@ import { useAction, useSettings } from '@/lib/hooks';
 import type { Customer, Precheck, RentalDetail, VehicleWithStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { CHARGE_KINDS, CHARGE_KIND_LABEL, COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, type ChargeKind, type CollateralKind } from '@shared/constants';
-import { cancelForfeit, cancelMessage, cancelPolicyText, planCancellation, planSettlement } from '@shared/money';
+import { cancelForfeit, cancelMessage, cancelPolicyText, planCancellation, planSettlement, rentalFineHold } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime, fmtDuration } from '@shared/time';
 
@@ -133,19 +134,22 @@ export function SettleDialog({ d, open, onOpenChange }: DialogProps) {
   const { data: settings } = useSettings();
   const rules = settings?.rules;
   const m = d.money;
-  const plan = planSettlement(m, rules?.fineHoldAmount ?? 0);
+  // Mức giữ + số ngày theo thỏa thuận khi đặt xe (in trong hợp đồng).
+  const agreed = rules ? rentalFineHold(d.rental, rules) : { amount: 0, days: 15 };
+  const plan = planSettlement(m, agreed.amount);
   const [offset, setOffset] = useState<number | null>(plan.offset);
   const [keep, setKeep] = useState<number | null>(plan.keepHold);
-  const [days, setDays] = useState<number | null>(rules?.fineHoldDays ?? 15);
+  const [days, setDays] = useState<number | null>(agreed.days);
   const [collectMethod, setCollectMethod] = useState<'cash' | 'transfer'>('transfer');
   const [refundMethod, setRefundMethod] = useState<'cash' | 'transfer'>('transfer');
   useEffect(() => {
     if (!open) return;
-    const p = planSettlement(d.money, rules?.fineHoldAmount ?? 0);
+    const a = rules ? rentalFineHold(d.rental, rules) : { amount: 0, days: 15 };
+    const p = planSettlement(d.money, a.amount);
     setOffset(p.offset);
     setKeep(p.keepHold);
-    setDays(rules?.fineHoldDays ?? 15);
-  }, [open, d.money, rules]);
+    setDays(a.days);
+  }, [open, d.money, d.rental, rules]);
 
   const off = Math.min(offset ?? 0, Math.max(0, m.depositHeld), Math.max(0, m.due));
   const collect = Math.max(0, m.due - off);
@@ -188,7 +192,7 @@ export function SettleDialog({ d, open, onOpenChange }: DialogProps) {
               <MoneyInput value={offset} onChange={setOffset} />
             </Field>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Giữ lại chờ phạt nguội">
+              <Field label="Giữ lại chờ phạt nguội" hint={rules ? `Hợp đồng: ${fmtVnd(agreed.amount)} · ${agreed.days} ngày` : undefined}>
                 <MoneyInput value={keep} onChange={setKeep} />
               </Field>
               <Field label="Trong">
@@ -294,23 +298,35 @@ const EXTEND = [
 export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
   const r = d.rental;
   const booked = r.status === 'booked';
+  const { data: settings } = useSettings();
   const [vehicleId, setVehicleId] = useState(r.vehicleId);
   const [start, setStart] = useState<number | null>(r.scheduledStart);
   const [end, setEnd] = useState<number | null>(r.scheduledEnd);
   const [deposit, setDeposit] = useState<number | null>(r.depositRequired);
+  const [hold, setHold] = useState<number | null>(null);
+  const [holdDays, setHoldDays] = useState<number | null>(null);
   const [pickupLocation, setPickupLocation] = useState(r.pickupLocation ?? '');
   const [returnLocation, setReturnLocation] = useState(r.returnLocation ?? '');
   const [notes, setNotes] = useState(r.notes ?? '');
+  const acc = useRentalAccessories(vehicleId, vehicleId === r.vehicleId ? r.accessories : null, open && booked);
+  const resetAcc = acc.reset;
   useEffect(() => {
     if (!open) return;
     setVehicleId(r.vehicleId);
     setStart(r.scheduledStart);
     setEnd(r.scheduledEnd);
     setDeposit(r.depositRequired);
+    const agreed = settings ? rentalFineHold(r, settings.rules) : null;
+    setHold(agreed?.amount ?? r.fineHoldRequired);
+    setHoldDays(agreed?.days ?? r.fineHoldDays);
     setPickupLocation(r.pickupLocation ?? '');
     setReturnLocation(r.returnLocation ?? '');
     setNotes(r.notes ?? '');
-  }, [open, r]);
+    resetAcc();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, r, settings]);
+  const hasDeposit = (deposit ?? 0) > 0;
+  const holdError = hasDeposit && (hold ?? 0) > (deposit ?? 0) ? 'Không được lớn hơn tiền cọc' : null;
   const { data: vehicles } = useQuery({ queryKey: ['vehicles'], queryFn: () => api.get<VehicleWithStatus[]>('/api/vehicles'), enabled: open && booked });
   const valid = start != null && end != null && end > start;
   const { data: pre } = useQuery({
@@ -324,6 +340,9 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
         ...(booked ? { vehicleId, scheduledStart: start } : {}),
         ...(['booked', 'active'].includes(r.status) ? { scheduledEnd: end } : {}),
         depositRequired: deposit ?? 0,
+        ...(hold != null ? { fineHoldRequired: hasDeposit ? hold : 0 } : {}),
+        ...(holdDays != null ? { fineHoldDays: holdDays } : {}),
+        ...(booked && acc.edited ? { accessories: acc.edited } : {}),
         pickupLocation: pickupLocation || null,
         returnLocation: returnLocation || null,
         notes: notes || null,
@@ -338,7 +357,7 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
       onOpenChange={onOpenChange}
       title={r.status === 'active' ? 'Gia hạn / sửa thông tin' : 'Sửa lượt thuê'}
       footer={
-        <Button onClick={() => save.mutate(!!pre?.conflicts.length)} loading={save.isPending} disabled={!valid} variant={pre?.conflicts.length ? 'danger' : 'primary'}>
+        <Button onClick={() => save.mutate(!!pre?.conflicts.length)} loading={save.isPending} disabled={!valid || !!holdError} variant={pre?.conflicts.length ? 'danger' : 'primary'}>
           {pre?.conflicts.length ? 'Vẫn lưu (trùng lịch)' : 'Lưu'}
         </Button>
       }
@@ -389,9 +408,25 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
             Trùng lịch: {c.label}
           </Notice>
         ))}
-        <Field label="Tiền cọc thỏa thuận">
-          <MoneyInput value={deposit} onChange={setDeposit} />
-        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Tiền cọc thỏa thuận">
+            <MoneyInput value={deposit} onChange={setDeposit} />
+          </Field>
+          {hasDeposit && (
+            <Field label="Giữ lại chờ phạt nguội" error={holdError}>
+              <div className="grid grid-cols-[1fr_7rem] gap-2">
+                <MoneyInput value={hold} onChange={(v) => setHold(v ?? 0)} />
+                <NumberInput value={holdDays} onChange={setHoldDays} suffix="ngày" />
+              </div>
+            </Field>
+          )}
+        </div>
+        {booked && (
+          <div>
+            <p className="mb-1.5 text-sm font-medium">Phụ kiện kèm lượt này</p>
+            <RentalAccessoriesEditor items={acc.items} onChange={acc.setItems} catalog={acc.catalog} loading={acc.loading} />
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Nơi giao xe">
             <Input value={pickupLocation} onChange={(e) => setPickupLocation(e.target.value)} />

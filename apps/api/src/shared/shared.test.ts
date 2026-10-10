@@ -16,7 +16,8 @@ import {
   vehicleChargingPolicy,
   type VehiclePricing,
 } from './pricing.js';
-import { cancelForfeit, cancelMessage, cancelPolicyText, planCancellation, planSettlement, summarizeMoney } from './money.js';
+import { cancelForfeit, cancelMessage, cancelPolicyText, defaultFineHold, planCancellation, planSettlement, rentalFineHold, summarizeMoney } from './money.js';
+import { mergeAccessoryPlan } from './accessories.js';
 import { CAR_MAKES, findCarMake, findCarModel } from './carModels.js';
 import { suggestBookingSlot } from './booking.js';
 import { buildRentalShare, rentalShareStages, rentalShareText, type RentalShareInput } from './rentalShare.js';
@@ -306,6 +307,34 @@ describe('khách hủy đặt xe', () => {
     expect(cancelPolicyText(policy)).toBe('Hủy trong vòng 72 giờ (3 ngày) trước giờ nhận xe hoặc không đến nhận xe: mất toàn bộ tiền cọc (tiền thuê đã trả được hoàn lại). Hủy sớm hơn: hoàn lại toàn bộ tiền cọc và tiền thuê đã trả.');
     expect(cancelPolicyText({ cancelNoticeHours: 24, cancelForfeitPct: 50 })).toContain('trong vòng 24 giờ trước giờ nhận xe hoặc không đến nhận xe: mất 50% tiền cọc');
     expect(cancelPolicyText({ cancelNoticeHours: 24, cancelForfeitPct: 0 })).toBe('Hủy trước giờ nhận xe: hoàn lại toàn bộ tiền cọc và tiền thuê đã trả.');
+    expect(cancelPolicyText(policy, false)).toBe('Hủy trước giờ nhận xe: hoàn lại toàn bộ tiền thuê đã trả.');
+  });
+});
+
+describe('cọc chờ phạt nguội theo lượt', () => {
+  const rules = { fineHoldAmount: 2000000, fineHoldDays: 15 };
+  it('mặc định theo cài đặt nhưng không vượt tiền cọc', () => {
+    expect(defaultFineHold(5000000, rules)).toBe(2000000);
+    expect(defaultFineHold(1000000, rules)).toBe(1000000);
+    expect(defaultFineHold(0, rules)).toBe(0);
+  });
+  it('lượt đã thỏa thuận thì theo lượt; lượt cũ (null) theo cài đặt', () => {
+    expect(rentalFineHold({ depositRequired: 5000000, fineHoldRequired: 3000000, fineHoldDays: 30 }, rules)).toEqual({ amount: 3000000, days: 30 });
+    expect(rentalFineHold({ depositRequired: 0, fineHoldRequired: null, fineHoldDays: null }, rules)).toEqual({ amount: 0, days: 15 });
+  });
+});
+
+describe('phụ kiện theo lượt', () => {
+  const a = (id: number | null, name: string, present = true) => ({ id, name, quantity: 1, value: 0, present });
+  it('chưa chỉnh thì theo xe; đã chỉnh thì giữ nguyên + thêm món xe mới có', () => {
+    const current = [a(1, 'Camera'), a(2, 'Sạc'), a(3, 'Ô')];
+    expect(mergeAccessoryPlan(null, current)).toBe(current);
+    expect(mergeAccessoryPlan([a(1, 'Camera', false), a(2, 'Sạc'), a(null, 'Ghế trẻ em')], current).map((x) => [x.name, x.present])).toEqual([
+      ['Camera', false],
+      ['Sạc', true],
+      ['Ghế trẻ em', true],
+      ['Ô', true],
+    ]);
   });
 });
 

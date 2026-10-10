@@ -323,7 +323,7 @@ function RulesSection() {
       </Card>
 
       <Card>
-        <CardHeader title="Cọc chờ phạt nguội" description="Giữ lại một phần cọc sau khi trả xe để đối soát vi phạm" />
+        <CardHeader title="Cọc chờ phạt nguội" description="Mức mặc định khi đặt xe: giữ lại một phần cọc sau khi trả xe để đối soát vi phạm. Không vượt tiền cọc của lượt; sửa được cho từng lượt lúc đặt xe." />
         <CardBody className="grid gap-4 sm:grid-cols-2">
           <Field label="Số tiền giữ lại">
             <MoneyInput value={f.fineHoldAmount} onChange={(v) => setF({ ...f, fineHoldAmount: v ?? 0 })} />

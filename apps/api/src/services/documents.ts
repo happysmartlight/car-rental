@@ -23,11 +23,11 @@ import {
   TRANSMISSION_LABEL,
   type TemplateKind,
 } from '../shared/constants.js';
-import { cancelPolicyText, planSettlement } from '../shared/money.js';
+import { cancelPolicyText, planSettlement, rentalFineHold } from '../shared/money.js';
 import { chargeDays, freeChargesFor, monthKmLimit, quoteRental, rentalChargingPolicy, tripChargingText } from '../shared/pricing.js';
 import { fmtNumber, vndInWords } from '../shared/text.js';
-import { fmtDate, fmtDateKey, fmtDateTime, fmtDuration, vnDateLong } from '../shared/time.js';
-import { handoverAccessoryTemplate } from './accessories.js';
+import { DAY_MS, fmtDate, fmtDateKey, fmtDateTime, fmtDuration, vnDateLong } from '../shared/time.js';
+import { rentalAccessoryPlan } from './accessories.js';
 import { rentalDetail, rentalPricing } from './rentals.js';
 
 // ── Danh sách biến (hiển thị trong Cài đặt → Mẫu hợp đồng) ───────────────────
@@ -129,12 +129,12 @@ export const TEMPLATE_FIELDS: { group: string; fields: FieldDoc[] }[] = [
       { key: 'hd.hinh_thuc', label: 'Hình thức thuê: "theo ngày" / "theo tháng"' },
       { key: 'tien.tong', label: 'Tổng tiền' },
       { key: 'tien.tong_chu', label: 'Tổng tiền bằng chữ' },
-      { key: 'tien.coc', label: 'Tiền cọc thỏa thuận' },
+      { key: 'tien.coc', label: 'Tiền cọc thỏa thuận (điều kiện {#co_coc}…{/co_coc} khi có cọc, {^co_coc}…{/co_coc} khi không cọc)' },
       { key: 'tien.coc_chu', label: 'Tiền cọc bằng chữ' },
       { key: 'tien.coc_da_nhan', label: 'Tiền cọc đã nhận' },
       { key: 'tien.da_tra', label: 'Đã thanh toán' },
       { key: 'tien.con_lai', label: 'Còn phải trả' },
-      { key: 'tien.giu_coc', label: 'Số tiền cọc giữ chờ phạt nguội' },
+      { key: 'tien.giu_coc', label: 'Số tiền cọc giữ chờ phạt nguội, thỏa thuận khi đặt xe (điều kiện {#co_giu_coc}…{/co_giu_coc})' },
       { key: 'tien.giu_coc_ngay', label: 'Số ngày giữ cọc' },
       { key: 'tien.chinh_sach_huy', label: 'Chính sách hủy thuê (mất cọc khi hủy sát giờ)' },
     ],
@@ -200,7 +200,8 @@ export const TEMPLATE_FIELDS: { group: string; fields: FieldDoc[] }[] = [
       { key: 'qt.can_tru', label: 'Cấn trừ từ cọc' },
       { key: 'qt.thu_them', label: 'Khách trả thêm' },
       { key: 'qt.hoan_coc', label: 'Hoàn cọc ngay' },
-      { key: 'qt.giu_coc', label: 'Giữ lại chờ phạt nguội' },
+      { key: 'qt.giu_coc', label: 'Giữ lại chờ phạt nguội (điều kiện {#co_qt_giu_coc}…{/co_qt_giu_coc})' },
+      { key: 'qt.giu_coc_ngay', label: 'Số ngày giữ lại' },
     ],
   },
   { group: 'Khác', fields: [{ key: 'ngay_in', label: 'Thời điểm in' }] },
@@ -264,9 +265,16 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
   const tripDays = chargeDays(r.scheduledStart, r.scheduledEnd, rules.graceMinutes);
   const pickupHo = d.handovers.find((h) => h.kind === 'pickup');
   const returnHo = [...d.handovers].reverse().find((h) => h.kind === 'return');
-  const plan = planSettlement(d.money, rules.fineHoldAmount);
-  // Phụ kiện: theo biên bản giao xe nếu đã giao, chưa giao thì theo danh sách hiện tại của xe.
-  const accGiao: HandoverAccessory[] = pickupHo?.accessories?.length ? pickupHo.accessories : handoverAccessoryTemplate(v.id).map((a) => ({ ...a, present: false }));
+  const hold = rentalFineHold(r, rules);
+  const plan = planSettlement(d.money, hold.amount);
+  // Đã quyết toán thì lấy đúng số ngày đã giữ, chưa thì theo thỏa thuận.
+  const holdDays = r.fineHoldUntil && r.actualEnd ? Math.round((r.fineHoldUntil - r.actualEnd) / DAY_MS) : hold.days;
+  // Phụ kiện: theo biên bản giao xe nếu đã giao, chưa giao thì theo danh sách thỏa thuận lúc đặt xe (bỏ món không kèm).
+  const accGiao: HandoverAccessory[] = pickupHo?.accessories?.length
+    ? pickupHo.accessories
+    : rentalAccessoryPlan(r)
+        .filter((a) => a.present)
+        .map((a) => ({ ...a, present: false }));
   const accNhan = returnHo?.accessories ?? [];
   const yesNo = (x: boolean | undefined, checked: boolean) => (!checked ? '☐' : x ? 'Có' : 'Không');
   const giaoChecked = !!pickupHo?.accessories?.length;
@@ -338,10 +346,12 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
       coc_da_nhan: money(d.money.depositReceived),
       da_tra: money(d.money.rentPaid),
       con_lai: money(Math.max(0, d.money.due)),
-      giu_coc: money(r.fineHoldAmount || rules.fineHoldAmount),
-      giu_coc_ngay: rules.fineHoldDays,
-      chinh_sach_huy: cancelPolicyText(rules),
+      giu_coc: money(hold.amount),
+      giu_coc_ngay: hold.days,
+      chinh_sach_huy: cancelPolicyText(rules, r.depositRequired > 0),
     },
+    co_coc: r.depositRequired > 0,
+    co_giu_coc: hold.amount > 0 && hold.days > 0,
     khoan: d.charges.map((c) => ({ loai: CHARGE_KIND_LABEL[c.kind], mo_ta: c.description, so_tien: money(c.amount) })),
     phu_kien: accGiao.filter((a) => !giaoChecked || a.present).map((a) => ({ ten: a.name, so_luong: a.quantity, gia_tri: money(a.value), ghi_chu: a.note ?? '' })),
     co_phu_kien: accGiao.length > 0,
@@ -375,7 +385,9 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
       thu_them: money(plan.collect),
       hoan_coc: money(plan.refundDeposit),
       giu_coc: money(plan.keepHold),
+      giu_coc_ngay: holdDays,
     },
+    co_qt_giu_coc: plan.keepHold > 0,
     thoi_gian_thuc: `${fmtDateTime(start)} → ${fmtDateTime(end)}`,
     ngay_in: fmtDateTime(Date.now()),
     ngay_in_ngan: fmtDate(Date.now()),
@@ -512,9 +524,9 @@ export async function retryPdf(documentId: number, userId: number) {
  * (thành phiên bản mới của mẫu) — trừ khi người dùng đã thay file mẫu đó (builtin = "<key>-user").
  */
 const BUILTINS: { key: string; rev: number; file: string; name: string; kind: TemplateKind }[] = [
-  { key: 'contract', rev: 5, file: 'hop-dong-thue-xe.docx', name: 'Hợp đồng thuê xe tự lái', kind: 'contract' },
+  { key: 'contract', rev: 6, file: 'hop-dong-thue-xe.docx', name: 'Hợp đồng thuê xe tự lái', kind: 'contract' },
   { key: 'pickup', rev: 3, file: 'bien-ban-giao-xe.docx', name: 'Biên bản giao xe', kind: 'pickup' },
-  { key: 'return', rev: 3, file: 'bien-ban-nhan-xe.docx', name: 'Biên bản nhận xe & quyết toán', kind: 'return' },
+  { key: 'return', rev: 4, file: 'bien-ban-nhan-xe.docx', name: 'Biên bản nhận xe & quyết toán', kind: 'return' },
 ];
 
 export function builtinTemplatePath(file: string): string {

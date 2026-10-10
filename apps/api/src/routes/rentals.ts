@@ -31,7 +31,7 @@ import {
   updateRental,
 } from '../services/rentals.js';
 import { CHARGE_KINDS, COLLATERAL_KINDS, TEMPLATE_KINDS, type RentalStatus } from '../shared/constants.js';
-import { summarizeMoney } from '../shared/money.js';
+import { rentalFineHold, summarizeMoney } from '../shared/money.js';
 import { overKmCharge, overtimeCharge } from '../shared/pricing.js';
 import { plateKey, unaccent } from '../shared/text.js';
 import { fmtDateTime } from '../shared/time.js';
@@ -56,6 +56,21 @@ const zCharge = z.object({
   amount: zSignedMoney,
 });
 
+const zAccessories = z
+  .array(
+    z.object({
+      id: z.number().int().nullable(),
+      name: z.string().trim().min(1).max(80),
+      quantity: z.coerce.number().int().min(0).max(99),
+      value: z.coerce.number().int().min(0).default(0),
+      present: z.boolean(),
+      note: zOptText,
+    }),
+  )
+  .max(100);
+
+const zFineHoldDays = z.coerce.number().int().min(0).max(365);
+
 const zHandover = z.object({
   at: zMs,
   odo: z.coerce.number().int().min(0),
@@ -65,19 +80,7 @@ const zHandover = z.object({
   damages: z
     .array(z.object({ zone: z.string().max(60), note: z.string().max(500), fileId: zFileId, isNew: z.boolean().optional() }))
     .default([]),
-  accessories: z
-    .array(
-      z.object({
-        id: z.number().int().nullable(),
-        name: z.string().trim().min(1).max(80),
-        quantity: z.coerce.number().int().min(0).max(99),
-        value: z.coerce.number().int().min(0).default(0),
-        present: z.boolean(),
-        note: zOptText,
-      }),
-    )
-    .max(100)
-    .default([]),
+  accessories: zAccessories.default([]),
   notes: zOptText,
   signatureFileId: zFileId,
 });
@@ -199,6 +202,9 @@ export async function rentalRoutes(app: FastifyInstance) {
         discount: zMoney.default(0),
         discountNote: zOptText,
         depositRequired: zMoney.default(0),
+        fineHoldRequired: zMoney.nullable().optional(),
+        fineHoldDays: zFineHoldDays.nullable().optional(),
+        accessories: zAccessories.nullable().optional(),
         driverIds: z.array(z.number().int()).default([]),
         notes: zOptText,
         payments: z.array(zPaymentIn).default([]),
@@ -234,6 +240,9 @@ export async function rentalRoutes(app: FastifyInstance) {
         pickupLocation: zOptText,
         returnLocation: zOptText,
         depositRequired: zMoney.optional(),
+        fineHoldRequired: zMoney.optional(),
+        fineHoldDays: zFineHoldDays.optional(),
+        accessories: zAccessories.nullable().optional(),
         notes: zOptText,
         allowConflict: z.boolean().optional(),
       }),
@@ -309,13 +318,14 @@ export async function rentalRoutes(app: FastifyInstance) {
         refundRent: zMove,
         offset: zMoney.default(0),
         refundDeposit: zMove,
-        fineHoldDays: z.coerce.number().int().min(0).max(365).default(getSetting('rules').fineHoldDays),
+        fineHoldDays: zFineHoldDays.optional(),
         returnCollaterals: z.boolean().default(true),
         note: zOptText,
       }),
       req.body,
     );
-    const r = settle(id, body, userId(req));
+    const fineHoldDays = body.fineHoldDays ?? rentalFineHold(getRental(id), getSetting('rules')).days;
+    const r = settle(id, { ...body, fineHoldDays }, userId(req));
     audit(req, 'rental.settle', 'rental', id, body);
     return r;
   });

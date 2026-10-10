@@ -34,10 +34,11 @@ import { Button, ButtonLink } from '@/components/ui/button';
 import { Dialog, useConfirm } from '@/components/ui/dialog';
 import { Badge, Card, CardBody, CardHeader, InfoRow, Menu, MenuItem, MenuSeparator, Notice, PageLoader } from '@/components/ui/misc';
 import { api, fileUrl, qs } from '@/lib/api';
-import { useAction, useAuth, useNow } from '@/lib/hooks';
+import { useAction, useAuth, useNow, useSettings } from '@/lib/hooks';
 import type { Handover, RentalDetail as Detail } from '@/lib/types';
 import { cn, errorMessage, telLink, zaloLink } from '@/lib/utils';
 import { CHARGE_KIND_LABEL, COLLATERAL_KIND_LABEL, PAYMENT_METHOD_LABEL, PHOTO_SLOTS, TEMPLATE_KIND_LABEL, type TemplateKind } from '@shared/constants';
+import { rentalFineHold } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { fmtDate, fmtDateTime, fmtDuration } from '@shared/time';
 import { CancelDialog, ChargeDialog, CollateralDialog, DriverDialog, EditRentalDialog, PaymentDialog, ReleaseHoldDialog, ScanDialog, SettleDialog } from './RentalDialogs';
@@ -123,6 +124,7 @@ export default function RentalDetail() {
   const confirm = useConfirm();
   const { isAdmin } = useAuth();
   const now = useNow();
+  const { data: settings } = useSettings();
   const [dialog, setDialog] = useState<DialogName>(params.get('settle') === '1' ? 'settle' : null);
   const [payPreset, setPayPreset] = useState<'rent_in' | 'deposit_in' | 'deposit_out' | 'rent_out'>('rent_in');
   const [scanDoc, setScanDoc] = useState<number | null>(null);
@@ -148,6 +150,10 @@ export default function RentalDetail() {
   const pickupHo = d.handovers.find((h) => h.kind === 'pickup');
   const returnHo = [...d.handovers].reverse().find((h) => h.kind === 'return');
   const userName = (uid: number | null) => d.users.find((u) => u.id === uid)?.displayName ?? '—';
+  const agreedHold = settings ? rentalFineHold(r, settings.rules) : null;
+  // Phụ kiện đã chỉnh riêng cho lượt (chỉ hiện trước khi giao xe — sau đó xem biên bản giao xe).
+  const accNotIncluded = r.status === 'booked' ? (r.accessories ?? []).filter((a) => !a.present).map((a) => a.name) : [];
+  const accExtra = r.status === 'booked' ? (r.accessories ?? []).filter((a) => a.id == null && a.present).map((a) => a.name) : [];
   const canShare = rentalShareStagesOf(d).length > 0;
 
   const generate = async (kind: TemplateKind) => {
@@ -334,6 +340,8 @@ export default function RentalDetail() {
               <InfoRow label="Thời gian">{fmtDuration(r.scheduledEnd - r.scheduledStart)}</InfoRow>
               <InfoRow label="Giới hạn km">{r.kmLimit ? `${fmtNumber(r.kmLimit)} km` : 'Không giới hạn'}</InfoRow>
               <InfoRow label="Giao nhận">{r.pickupMethod === 'delivery' ? `Giao tận nơi: ${r.pickupLocation ?? ''}` : 'Khách tới lấy'}</InfoRow>
+              {accNotIncluded.length > 0 && <InfoRow label="Không kèm">{accNotIncluded.join(', ')}</InfoRow>}
+              {accExtra.length > 0 && <InfoRow label="Phụ kiện thêm">{accExtra.join(', ')}</InfoRow>}
               {r.notes && <InfoRow label="Ghi chú">{r.notes}</InfoRow>}
               <InfoRow label="Người tạo">{userName(r.createdBy)}</InfoRow>
             </CardBody>
@@ -361,6 +369,14 @@ export default function RentalDetail() {
                     {fmtVnd(m.depositHeld)} {['booked', 'active'].includes(r.status) && r.depositRequired > m.depositHeld && <span className="text-xs text-amber-600">/ {fmtNumber(r.depositRequired)}</span>}
                   </span>
                 </div>
+                {['booked', 'active', 'returned'].includes(r.status) && agreedHold && agreedHold.amount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted">Giữ chờ phạt nguội</span>
+                    <span className="tabular">
+                      {fmtVnd(agreedHold.amount)} · {agreedHold.days} ngày
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {m.due > 0 && (
