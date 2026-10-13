@@ -3,6 +3,23 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.4.0] - 2026-10-13
+
+### Mới
+- **Đọc GPLX từ ảnh** — tải ảnh vào ô **Mặt trước GPLX** trong hồ sơ khách (thẻ PET, cả mẫu cũ của Bộ GTVT lẫn mẫu mới của Cục CSGT), app tự đọc và điền **số GPLX, hạng, ngày cấp, ngày hết hạn** (hoặc "Không thời hạn"). Họ tên chỉ điền khi ô còn trống; khác tên khách đang nhập thì app cảnh báo — GPLX phải đúng của người thuê. Ảnh nghiêng, xoay ngang hay lộn ngược vẫn đọc được.
+- **Ngày cấp GPLX** — trường mới trong hồ sơ khách, hiện ở trang khách và dùng được trong mẫu hợp đồng bằng `{khach.gplx_ngay_cap}`.
+- **Tự lấy ảnh chân dung từ CCCD** — chọn ảnh mặt trước CCCD gắn chip (ở nút quét QR hoặc ô **Mặt trước CCCD**), app cắt ảnh chân dung trên thẻ, xoay thẳng và điền vào **Ảnh chân dung** nếu khách chưa có ảnh.
+- **QR hỏng vẫn lấy được thông tin khách** — ảnh mặt trước căn cước mà không đọc được QR thì app đọc chữ trên thẻ: **số CCCD, họ tên, ngày sinh, giới tính, nơi thường trú**. Chỉ điền ô còn trống; khác thông tin đang nhập thì cảnh báo, không điền đè. Ngày cấp in ở mặt sau thẻ nên vẫn nhập tay.
+- **Tải ảnh CCCD là điền luôn thông tin** — ô **Mặt trước CCCD** (CCCD gắn chip) và **Mặt sau CCCD** (thẻ Căn cước từ 7/2024, QR in ở mặt sau) tự đọc QR và điền như khi quét. Ảnh là thẻ của người khác thì app cảnh báo, không điền đè.
+
+### Cải tiến
+- **Quét QR căn cước nhạy hơn nhiều** — đọc được QR mờ, loang mực, ảnh đã gửi qua Zalo (trước đây nhiều ảnh báo "Không tìm thấy QR căn cước"). Quét bằng camera cũng bắt mã nhanh hơn.
+- Hộp quét QR ghi rõ chỗ in QR: CCCD gắn chip ở **mặt trước**, thẻ Căn cước (từ 7/2024) ở **mặt sau**. Nút chọn ảnh đổi thành **Chụp / chọn ảnh thẻ**.
+
+### Lưu ý
+- Thông tin đọc từ chữ trên ảnh (GPLX, hoặc CCCD khi QR hỏng) có thể sai vài chữ — app luôn nhắc **kiểm tra lại** trước khi lưu. Thông tin đọc từ QR thì chính xác.
+- Việc đọc ảnh chạy ngay trên điện thoại, ảnh không gửi đi đâu. Lần đầu đọc chữ, app tải thêm khoảng 5,5 MB dữ liệu nhận dạng chữ (sau đó dùng lại, không cần tải nữa); mỗi lần đọc mất vài giây.
+
 ## [0.3.0] - 2026-10-10
 
 ### Mới

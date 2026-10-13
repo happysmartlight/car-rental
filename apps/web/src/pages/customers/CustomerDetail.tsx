@@ -131,6 +131,7 @@ export default function CustomerDetail() {
                     <span className="tabular">{c.licenseNumber}</span>
                   </InfoRow>
                   <InfoRow label="Hạng">{c.licenseClass}</InfoRow>
+                  <InfoRow label="Cấp GPLX">{fmtDateKey(c.licenseIssueDate)}</InfoRow>
                   <InfoRow label="Hạn GPLX">
                     {c.licenseExpiry ? (
                       <span className={licenseDays != null && licenseDays < 0 ? 'text-red-600' : undefined}>

@@ -88,9 +88,10 @@ describe('luồng một lượt thuê', () => {
   });
 
   it('thêm khách, chặn trùng CCCD, tìm không dấu', async () => {
-    const body = { fullName: 'Nguyễn Văn An', idNumber: '079090001234', dob: '1990-08-15', phone: '0901234567', licenseNumber: '790123456789', licenseClass: 'B', licenseExpiry: '2030-01-01', permanentAddress: '12 Lê Lợi' };
+    const body = { fullName: 'Nguyễn Văn An', idNumber: '079090001234', dob: '1990-08-15', phone: '0901234567', licenseNumber: '790123456789', licenseClass: 'B', licenseExpiry: '2030-01-01', licenseIssueDate: '2020-01-01', permanentAddress: '12 Lê Lợi' };
     const r = await call('POST', '/api/customers', body);
     expect(r.status).toBe(200);
+    expect(r.json.licenseIssueDate).toBe('2020-01-01');
     customerId = r.json.id;
     const dup = await call('POST', '/api/customers', body);
     expect(dup.status).toBe(409);

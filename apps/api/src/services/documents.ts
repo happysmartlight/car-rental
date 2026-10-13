@@ -71,6 +71,7 @@ export const TEMPLATE_FIELDS: { group: string; fields: FieldDoc[] }[] = [
       { key: 'khach.gplx', label: 'Số GPLX' },
       { key: 'khach.gplx_hang', label: 'Hạng GPLX' },
       { key: 'khach.gplx_han', label: 'Hạn GPLX' },
+      { key: 'khach.gplx_ngay_cap', label: 'Ngày cấp GPLX' },
       { key: 'khach.lien_he_khan', label: 'Người liên hệ khẩn cấp' },
     ],
   },
@@ -227,6 +228,7 @@ function customerFields(c: Customer) {
     gplx: c.licenseNumber ?? '',
     gplx_hang: c.licenseClass ?? '',
     gplx_han: c.licenseExpiry ? fmtDateKey(c.licenseExpiry) : 'Không thời hạn',
+    gplx_ngay_cap: fmtDateKey(c.licenseIssueDate),
     lien_he_khan: [c.emergencyName, c.emergencyRelation && `(${c.emergencyRelation})`, c.emergencyPhone].filter(Boolean).join(' '),
   };
 }

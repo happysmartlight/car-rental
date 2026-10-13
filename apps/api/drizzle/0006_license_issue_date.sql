@@ -1,0 +1,1 @@
+ALTER TABLE `customers` ADD `license_issue_date` text;

@@ -43,6 +43,13 @@
       "when": 1791633350079,
       "tag": "0005_cashbook",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791892656047,
+      "tag": "0006_license_issue_date",
+      "breakpoints": true
     }
   ]
 }

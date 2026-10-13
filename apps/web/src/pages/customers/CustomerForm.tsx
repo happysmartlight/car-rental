@@ -1,5 +1,5 @@
 import { IdCard, ScanLine, UserCheck } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { toast } from 'sonner';
 import { CccdScanner } from '@/components/CccdScanner';
@@ -7,14 +7,19 @@ import { PhotoInput } from '@/components/images';
 import { Button } from '@/components/ui/button';
 import { Checkbox, DateInput, Field, Input, Select, Switch, Textarea } from '@/components/ui/form';
 import { Notice } from '@/components/ui/misc';
-import { ApiError, api } from '@/lib/api';
+import { ApiError, api, uploadFile } from '@/lib/api';
+import { readCccdImage } from '@/lib/cccdPhoto';
 import { useAuth } from '@/lib/hooks';
 import type { Customer, Warning } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
-import type { CccdData } from '@shared/cccd';
+import { CAN_CUOC_FROM, inferIssuePlace, type CccdData, type CccdOcrData } from '@shared/cccd';
 import { LICENSE_CLASSES } from '@shared/constants';
+import { unaccent } from '@shared/text';
 
 type FormState = Partial<Omit<Customer, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt'>>;
+
+/** So tên bỏ dấu — OCR hay sai dấu ("Tiến" → "Tiền") nhưng vẫn là cùng một người. */
+const sameName = (a: string, b: string) => unaccent(a).replace(/\s+/g, ' ').trim() === unaccent(b).replace(/\s+/g, ' ').trim();
 
 const ID_TYPES = [
   { value: 'cccd_chip', label: 'CCCD gắn chip' },
@@ -69,14 +74,119 @@ export function CustomerForm({
     if (initial) setF(initial);
   }, [initial]);
 
-  const onScan = async (d: CccdData) => {
-    setF((s) => ({ ...s, ...d }));
-    toast.success(`Đã đọc CCCD: ${d.fullName}`);
+  // Đọc ảnh mất vài giây — lúc có kết quả thì so với form mới nhất, không phải `f` lúc bấm chọn ảnh.
+  const latest = useRef(f);
+  latest.current = f;
+
+  const lookupExisting = async (idNumber: string) => {
     try {
-      const r = await api.get<{ customer: Customer | null; warnings: Warning[] }>(`/api/customers/lookup?idNumber=${d.idNumber}`);
+      const r = await api.get<{ customer: Customer | null; warnings: Warning[] }>(`/api/customers/lookup?idNumber=${idNumber}`);
       if (r.customer && r.customer.id !== initial?.id) setExisting({ customer: r.customer, warnings: r.warnings });
     } catch {
       /* tra cứu phụ, bỏ qua lỗi */
+    }
+  };
+
+  // Ảnh chân dung cắt từ CCCD — chỉ điền khi khách chưa có, không đè ảnh đã chụp.
+  const addPortrait = async (portrait: Blob) => {
+    if (latest.current.portraitFileId) return;
+    try {
+      const r = await uploadFile(portrait, 'portrait', { name: 'portrait.jpg' });
+      setF((s) => (s.portraitFileId ? s : { ...s, portraitFileId: r.id }));
+      toast.success('Đã lấy ảnh chân dung từ CCCD');
+    } catch {
+      /* phụ, bỏ qua lỗi */
+    }
+  };
+
+  // QR căn cước: đúng tuyệt đối → điền đè.
+  const onScan = async (d: CccdData, _raw: string, portrait?: Blob | null) => {
+    setF((s) => ({ ...s, ...d }));
+    toast.success(`Đã đọc CCCD: ${d.fullName}`);
+    if (portrait) void addPortrait(portrait);
+    await lookupExisting(d.idNumber);
+  };
+
+  // Chữ đọc bằng OCR (QR hỏng) có thể sai: chỉ điền ô còn trống; khác thông tin đang có thì cảnh báo, không đè.
+  const onOcr = async (d: CccdOcrData, toastId?: string | number) => {
+    const cur = latest.current;
+    const conflicts = [
+      d.idNumber && cur.idNumber && d.idNumber !== cur.idNumber && `số CCCD ${d.idNumber}`,
+      d.fullName && cur.fullName?.trim() && !sameName(d.fullName, cur.fullName) && `tên "${d.fullName}"`,
+    ].filter(Boolean);
+    setF((s) => ({
+      ...s,
+      idNumber: s.idNumber || d.idNumber,
+      fullName: s.fullName?.trim() ? s.fullName : (d.fullName ?? s.fullName),
+      dob: s.dob || d.dob,
+      gender: s.gender || d.gender,
+      permanentAddress: s.permanentAddress || d.permanentAddress,
+      ...(d.idCardType === 'can_cuoc' && { idCardType: d.idCardType, idIssuePlace: s.idIssuePlace || inferIssuePlace(CAN_CUOC_FROM).place }),
+    }));
+    const got = [d.idNumber && 'số CCCD', d.fullName && 'họ tên', d.dob && 'ngày sinh', d.gender && 'giới tính', d.permanentAddress && 'địa chỉ'].filter(Boolean);
+    toast.success(`Không đọc được QR — đã đọc chữ trên thẻ: ${got.join(', ')}. Kiểm tra lại cho chắc; ngày cấp in ở mặt sau thẻ.`, { id: toastId, duration: 8000 });
+    if (conflicts.length) toast.warning(`Chữ trên ảnh khác thông tin đang nhập (${conflicts.join(', ')}) — không điền đè`, { duration: 10_000 });
+    if (d.idNumber && !cur.idNumber) await lookupExisting(d.idNumber);
+  };
+
+  // Ảnh CCCD tải lên: có QR (mặt trước CCCD gắn chip / mặt sau thẻ Căn cước 2024) → điền như quét QR + cắt chân dung.
+  // Mặt trước mà QR hỏng → đọc chữ (OCR), chỉ khi form còn thiếu số CCCD/họ tên — đỡ chờ vài giây vô ích.
+  const fromIdPhoto = async (image: Blob, side: 'front' | 'back') => {
+    const cur = latest.current;
+    const ocr = side === 'front' && (!cur.idNumber || !cur.fullName?.trim());
+    const id = ocr ? toast.loading('Đang đọc ảnh CCCD…') : undefined;
+    try {
+      const r = await readCccdImage(image, { ocr, onOcrStart: () => toast.loading('Không đọc được QR — đang đọc chữ trên thẻ…', { id }) });
+      if (r?.source === 'qr') {
+        const now = latest.current.idNumber;
+        if (now && now !== r.data.idNumber) {
+          toast.warning(`Ảnh là CCCD của ${r.data.fullName} (${r.data.idNumber}) — khác số CCCD đang nhập, không điền đè`, { id, duration: 10_000 });
+          return;
+        }
+        if (id) toast.dismiss(id);
+        await onScan(r.data, r.text, r.portrait);
+      } else if (r) await onOcr(r.data, id);
+      else if (id) toast.error('Không đọc được thông tin trên ảnh CCCD — nhập tay giúp', { id });
+    } catch {
+      if (id) toast.error('Không đọc được ảnh CCCD — nhập tay giúp', { id });
+    }
+  };
+
+  // OCR mặt trước GPLX: ghi đè các trường GPLX (ảnh mới là nguồn mới nhất); họ tên chỉ điền khi còn trống,
+  // khác tên đang có thì cảnh báo — GPLX phải đúng của người thuê.
+  const licenseFromPhoto = async (image: Blob) => {
+    const id = toast.loading('Đang đọc chữ trên GPLX…');
+    try {
+      const { readGplxPhoto } = await import('@/lib/gplxPhoto');
+      const g = await readGplxPhoto(image);
+      if (!g) {
+        toast.error('Không đọc được chữ trên GPLX — nhập tay giúp', { id });
+        return;
+      }
+      setF((s) => ({
+        ...s,
+        licenseNumber: g.licenseNumber ?? s.licenseNumber,
+        licenseClass: g.licenseClass ?? s.licenseClass,
+        licenseIssueDate: g.issueDate ?? s.licenseIssueDate,
+        licenseExpiry: g.noExpiry ? null : (g.expiry ?? s.licenseExpiry),
+        fullName: s.fullName?.trim() ? s.fullName : (g.fullName ?? s.fullName),
+      }));
+      if (g.noExpiry) setNoExpiry(true);
+      else if (g.expiry) setNoExpiry(false);
+      const got = [
+        g.licenseNumber && 'số',
+        g.licenseClass && `hạng ${g.licenseClass}`,
+        g.issueDate && 'ngày cấp',
+        (g.expiry || g.noExpiry) && 'hạn',
+        g.fullName && 'họ tên',
+      ].filter(Boolean);
+      toast.success(`Đã đọc GPLX: ${got.join(', ')} — kiểm tra lại cho chắc`, { id });
+      const name = latest.current.fullName;
+      if (g.fullName && name?.trim() && !sameName(g.fullName, name)) {
+        toast.warning(`Tên trên GPLX "${g.fullName}" khác tên khách "${name}"`, { duration: 10_000 });
+      }
+    } catch {
+      toast.error('Không đọc được GPLX — nhập tay giúp', { id });
     }
   };
 
@@ -181,8 +291,8 @@ export function CustomerForm({
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:max-w-md">
-          <PhotoInput kind="id_front" label="Mặt trước CCCD" value={f.idFrontFileId} onChange={(v) => set('idFrontFileId', v)} />
-          <PhotoInput kind="id_back" label="Mặt sau CCCD" value={f.idBackFileId} onChange={(v) => set('idBackFileId', v)} />
+          <PhotoInput kind="id_front" label="Mặt trước CCCD" value={f.idFrontFileId} onChange={(v) => set('idFrontFileId', v)} onPicked={(img) => void fromIdPhoto(img, 'front')} />
+          <PhotoInput kind="id_back" label="Mặt sau CCCD" value={f.idBackFileId} onChange={(v) => set('idBackFileId', v)} onPicked={(img) => void fromIdPhoto(img, 'back')} />
         </div>
       </Section>
 
@@ -224,13 +334,16 @@ export function CustomerForm({
               ))}
             </Select>
           </Field>
+          <Field label="Ngày cấp">
+            <DateInput value={f.licenseIssueDate} onChange={(v) => set('licenseIssueDate', v)} />
+          </Field>
           <Field label="Có giá trị đến">
             {noExpiry ? <Input value="Không thời hạn" disabled /> : <DateInput value={f.licenseExpiry} onChange={(v) => set('licenseExpiry', v)} />}
             <Checkbox className="mt-2" checked={noExpiry} onChange={setNoExpiry} label="Không thời hạn" />
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:max-w-md">
-          <PhotoInput kind="license_front" label="Mặt trước GPLX" value={f.licenseFrontFileId} onChange={(v) => set('licenseFrontFileId', v)} />
+          <PhotoInput kind="license_front" label="Mặt trước GPLX" value={f.licenseFrontFileId} onChange={(v) => set('licenseFrontFileId', v)} onPicked={(img) => void licenseFromPhoto(img)} />
           <PhotoInput kind="license_back" label="Mặt sau GPLX" value={f.licenseBackFileId} onChange={(v) => set('licenseBackFileId', v)} />
         </div>
       </Section>
@@ -280,7 +393,7 @@ export function CustomerForm({
         </Button>
       </div>
 
-      <CccdScanner open={scanOpen} onOpenChange={setScanOpen} onResult={onScan} />
+      <CccdScanner open={scanOpen} onOpenChange={setScanOpen} onResult={onScan} onOcr={(d) => void onOcr(d)} />
     </div>
   );
 }

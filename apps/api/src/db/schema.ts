@@ -222,6 +222,7 @@ export const customers = sqliteTable(
     licenseNumber: text('license_number'),
     licenseClass: text('license_class'),
     licenseExpiry: text('license_expiry'),
+    licenseIssueDate: text('license_issue_date'),
     emergencyName: text('emergency_name'),
     emergencyPhone: text('emergency_phone'),
     emergencyRelation: text('emergency_relation'),

@@ -33,6 +33,7 @@ const zCustomer = z.object({
   licenseNumber: zOptText,
   licenseClass: zOptText,
   licenseExpiry: zDateKey,
+  licenseIssueDate: zDateKey,
   emergencyName: zOptText,
   emergencyPhone: zOptText,
   emergencyRelation: zOptText,

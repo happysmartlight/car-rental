@@ -81,6 +81,7 @@ export function PhotoInput({
   camera,
   className,
   aspect = 'aspect-[4/3]',
+  onPicked,
 }: {
   value: string | null | undefined;
   onChange: (fileId: string | null) => void;
@@ -90,6 +91,8 @@ export function PhotoInput({
   camera?: boolean;
   className?: string;
   aspect?: string;
+  /** Gọi thêm với ảnh (đã nén) sau khi tải lên xong — vd. cắt ảnh chân dung từ mặt trước CCCD. */
+  onPicked?: (image: Blob) => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -102,6 +105,7 @@ export function PhotoInput({
       const blob = await compressImage(file, kind.startsWith('id_') || kind.startsWith('license_') ? 2600 : 2000);
       const r = await uploadFile(blob, kind, { stamp: typeof stamp === 'function' ? stamp() : stamp, name: 'photo.jpg' });
       onChange(r.id);
+      onPicked?.(blob);
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {

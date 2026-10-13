@@ -3,24 +3,29 @@
 
 import { ImageUp, ScanLine } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader';
-import wasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url';
-import { parseCccdQr, type CccdData } from '@shared/cccd';
+import { parseCccdQr, type CccdData, type CccdOcrData } from '@shared/cccd';
+import { grab, readCccdImage, readQr } from '@/lib/cccdPhoto';
+import { applyQrFilter, QR_PASSES } from '@/lib/qrImage';
 import { Button } from './ui/button';
 import { Dialog } from './ui/dialog';
 import { Notice } from './ui/misc';
 
-prepareZXingModule({
-  overrides: {
-    locateFile: (path: string, prefix: string) => (path.endsWith('.wasm') ? wasmUrl : prefix + path),
-  },
-});
-
-const OPTS = { formats: ['QRCode' as const], tryHarder: true, maxNumberOfSymbols: 1 };
-
-export function CccdScanner({ open, onOpenChange, onResult }: { open: boolean; onOpenChange: (o: boolean) => void; onResult: (d: CccdData, raw: string) => void }) {
+export function CccdScanner({
+  open,
+  onOpenChange,
+  onResult,
+  onOcr,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  /** `portrait`: ảnh chân dung cắt từ ảnh thẻ (chỉ khi chọn ảnh mặt trước CCCD gắn chip). */
+  onResult: (d: CccdData, raw: string, portrait?: Blob | null) => void;
+  /** Ảnh chọn không đọc được QR → đọc chữ trên thẻ (OCR). Không truyền thì chỉ đọc QR. */
+  onOcr?: (d: CccdOcrData) => void;
+}) {
   const video = useRef<HTMLVideoElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
 
@@ -29,8 +34,8 @@ export function CccdScanner({ open, onOpenChange, onResult }: { open: boolean; o
     let stream: MediaStream | null = null;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let frame = 0;
     const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
     setError(null);
     setHint(null);
 
@@ -38,14 +43,14 @@ export function CccdScanner({ open, onOpenChange, onResult }: { open: boolean; o
       if (stopped) return;
       const v = video.current;
       if (v && v.readyState >= 2 && v.videoWidth) {
-        // Cắt vùng giữa khung hình — nhanh hơn và khớp khung ngắm.
+        // Cắt vùng giữa khung hình — nhanh hơn và khớp khung ngắm. Mỗi khung hình thử một cách xử lý ảnh.
         const side = Math.min(v.videoWidth, v.videoHeight) * 0.8;
-        canvas.width = side;
-        canvas.height = side;
-        ctx.drawImage(v, (v.videoWidth - side) / 2, (v.videoHeight - side) / 2, side, side, 0, 0, side, side);
+        const { scale, filter } = QR_PASSES[frame++ % QR_PASSES.length];
         try {
-          const [res] = await readBarcodes(ctx.getImageData(0, 0, side, side), OPTS);
-          if (res?.text) {
+          const img = grab(canvas, v, (v.videoWidth - side) / 2, (v.videoHeight - side) / 2, side, side, scale);
+          applyQrFilter(img, filter);
+          const res = await readQr(img);
+          if (res) {
             const parsed = parseCccdQr(res.text);
             if (parsed) {
               navigator.vibrate?.(80);
@@ -90,22 +95,24 @@ export function CccdScanner({ open, onOpenChange, onResult }: { open: boolean; o
 
   const fromFile = async (file: File | undefined) => {
     if (!file) return;
+    if (fileRef.current) fileRef.current.value = '';
     setHint('Đang đọc ảnh…');
+    setBusy(true);
     try {
-      const [res] = await readBarcodes(file, OPTS);
-      const parsed = res?.text ? parseCccdQr(res.text) : null;
-      if (parsed && res) {
-        onResult(parsed, res.text);
-        onOpenChange(false);
-      } else setHint('Không tìm thấy QR căn cước trong ảnh. Chụp gần, rõ góc QR.');
+      const r = await readCccdImage(file, { ocr: !!onOcr, onOcrStart: () => setHint('Không đọc được QR — đang đọc chữ trên thẻ…') });
+      if (r?.source === 'qr') onResult(r.data, r.text, r.portrait);
+      else if (r) onOcr?.(r.data);
+      if (r) onOpenChange(false);
+      else setHint(onOcr ? 'Không đọc được QR lẫn chữ trên ảnh. Chụp mặt trước thẻ gần, đủ sáng, không lóa.' : 'Không tìm thấy QR căn cước trong ảnh. Chụp gần, rõ góc QR.');
     } catch {
       setHint('Không đọc được ảnh');
+    } finally {
+      setBusy(false);
     }
-    if (fileRef.current) fileRef.current.value = '';
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Quét QR căn cước" description="Đưa mã QR ở mặt trước thẻ vào giữa khung" size="md">
+    <Dialog open={open} onOpenChange={onOpenChange} title="Quét QR căn cước" description="Đưa mã QR vào giữa khung — CCCD gắn chip: mặt trước; thẻ Căn cước (từ 7/2024): mặt sau" size="md">
       <div className="space-y-3">
         {error ? (
           <Notice tone="amber">{error}</Notice>
@@ -119,9 +126,10 @@ export function CccdScanner({ open, onOpenChange, onResult }: { open: boolean; o
         )}
         {hint && <p className="text-center text-sm text-muted">{hint}</p>}
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void fromFile(e.target.files?.[0])} />
-        <Button variant="outline" className="w-full" onClick={() => fileRef.current?.click()}>
-          <ImageUp /> Chọn ảnh chụp QR có sẵn
+        <Button variant="outline" className="w-full" loading={busy} onClick={() => fileRef.current?.click()}>
+          <ImageUp /> Chụp / chọn ảnh thẻ
         </Button>
+        {onOcr && <p className="text-center text-xs text-muted">Không quét được QR? Chụp mặt trước thẻ — app sẽ đọc chữ trên thẻ.</p>}
       </div>
     </Dialog>
   );

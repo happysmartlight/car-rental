@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { formatPlate, numberToVietnameseWords, parseMoney, plateKey, unaccent, vndInWords } from './text.js';
 import { buildVietQrPayload, crc16, sanitizeTransferNote } from './vietqr.js';
-import { parseCccdQr } from './cccd.js';
+import { cccdOcrFieldCount, mergeCccdOcr, parseCccdQr, parseCccdText } from './cccd.js';
+import { gplxFieldCount, mergeGplx, parseGplxText } from './gplx.js';
 import {
   DEFAULT_PRICING_RULES,
   chargeDays,
@@ -107,6 +108,168 @@ describe('QR CCCD', () => {
     expect(d?.gender).toBe('Nữ');
   });
   it('chuỗi lạ → null', () => expect(parseCccdQr('https://example.com')).toBeNull());
+});
+
+describe('OCR mặt trước CCCD (khi QR hỏng)', () => {
+  it('CCCD gắn chip — chữ OCR thật: nhãn mất ":", năm sinh bị tách, rác quanh tên', () => {
+    const d = parseCccdText(`CĂN CƯỚC CÔNG DÂN
+Citizen Identity Card m®x
+Số / No. 079095001234
+Họ và tên / Full name:
+ˆ ~ LÊ MINH KHOA
+ˆ Ngày sinh / Date of birh: 05/05/1 995 l—C => si
+-~- Giới tính/Sexx: Nam Quốc tịch/ Natlonality: Việt Nam.
+Quê quán / Place of origin: :
+Châu Thành, Long An &
+Nơi thường trú / Place of resilenee-Phú Hòa -
+_Phú Lợi, TP. Thủ Dầu Một, Bình Dương -
+Gó giá trị đền: 05052035`);
+    expect(d).toEqual({
+      idNumber: '079095001234',
+      fullName: 'Lê Minh Khoa',
+      dob: '1995-05-05',
+      gender: 'Nam',
+      permanentAddress: 'Phú Hòa, Phú Lợi, TP. Thủ Dầu Một, Bình Dương',
+      idCardType: null,
+    });
+    expect(cccdOcrFieldCount(d)).toBe(5);
+  });
+
+  it('nhãn số bị đọc thành "só:x:", địa chỉ có rác đầu dòng và số bị tách', () => {
+    const d = parseCccdText(`só:x: 001096012345
+Họ' và tên / Full name:
+PHẠM TIẾN DŨNG
+Ngày sinh/Dateofbithh. 12/03/1996
+Giớitính/Sex: Nam Quóc tịch/ Naffonaliy: Việt Nam
+Nơi thường trú / Place of vờ NG !
+g 2 1/4/7, KP2.
+Tân Mai, Thành phố Biên Hòa, Đồng Nai.`);
+    expect(d).toMatchObject({
+      idNumber: '001096012345',
+      fullName: 'Phạm Tiến Dũng',
+      dob: '1996-03-12',
+      permanentAddress: '21/4/7, KP2, Tân Mai, Thành phố Biên Hòa, Đồng Nai',
+    });
+  });
+
+  it('thẻ Căn cước 2024: "Số định danh cá nhân", nữ, không có địa chỉ ở mặt trước', () => {
+    const d = parseCccdText(`CĂN CƯỚC
+IDENTITY CARD
+Số định danh cá nhân/Personal identification number: 001195012345
+Họ, chữ đệm và tên khai sinh/Surname, middle name and given name:
+TRẦN THỊ BÌNH
+Ngày, tháng, năm sinh/Date of birth: 01/02/1995
+Giới tính/Sex: Nữ Quốc tịch/Nationality: Việt Nam`);
+    expect(d).toEqual({ idNumber: '001195012345', fullName: 'Trần Thị Bình', dob: '1995-02-01', gender: 'Nữ', permanentAddress: null, idCardType: 'can_cuoc' });
+  });
+
+  it('bỏ rác OCR thật trong họ tên và địa chỉ', () => {
+    const d = parseCccdText(`Họ và tên / Full name:
+LÊ MINH KHOA L CC
+Nơi thường trú / Place of residence: Ề Hòa, 990070999200 u
+Lợi, ïP. Thủ! Dầu Một, Bình Dương`);
+    expect(d.fullName).toBe('Lê Minh Khoa');
+    expect(d.permanentAddress).toBe('Ề Hòa, Lợi, Thủ Dầu Một, Bình Dương');
+  });
+
+  it('địa chỉ chỉ lấy 2 dòng — dòng rác bên dưới thẻ không bị ghép vào', () => {
+    const d = parseCccdText('Nơi thường trú / Place of residence: Phú Hòa\nPhú Lợi, TP. Thủ Dầu Một, Bình Dương\nNV N729220/02903/9Ng');
+    expect(d.permanentAddress).toBe('Phú Hòa, Phú Lợi, TP. Thủ Dầu Một, Bình Dương');
+  });
+
+  it('gộp hai lần đọc + chữ rác không ra trường nào', () => {
+    const a = parseCccdText('Số / No. 079095001234\nHọ và tên / Full name:\nLÊMINH KHOA');
+    const b = parseCccdText('Họ và tên / Full name:\nLÊ MINH KHOA');
+    // Tên bị dính chữ ở lần đọc đầu → lấy bản tách đủ chữ.
+    expect(mergeCccdOcr(a, b)).toMatchObject({ idNumber: '079095001234', fullName: 'Lê Minh Khoa' });
+    expect(cccdOcrFieldCount(parseCccdText('n\nĐá SẼ Đx DI.\nAN . s 222/24'))).toBe(0);
+  });
+});
+
+describe('OCR GPLX', () => {
+  it('mẫu Cục CSGT (chữ OCR thật, có nhiễu)', () => {
+    const d = parseGplxText(`CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM
+Độc lập - Tự do - Hạnh phúc.
+'SOCIALIST REPUBLIC OF VIET NAM
+GIẦY PHÉP LÁI XE/ DRIVER'S LICENSE
+
+Số/No:790123450987
+
+Họ tên/Full name: PHẠM TIẾN DŨNG
+
+Ngày sinh/Date of birth: 12/03/1996
+
+Quốc tịch/Nationaliy: Việt Nam
+
+Ngày cấp/Date ofissue:20/05/2025.
+
+Ngày hết hạn/Expiration date:20/05/2035.
+
+mm?" 'Cơ quan cấp/Issuing authority:Cục Cảnh sát giao thông
+Nơi cư trú/Address: Phường Tân Mai
+Hạng/Class: B & =`);
+    expect(d).toEqual({
+      licenseNumber: '790123450987',
+      fullName: 'Phạm Tiến Dũng',
+      dob: '1996-03-12',
+      issueDate: '2025-05-20',
+      expiry: '2035-05-20',
+      noExpiry: false,
+      licenseClass: 'B',
+    });
+    expect(gplxFieldCount(d)).toBe(5);
+  });
+
+  it('mẫu Bộ GTVT: ngày cấp dạng "ngày/date … tháng/month …", nhãn sai dấu, giá trị xuống dòng', () => {
+    const d = parseGplxText(`GIAY PHEP LAI XE / DRIVER'S LICENSE
+So/No: 79O123456789
+Ho tên/Full name:
+NGUYỄN THỊ HOA
+Ngày sinh/Date of Birth: 5/3/1990
+Nơi cư trú/Address: 12 Lê Lợi, Q.1
+TP. Hồ Chí Minh, ngày/date 15 tháng/month 06 năm/year 2019
+Hạng/Class: 82
+Có giá trị đến/Expires: 15/06/2029`);
+    expect(d).toMatchObject({
+      licenseNumber: '790123456789',
+      fullName: 'Nguyễn Thị Hoa',
+      dob: '1990-03-05',
+      issueDate: '2019-06-15',
+      expiry: '2029-06-15',
+      licenseClass: 'B2',
+    });
+  });
+
+  it('không thời hạn; hạng dài (C1E) không bị cắt thành C1', () => {
+    const d = parseGplxText('Hạng/Class: C1E\nCó giá trị đến/Expires: Không thời hạn');
+    expect(d.noExpiry).toBe(true);
+    expect(d.expiry).toBeNull();
+    expect(d.licenseClass).toBe('C1E');
+  });
+
+  it('hết hạn trước ngày cấp → bỏ hạn (OCR đọc sai)', () => {
+    const d = parseGplxText('Ngày cấp/Date of issue: 20/05/2025\nNgày hết hạn/Expiration date: 20/05/2015');
+    expect(d.issueDate).toBe('2025-05-20');
+    expect(d.expiry).toBeNull();
+  });
+
+  it('nhãn mất giá trị → không vớ nhầm ngày của dòng nhãn bên dưới', () => {
+    const d = parseGplxText('Ngày cấp/Date of issue:\nNgày hết hạn/Expiration date:20/05/2035\nHạng/Class:\nCơ quan cấp/Issuing authority: Cục CSGT');
+    expect(d.issueDate).toBeNull();
+    expect(d.expiry).toBe('2035-05-20');
+    expect(d.licenseClass).toBeNull();
+  });
+
+  it('gộp hai lần đọc: lấp chỗ trống, không đè trường đã có', () => {
+    const a = parseGplxText('Số/No: 790123450987\nHạng/Class: B');
+    const b = parseGplxText('Số/No: 790123460987\nNgày cấp/Date of issue: 20/05/2025\nCó giá trị đến/Expires: Không thời hạn');
+    expect(mergeGplx(a, b)).toMatchObject({ licenseNumber: '790123450987', licenseClass: 'B', issueDate: '2025-05-20', expiry: null, noExpiry: true });
+  });
+
+  it('ảnh ngược / chữ rác → không ra trường nào', () => {
+    const d = parseGplxText("uɐN ʇǝᴉΛ\nm.¬ Sây sinh/Date or binh: Ti/08/199g\n'ʞ ¿ =");
+    expect(gplxFieldCount(d)).toBe(0);
+  });
 });
 
 const car: VehiclePricing = { priceDay: 800000, priceHour: 100000, priceWeekendDay: 1000000, kmLimitDay: 300, overKmFee: 3000, overHourFee: 100000 };

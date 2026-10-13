@@ -19,5 +19,11 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     chunkSizeWarningLimit: 1500,
+    rolldownOptions: {
+      output: {
+        // Dữ liệu OCR: Tesseract tự ghép "<thư mục>/vie.traineddata.gz" nên giữ nguyên tên file, hash đặt ở tên thư mục.
+        assetFileNames: (a) => (a.names[0]?.endsWith('.traineddata.gz') ? 'assets/ocr-[hash]/[name][extname]' : 'assets/[name]-[hash][extname]'),
+      },
+    },
   },
 });
