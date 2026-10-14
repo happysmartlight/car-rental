@@ -189,7 +189,7 @@ export default function CustomerDetail() {
                       {fmtDateTime(f.violatedAt)} {f.amount ? <>· <Money value={f.amount} /></> : null}
                     </p>
                   </div>
-                  <FineStatusBadge status={f.status} />
+                  <FineStatusBadge status={f.status} voided={!!f.voidedAt} />
                 </li>
               ))}
             </ul>

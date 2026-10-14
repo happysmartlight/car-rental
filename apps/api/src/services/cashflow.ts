@@ -8,6 +8,8 @@ import { badRequest, notFound } from '../lib/http.js';
 import { CASH_CATEGORY, dueRecurringMonths, monthKeyOf, parseMonthKey, recurringDate, vnMonthStart, type CashCategory, type CashMethod, type Period } from '../shared/cashflow.js';
 import { summarizeMoney, type MoneyPayment, type PaymentDirection } from '../shared/money.js';
 import type { PaymentMethod, RentalStatus } from '../shared/constants.js';
+import { vnDateKey } from '../shared/time.js';
+import { markMaintenanceDone } from './maintenance.js';
 import { occupiedRange } from './rentals.js';
 
 /** null = cả đội xe + chi phí chung; 'shared' = chỉ chi phí chung; số = một xe. */
@@ -103,9 +105,18 @@ export function applyRenewal(vehicleId: number, r: VehicleRenewal): Partial<Vehi
   return patch;
 }
 
-export function createEntry(input: EntryInput, userId: number, renewal?: VehicleRenewal): { entry: CashEntry; renewed: Partial<Vehicle> } {
+/**
+ * Ghi một khoản thu chi. `renewal`: gia hạn giấy tờ / mốc bảo dưỡng chung của xe.
+ * `maintenanceDone`: các hạng mục trong lịch bảo dưỡng vừa làm (thay dầu, lọc gió…) → ghi lịch sử, dời mốc.
+ */
+export function createEntry(
+  input: EntryInput,
+  userId: number,
+  renewal?: VehicleRenewal,
+  maintenanceDone?: number[],
+): { entry: CashEntry; renewed: Partial<Vehicle>; maintenance: number } {
   ensureVehicle(input.vehicleId);
-  if (renewal && input.vehicleId == null) throw badRequest('Chọn xe để gia hạn giấy tờ / bảo dưỡng');
+  if ((renewal || maintenanceDone?.length) && input.vehicleId == null) throw badRequest('Chọn xe để gia hạn giấy tờ / bảo dưỡng');
   const now = Date.now();
   return db.transaction(() => {
     const entry = db
@@ -114,7 +125,11 @@ export function createEntry(input: EntryInput, userId: number, renewal?: Vehicle
       .returning()
       .get();
     const renewed = renewal && input.vehicleId != null ? applyRenewal(input.vehicleId, renewal) : {};
-    return { entry, renewed };
+    const done =
+      maintenanceDone?.length && input.vehicleId != null
+        ? markMaintenanceDone(input.vehicleId, { itemIds: maintenanceDone, date: vnDateKey(input.at), odo: input.odo, notes: input.description, cashEntryId: entry.id }, userId)
+        : [];
+    return { entry, renewed, maintenance: done.length };
   });
 }
 

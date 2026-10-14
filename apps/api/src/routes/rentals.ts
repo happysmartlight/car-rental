@@ -8,6 +8,8 @@ import { badRequest, idParam, notFound, parse, requireRole, userId, zFileId, zMo
 import { getSetting } from '../lib/settings.js';
 import { escapeHtml, notify } from '../lib/telegram.js';
 import { defaultTemplate, generateDocument, getTemplate, retryPdf } from '../services/documents.js';
+import { checkRentalFines } from '../services/fineCheck.js';
+import { maintenanceWarnings } from '../services/maintenance.js';
 import {
   addCharge,
   addCollateral,
@@ -184,7 +186,27 @@ export async function rentalRoutes(app: FastifyInstance) {
     const people = [body.customerId, ...body.driverIds].filter((x): x is number => !!x);
     const warnings = people.flatMap((id, i) => driverWarnings(getCustomer(id), body.scheduledStart, i === 0 ? 'Khách' : 'Lái phụ'));
     if (!vehicle.active) warnings.unshift({ code: 'vehicle_inactive', severity: 'danger', message: 'Xe đang ngưng hoạt động' });
+    warnings.push(...maintenanceWarnings(vehicle));
     return { quote, conflicts, warnings, depositSuggested: vehicle.depositAmount };
+  });
+
+  /** Xe trống + giá từng xe cho một khoảng thời gian — báo giá nhanh khi khách hỏi "ngày này còn xe nào?". */
+  app.post('/api/rentals/availability', async (req) => {
+    requireRole(req, 'staff');
+    const body = parse(z.object({ scheduledStart: zMs, scheduledEnd: zMs }), req.body);
+    if (body.scheduledEnd <= body.scheduledStart) throw badRequest('Giờ trả phải sau giờ nhận');
+    const vehicles = db
+      .select()
+      .from(schema.vehicles)
+      .where(and(eq(schema.vehicles.active, true), isNull(schema.vehicles.archivedAt)))
+      .orderBy(schema.vehicles.plate)
+      .all();
+    return {
+      items: vehicles.map((v) => {
+        const conflicts = findConflicts(v.id, body.scheduledStart, body.scheduledEnd);
+        return { vehicle: v, available: !conflicts.length, conflicts, quote: quoteFor(v, body.scheduledStart, body.scheduledEnd), deposit: v.depositAmount };
+      }),
+    };
   });
 
   app.post('/api/rentals', async (req) => {
@@ -335,7 +357,7 @@ export async function rentalRoutes(app: FastifyInstance) {
     const id = idParam(req);
     const body = parse(
       z.object({
-        deductions: z.array(zCharge).default([]),
+        deductions: z.array(zCharge.extend({ fineId: z.number().int().nullable().optional() })).default([]),
         refund: z.object({ method: z.enum(['cash', 'transfer']) }).nullable().default(null),
         note: zOptText,
       }),
@@ -343,6 +365,15 @@ export async function rentalRoutes(app: FastifyInstance) {
     );
     const r = releaseHold(id, body, userId(req));
     audit(req, 'rental.release_hold', 'rental', id, body);
+    return r;
+  });
+
+  /** Tra phạt nguội riêng cho lượt này (trước khi hoàn cọc): vi phạm trong lúc khách giữ xe, tự ghi hồ sơ. */
+  app.post('/api/rentals/:id/fine-check', async (req) => {
+    requireRole(req, 'staff');
+    const id = idParam(req);
+    const r = await checkRentalFines(id, userId(req));
+    audit(req, 'rental.fine_check', 'rental', id, { ok: r.ok, error: r.error, found: r.found, recorded: r.recorded });
     return r;
   });
 
@@ -475,6 +506,9 @@ export async function rentalRoutes(app: FastifyInstance) {
     getRental(id);
     const tpl = body.templateId ? getTemplate(body.templateId) : defaultTemplate(body.kind ?? 'contract');
     if (!tpl) throw badRequest('Chưa có mẫu văn bản loại này. Thêm mẫu trong Cài đặt → Mẫu hợp đồng.');
+    if (tpl.kind === 'extension' && !db.select().from(schema.rentalExtensions).where(eq(schema.rentalExtensions.rentalId, id)).get()) {
+      throw badRequest('Lượt thuê chưa gia hạn lần nào — gia hạn ở "Gia hạn / sửa" trước khi in phụ lục');
+    }
     const result = await generateDocument(id, tpl.id, userId(req));
     audit(req, 'document.generate', 'rental', id, { documentId: result.document.id, template: tpl.name });
     return result;

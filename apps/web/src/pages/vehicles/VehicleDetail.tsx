@@ -3,6 +3,7 @@ import { Archive, ArrowRight, Car, KeyRound, MoreHorizontal, Pencil, Receipt, Sh
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { AccessoryManager } from '@/components/AccessoryManager';
+import { MaintenanceSchedule } from '@/components/MaintenanceSchedule';
 import { CashEntryDialog, type CashDialogState } from '@/components/CashEntryDialog';
 import { Page } from '@/components/layout/AppShell';
 import { ShareDialog } from '@/components/ShareDialog';
@@ -193,6 +194,8 @@ export default function VehicleDetail() {
           </Card>
         </div>
 
+        <MaintenanceSchedule vehicle={v} />
+
         {isAdmin && <VehicleCash vehicleId={v.id} onAdd={() => setCash({ mode: 'new', vehicleId: v.id })} />}
 
         <AccessoryManager vehicleId={v.id} />
@@ -263,7 +266,7 @@ export default function VehicleDetail() {
                       {fmtDateTime(f.violatedAt)} {f.amount ? <>· <Money value={f.amount} /></> : null}
                     </p>
                   </div>
-                  <FineStatusBadge status={f.status} />
+                  <FineStatusBadge status={f.status} voided={!!f.voidedAt} />
                 </li>
               ))}
             </ul>

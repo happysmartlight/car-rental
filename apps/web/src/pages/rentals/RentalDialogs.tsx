@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { ExternalLink, Plus, Send, Trash2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ExternalLink, Plus, Search, Send, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { toast } from 'sonner';
@@ -10,16 +10,16 @@ import { RentalAccessoriesEditor, useRentalAccessories } from '@/components/Rent
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Checkbox, DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select, Textarea } from '@/components/ui/form';
-import { Notice } from '@/components/ui/misc';
+import { Badge, Notice } from '@/components/ui/misc';
 import { api } from '@/lib/api';
 import { shareText } from '@/lib/shareCard';
 import { useAction, useSettings } from '@/lib/hooks';
-import type { Customer, Precheck, RentalDetail, VehicleWithStatus } from '@/lib/types';
-import { cn } from '@/lib/utils';
-import { CHARGE_KINDS, CHARGE_KIND_LABEL, COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, type ChargeKind, type CollateralKind } from '@shared/constants';
+import type { Customer, Precheck, RentalDetail, RentalFineCheck, VehicleWithStatus } from '@/lib/types';
+import { cn, errorMessage } from '@/lib/utils';
+import { CHARGE_KINDS, CHARGE_KIND_LABEL, COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, FINE_DONE_STATUSES, type ChargeKind, type CollateralKind } from '@shared/constants';
 import { cancelForfeit, cancelMessage, cancelPolicyText, planCancellation, planSettlement, rentalFineHold } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
-import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime, fmtDuration } from '@shared/time';
+import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime, fmtDuration, fmtTime } from '@shared/time';
 
 type DialogProps = { d: RentalDetail; open: boolean; onOpenChange: (o: boolean) => void };
 const inv = (id: number) => ({ invalidate: [['rental', String(id)], ['rentals'], ['dashboard'], ['calendar']] });
@@ -227,59 +227,159 @@ export function SettleDialog({ d, open, onOpenChange }: DialogProps) {
   );
 }
 
-// ── Hết hạn giữ cọc: trừ phạt nguội + hoàn ───────────────────────────────────
+// ── Hết hạn giữ cọc: tra phạt nguội, trừ vào cọc, hoàn phần còn lại ──────────
+
+type HoldRow = { fineId: number | null; description: string; amount: number | null };
 
 export function ReleaseHoldDialog({ d, open, onOpenChange }: DialogProps) {
-  const [rows, setRows] = useState<{ description: string; amount: number | null }[]>([]);
+  const qc = useQueryClient();
+  const r = d.rental;
+  const [rows, setRows] = useState<HoldRow[]>([]);
   const [method, setMethod] = useState<'cash' | 'transfer'>('transfer');
+  const [checking, setChecking] = useState(false);
+  const [check, setCheck] = useState<RentalFineCheck | null>(null);
+  // Khoản trừ = hồ sơ phạt nguội chưa thu của lượt này. Tra xong có hồ sơ mới → thêm dòng, giữ số đã nhập.
   useEffect(() => {
-    if (open) setRows(d.fines.filter((f) => f.amount && f.status !== 'customer_paid' && f.status !== 'recovered').map((f) => ({ description: `Phạt nguội ${fmtDateTime(f.violatedAt)}: ${f.violation ?? ''}`.trim(), amount: f.amount })));
+    if (!open) {
+      setRows([]);
+      setCheck(null);
+      return;
+    }
+    const pending = d.fines.filter((f) => !f.voidedAt && !FINE_DONE_STATUSES.includes(f.status));
+    setRows((prev) => {
+      const keep = prev.filter((x) => x.fineId == null || pending.some((f) => f.id === x.fineId));
+      const add = pending
+        .filter((f) => !keep.some((x) => x.fineId === f.id))
+        .map((f) => ({ fineId: f.id, description: `Phạt nguội ${fmtDateTime(f.violatedAt)}${f.violation ? `: ${f.violation}` : ''}`, amount: f.amount }));
+      return [...keep, ...add];
+    });
   }, [open, d.fines]);
-  const deducted = rows.reduce((s, r) => s + (r.amount ?? 0), 0);
-  const refund = d.money.depositHeld - deducted;
+  const deducted = rows.reduce((s, x) => s + (x.amount ?? 0), 0);
+  const held = d.money.depositHeld;
+  const refund = Math.max(0, held - deducted);
+  // Phạt vượt cọc: trừ hết cọc, phần vượt ghi vào lượt thuê thành tiền khách còn nợ.
+  const owed = Math.max(0, deducted - held);
+  const missingAmount = rows.filter((x) => x.fineId != null && !x.amount).length;
   const save = useAction(
     () =>
-      api.post(`/api/rentals/${d.rental.id}/release-hold`, {
-        deductions: rows.filter((r) => r.amount).map((r) => ({ kind: 'fine', description: r.description || 'Phạt nguội', amount: r.amount })),
+      api.post(`/api/rentals/${r.id}/release-hold`, {
+        deductions: rows.filter((x) => x.amount).map((x) => ({ kind: 'fine', description: x.description || 'Phạt nguội', amount: x.amount, fineId: x.fineId })),
         refund: refund > 0 ? { method } : null,
       }),
-    { ...inv(d.rental.id), success: 'Đã hoàn tất lượt thuê', onSuccess: () => onOpenChange(false) },
+    { ...inv(r.id), invalidate: [...inv(r.id).invalidate, ['fines']], success: 'Đã hoàn tất lượt thuê', onSuccess: () => onOpenChange(false) },
   );
+  const runCheck = async () => {
+    setChecking(true);
+    try {
+      const res = await api.post<RentalFineCheck>(`/api/rentals/${r.id}/fine-check`);
+      setCheck(res);
+      if (res.ok) {
+        if (res.found) toast.warning(`Có ${res.found} vi phạm trong thời gian thuê${res.recorded ? ` — đã ghi ${res.recorded} hồ sơ mới` : ''}`);
+        else toast.success('Không có vi phạm trong thời gian khách giữ xe');
+        void qc.invalidateQueries({ queryKey: ['rental', String(r.id)] });
+        void qc.invalidateQueries({ queryKey: ['fines'] });
+        void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      }
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setChecking(false);
+    }
+  };
   const seg = d.segments[0];
+  const lastSeg = d.segments.at(-1);
+  const range = seg ? `${fmtDateTime(seg.startAt)} → ${fmtDateTime(lastSeg?.endAt)}` : 'thời gian thuê';
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Hoàn cọc giữ lại" description={`Đang giữ ${fmtVnd(d.money.depositHeld)} · hạn ${d.rental.fineHoldUntil ? fmtDate(d.rental.fineHoldUntil) : '—'}`} footer={<Button onClick={() => save.mutate()} loading={save.isPending} disabled={refund < 0}>Xác nhận</Button>}>
+    <Dialog open={open} onOpenChange={onOpenChange} title="Hoàn cọc giữ lại" description={`Đang giữ ${fmtVnd(d.money.depositHeld)} · hạn ${r.fineHoldUntil ? fmtDate(r.fineHoldUntil) : '—'}`} footer={<Button onClick={() => save.mutate()} loading={save.isPending}>Xác nhận</Button>}>
       <div className="space-y-4">
-        <Notice tone="amber">
-          Kiểm tra phạt nguội biển <b>{d.vehicle.plate}</b> (trang Phạt nguội → Kiểm tra) cho khoảng {seg ? `${fmtDateTime(seg.startAt)} → ${fmtDateTime(seg.endAt)}` : 'thời gian thuê'} trước khi hoàn.
-          <div className="mt-2 flex flex-wrap gap-3">
-            <a href="https://csgt.bocongan.gov.vn/tra-cuu-phat-nguoi" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline">
-              Mở trang tra cứu chính thức <ExternalLink className="size-3" />
-            </a>
-            <Link to="/fines" className="font-medium underline">
-              Kiểm tra trong app
-            </Link>
+        <div className="space-y-3 rounded-2xl border border-border p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm">
+              Phạt nguội biển <b>{d.vehicle.plate}</b> trong lúc khách giữ xe ({range})
+            </p>
+            <Button size="sm" onClick={runCheck} loading={checking}>
+              <Search /> Kiểm tra ngay
+            </Button>
           </div>
-        </Notice>
+          {checking && <p className="text-xs text-muted">Đang tra cứu… có thể mất 10–20 giây.</p>}
+          {!check && r.fineCheckedAt != null && r.fineCheckFound != null && (
+            <Notice tone={r.fineCheckFound ? 'red' : 'green'}>
+              Đã tra lúc {fmtDateTime(r.fineCheckedAt)}: {r.fineCheckFound ? `có ${r.fineCheckFound} vi phạm — đã ghi hồ sơ, nhập mức phạt bên dưới.` : 'không có vi phạm trong thời gian khách giữ xe.'}
+            </Notice>
+          )}
+          {check && !check.ok && (
+            <Notice tone="amber">
+              <p className="font-medium">Chưa tự tra được: {check.error}</p>
+              <p className="mt-1">
+                Tra tay trên trang chính thức rồi dán kết quả ở trang{' '}
+                <Link to="/fines" className="font-medium underline">
+                  Phạt nguội
+                </Link>{' '}
+                — app tự gắn vi phạm vào lượt thuê này.
+              </p>
+              <a href="https://csgt.bocongan.gov.vn/tra-cuu-phat-nguoi" target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 font-medium underline">
+                Mở trang tra cứu chính thức <ExternalLink className="size-3" />
+              </a>
+            </Notice>
+          )}
+          {check?.ok && !check.violations.length && <Notice tone="green">Không có vi phạm nào trong thời gian khách giữ xe (tra lúc {fmtTime(check.checkedAt)}).</Notice>}
+          {check?.ok && check.violations.length > 0 && (
+            <ul className="divide-y divide-border rounded-xl border border-border text-sm">
+              {check.violations.map((v, i) => (
+                <li key={i} className="flex items-start justify-between gap-2 px-3 py-2">
+                  <span className="min-w-0">
+                    <b>{fmtDateTime(v.violatedAt)}</b> {v.violation}
+                    {v.location && <span className="block text-xs text-muted">{v.location}</span>}
+                  </span>
+                  <Badge tone={v.status === 'paid' ? 'gray' : 'red'}>{v.status === 'paid' ? 'Đã xử phạt' : 'Chưa xử phạt'}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <div className="space-y-2">
           <p className="text-sm font-medium">Khoản trừ vào cọc</p>
-          {rows.map((r, i) => (
+          {rows.map((x, i) => (
             <div key={i} className="grid grid-cols-[1fr_130px_auto] gap-2">
-              <Input value={r.description} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} placeholder="Phạt nguội…" />
-              <MoneyInput value={r.amount} onChange={(v) => setRows(rows.map((x, j) => (j === i ? { ...x, amount: v } : x)))} />
+              <Input value={x.description} onChange={(e) => setRows(rows.map((y, j) => (j === i ? { ...y, description: e.target.value } : y)))} placeholder="Phạt nguội…" />
+              <MoneyInput value={x.amount} onChange={(v) => setRows(rows.map((y, j) => (j === i ? { ...y, amount: v } : y)))} placeholder="Mức phạt" />
               <Button variant="ghost" size="icon" onClick={() => setRows(rows.filter((_, j) => j !== i))} aria-label="Xóa">
                 <Trash2 />
               </Button>
             </div>
           ))}
-          <Button variant="secondary" size="sm" onClick={() => setRows([...rows, { description: '', amount: null }])}>
+          <Button variant="secondary" size="sm" onClick={() => setRows([...rows, { fineId: null, description: '', amount: null }])}>
             <Plus /> Thêm khoản trừ
           </Button>
+          {missingAmount > 0 && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              {missingAmount} vi phạm chưa có mức phạt — nhập để trừ vào cọc. Để trống thì không trừ; hồ sơ vẫn nằm ở trang Phạt nguội để thu lại sau.
+            </p>
+          )}
         </div>
-        <div className="flex items-center justify-between rounded-2xl bg-surface-2 px-4 py-3">
-          <span className="font-medium">Hoàn lại khách</span>
-          <span className={`tabular text-lg font-semibold ${refund < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{fmtVnd(refund)}</span>
+        <div className="divide-y divide-border rounded-2xl bg-surface-2 px-4 py-1">
+          {deducted > 0 && (
+            <div className="flex items-center justify-between py-2 text-sm">
+              <span className="text-muted">Trừ vào cọc</span>
+              <span className="tabular">{fmtVnd(Math.min(deducted, held))}</span>
+            </div>
+          )}
+          {owed > 0 && (
+            <div className="flex items-center justify-between py-2">
+              <span className="font-medium">Khách còn nợ</span>
+              <span className="tabular text-lg font-semibold text-red-600 dark:text-red-400">{fmtVnd(owed)}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between py-2">
+            <span className="font-medium">Hoàn lại khách</span>
+            <span className="tabular text-lg font-semibold text-emerald-600 dark:text-emerald-400">{fmtVnd(refund)}</span>
+          </div>
         </div>
-        {refund < 0 && <Notice tone="red">Khoản trừ vượt tiền cọc đang giữ. Ghi phần vượt thành khoản phí rồi thu thêm của khách.</Notice>}
+        {owed > 0 && (
+          <Notice tone="amber">
+            Phạt vượt tiền cọc đang giữ: trừ hết {fmtVnd(held)}, còn {fmtVnd(owed)} ghi vào lượt thuê thành khoản khách nợ — Việc cần làm sẽ nhắc thu, thu xong bấm "Thu tiền thuê" trên trang lượt thuê. Gửi khách thông báo phạt nguội để khách chuyển khoản.
+          </Notice>
+        )}
         {refund > 0 && <Segmented value={method} onChange={setMethod} className="flex w-full" options={[{ value: 'transfer', label: 'Chuyển khoản' }, { value: 'cash', label: 'Tiền mặt' }]} />}
       </div>
     </Dialog>
@@ -348,7 +448,11 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
         notes: notes || null,
         allowConflict,
       }),
-    { ...inv(r.id), success: 'Đã lưu', onSuccess: () => onOpenChange(false) },
+    {
+      ...inv(r.id),
+      success: r.status === 'active' && end !== r.scheduledEnd ? 'Đã gia hạn — in phụ lục và gửi khách ngay trên trang lượt thuê' : 'Đã lưu',
+      onSuccess: () => onOpenChange(false),
+    },
   );
   const oldRental = d.charges.filter((c) => c.auto).reduce((s, c) => s + c.amount, 0);
   return (

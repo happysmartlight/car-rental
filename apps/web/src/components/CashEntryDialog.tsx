@@ -6,7 +6,7 @@ import { Ban, Repeat } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAction, useAuth } from '@/lib/hooks';
-import type { CashEntry, RecurringRow, Vehicle, VehicleWithStatus } from '@/lib/types';
+import type { CashEntry, MaintenanceData, RecurringRow, Vehicle, VehicleWithStatus } from '@/lib/types';
 import {
   CASH_CATEGORY,
   RECUR_INTERVALS,
@@ -24,6 +24,7 @@ import {
   type CashMethod,
   type RenewKind,
 } from '@shared/cashflow';
+import { statusText } from '@shared/maintenance';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { addMonthsVn, fmtDateKey, fmtDateTime, vnDateKey, vnDateKeyToMs } from '@shared/time';
 import { MultiPhotoInput } from './images';
@@ -57,6 +58,8 @@ interface Form {
   odo: number | null;
   receiptFileIds: string[];
   renew: Renew;
+  /** Hạng mục trong lịch bảo dưỡng của xe vừa làm (thay dầu, lọc gió…). */
+  maintenanceDone: number[];
   repeat: boolean;
   intervalMonths: number;
   endMonth: string;
@@ -78,6 +81,7 @@ function initialForm(s: CashDialogState): Form {
     odo: null,
     receiptFileIds: [],
     renew: NO_RENEW,
+    maintenanceDone: [],
     repeat: false,
     intervalMonths: 1,
     endMonth: '',
@@ -145,10 +149,17 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
     set('category', categoriesOf(d)[0]);
   };
   const changeCategory = (c: CashCategory) => {
-    setF((x) => ({ ...x, category: c, vehicleId: CASH_CATEGORY[c].shared && mode === 'new' && !(state?.mode === 'new' && state.vehicleId) ? null : x.vehicleId, renew: NO_RENEW }));
+    setF((x) => ({ ...x, category: c, vehicleId: CASH_CATEGORY[c].shared && mode === 'new' && !(state?.mode === 'new' && state.vehicleId) ? null : x.vehicleId, renew: NO_RENEW, maintenanceDone: [] }));
   };
 
-  const inv = { invalidate: [['cashflow'], ['recurring'], ['dashboard'], ['vehicle']] };
+  const inv = { invalidate: [['cashflow'], ['recurring'], ['dashboard'], ['vehicle'], ['maintenance']] };
+  // Bảo dưỡng / sửa chữa / lốp – ắc quy cho một xe: tick luôn hạng mục đã làm trong lịch bảo dưỡng.
+  const showMaintenance = mode === 'new' && !f.repeat && !!cat.odo && f.vehicleId != null;
+  const { data: maint } = useQuery({
+    queryKey: ['maintenance', f.vehicleId],
+    queryFn: () => api.get<MaintenanceData>(`/api/vehicles/${f.vehicleId}/maintenance`),
+    enabled: open && showMaintenance,
+  });
   const done = () => onClose();
 
   const entryBody = () => {
@@ -200,9 +211,14 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
         await api.put(`/api/cash-entries/${entry.id}`, entryBody());
         return 'Đã lưu';
       }
-      const r = await api.post<{ renewed: Record<string, unknown> }>('/api/cash-entries', { ...entryBody(), renewal: renewal() });
+      const r = await api.post<{ renewed: Record<string, unknown>; maintenance: number }>('/api/cash-entries', {
+        ...entryBody(),
+        renewal: renewal(),
+        maintenanceDone: showMaintenance && f.maintenanceDone.length ? f.maintenanceDone : undefined,
+      });
       const renewed = Object.keys(r.renewed).length ? ' · đã cập nhật hạn cho xe' : '';
-      return `Đã ghi ${dir === 'out' ? 'khoản chi' : 'khoản thu'} ${fmtVnd(f.amount)}${renewed}`;
+      const maintained = r.maintenance ? ` · cập nhật ${r.maintenance} hạng mục bảo dưỡng` : '';
+      return `Đã ghi ${dir === 'out' ? 'khoản chi' : 'khoản thu'} ${fmtVnd(f.amount)}${renewed}${maintained}`;
     },
     { ...inv, success: (m) => m, onSuccess: done },
   );
@@ -350,6 +366,24 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
             <Field label="ODO lúc làm" hint={vehicle ? `ODO hiện tại của xe: ${fmtNumber(vehicle.odo)} km` : undefined}>
               <NumberInput value={f.odo} onChange={(v) => set('odo', v)} suffix="km" placeholder={vehicle ? fmtNumber(vehicle.odo) : undefined} />
             </Field>
+          )}
+
+          {showMaintenance && !!maint?.items.length && (
+            <div className="space-y-2.5 rounded-2xl bg-surface-2/60 p-3">
+              <p className="text-sm font-medium">Hạng mục đã làm — cập nhật lịch bảo dưỡng</p>
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                {maint.items.map((i) => (
+                  <Checkbox
+                    key={i.id}
+                    checked={f.maintenanceDone.includes(i.id)}
+                    onChange={(v) => set('maintenanceDone', v ? [...f.maintenanceDone, i.id] : f.maintenanceDone.filter((x) => x !== i.id))}
+                    label={i.name}
+                    description={statusText(i.status)}
+                  />
+                ))}
+              </div>
+              <p className="text-xs text-muted">Tính hạn lần tới từ ngày và ODO ghi ở trên.</p>
+            </div>
           )}
 
           {mode === 'new' && !f.repeat && isAdmin && cat.renew && vehicle && <RenewFields kind={cat.renew} vehicle={vehicle} date={f.date} odo={f.odo} renew={f.renew} onChange={setRenew} />}

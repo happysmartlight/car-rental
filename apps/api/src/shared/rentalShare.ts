@@ -1,5 +1,6 @@
-// Nội dung gửi khách sau từng bước của lượt thuê: giao xe, nhận xe, quyết toán.
+// Nội dung gửi khách sau từng bước của lượt thuê: đặt xe, giao xe, gia hạn, nhận xe, quyết toán.
 // Hàm thuần dựng một "phiếu" (khối + dòng); web vẽ phiếu thành ảnh hoặc ghép thành tin nhắn Zalo.
+// Phiếu báo phạt nguội (fineShare.ts) và báo giá nhanh (quoteShare.ts) dùng chung khuôn này.
 
 import type { ChargeKind, FuelType, RentalStatus } from './constants.js';
 import type { MoneySummary } from './money.js';
@@ -7,13 +8,18 @@ import { chargeDays, rentalChargingPolicy, tripChargingText, type VehiclePricing
 import { fmtNumber } from './text.js';
 import { fmtDate, fmtDateTime, fmtDuration } from './time.js';
 
-export type RentalShareStage = 'pickup' | 'return' | 'settle';
+export type RentalShareStage = 'book' | 'pickup' | 'extend' | 'return' | 'settle';
 
 export const RENTAL_SHARE_STAGE_LABEL: Record<RentalShareStage, string> = {
+  book: 'Đặt xe',
   pickup: 'Giao xe',
+  extend: 'Gia hạn',
   return: 'Nhận xe',
   settle: 'Quyết toán',
 };
+
+/** Loại phiếu: theo bước của lượt thuê, hoặc báo phạt nguội / báo giá. */
+export type ShareDocKind = RentalShareStage | 'fine' | 'quote';
 
 interface HandoverLike {
   at: number;
@@ -32,6 +38,7 @@ export interface RentalShareInput {
     scheduledStart: number;
     scheduledEnd: number;
     kmLimit: number;
+    pickupMethod?: 'at_shop' | 'delivery';
     pickupLocation: string | null;
     returnLocation: string | null;
     depositRequired: number;
@@ -45,6 +52,12 @@ export interface RentalShareInput {
   ret: HandoverLike | null;
   charges: { kind: ChargeKind; description: string; amount: number }[];
   money: MoneySummary;
+  /** Lần gia hạn gần nhất (phiếu gia hạn). */
+  extension?: { oldEnd: number; newEnd: number; oldTotal: number; newTotal: number } | null;
+  /** Phiếu đặt xe: chính sách hủy, mức giữ cọc chờ phạt nguội, giấy tờ cần mang. */
+  cancelPolicy?: string | null;
+  fineHold?: { amount: number; days: number } | null;
+  requirements?: string[];
   graceMinutes: number;
   shopName: string;
   shopAddress?: string;
@@ -65,11 +78,15 @@ export interface ShareBlock {
 }
 
 export interface RentalShareDoc {
-  stage: RentalShareStage;
+  stage: ShareDocKind;
   title: string;
   icon: string;
   code: string;
   plate: string;
+  /** Dòng phụ dưới tiêu đề trên ảnh (mặc định: mã hợp đồng · biển số). */
+  subtitle?: string;
+  /** Tiêu đề khối ảnh (mặc định: ảnh xe lúc giao / nhận). */
+  photosHeading?: string;
   lead: string[];
   blocks: ShareBlock[];
   notes: string[];
@@ -80,9 +97,11 @@ export interface RentalShareDoc {
 }
 
 /** Giai đoạn có thể gửi khách theo trạng thái hiện tại (cũ → mới). */
-export function rentalShareStages(status: RentalStatus, hasPickup: boolean, hasReturn: boolean): RentalShareStage[] {
+export function rentalShareStages(status: RentalStatus, hasPickup: boolean, hasReturn: boolean, hasExtension = false): RentalShareStage[] {
+  if (status === 'booked') return ['book'];
   const out: RentalShareStage[] = [];
   if (hasPickup && ['active', 'returned', 'settled', 'closed'].includes(status)) out.push('pickup');
+  if (hasExtension && ['active', 'returned', 'settled', 'closed'].includes(status)) out.push('extend');
   if (hasReturn && ['returned', 'settled', 'closed'].includes(status)) out.push('return');
   if (['settled', 'closed'].includes(status)) out.push('settle');
   return out;
@@ -108,6 +127,53 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
   const pricing = JSON.parse(r.pricing) as VehiclePricing;
   const base = { code: r.code, plate: v.plate, lead: [`Chào anh/chị ${i.customerName},`] };
   const thanks = 'Cảm ơn anh/chị đã tin tưởng, rất mong được phục vụ anh/chị lần sau!';
+
+  if (i.stage === 'book') {
+    const delivery = r.pickupMethod ? r.pickupMethod === 'delivery' : !!r.pickupLocation;
+    const returnPlace = r.returnLocation || r.pickupLocation || i.shopAddress;
+    const depositShort = Math.max(0, r.depositRequired - m.depositHeld);
+    const trip: ShareRow[] = [
+      row('Mã đặt xe', r.code),
+      xe,
+      row('Nhận xe', fmtDateTime(r.scheduledStart), { strong: true }),
+      row('Trả xe', fmtDateTime(r.scheduledEnd), { strong: true }),
+      row('Thời gian thuê', fmtDuration(r.scheduledEnd - r.scheduledStart)),
+      row(delivery ? 'Giao xe tận nơi' : 'Nhận xe tại', (delivery ? r.pickupLocation : i.shopAddress) || 'cửa hàng'),
+    ];
+    if (returnPlace && returnPlace !== (r.pickupLocation || i.shopAddress)) trip.push(row('Trả xe tại', returnPlace));
+    trip.push(row('Giới hạn quãng đường', r.kmLimit ? `${fmtNumber(r.kmLimit)} km` : 'Không giới hạn'));
+    const pay: ShareRow[] = [];
+    if (m.rentPaid > 0) pay.push(row('Đã thanh toán', vnd(m.rentPaid)));
+    pay.push(m.due > 0 ? row('Tiền thuê còn lại', vnd(m.due), { strong: true }) : row('Tiền thuê', 'Đã thanh toán đủ', { tone: 'green' }));
+    if (r.depositRequired > 0) {
+      pay.push(
+        depositShort > 0
+          ? row('Tiền cọc', m.depositHeld > 0 ? `${vnd(m.depositHeld)} / ${vnd(r.depositRequired)} (còn thiếu ${vnd(depositShort)})` : vnd(r.depositRequired), { strong: true, tone: 'red' })
+          : row('Tiền cọc', `Đã nhận ${vnd(m.depositHeld)}`, { tone: 'green' }),
+      );
+    } else {
+      pay.push(row('Tiền cọc', 'Không cần đặt cọc'));
+    }
+    const notes: string[] = [];
+    if (i.requirements?.length) notes.push(`Khi nhận xe, anh/chị mang theo: ${i.requirements.join('; ')}.`);
+    if (m.due > 0) notes.push(`Tiền thuê còn lại ${vnd(m.due)} thanh toán khi nhận xe.`);
+    if (i.fineHold && i.fineHold.amount > 0 && i.fineHold.days > 0) {
+      notes.push(`Sau khi trả xe, cửa hàng giữ lại ${vnd(i.fineHold.amount)} tiền cọc trong ${i.fineHold.days} ngày để đối soát phạt nguội, sau đó hoàn lại.`);
+    }
+    if (i.cancelPolicy) notes.push(`Chính sách hủy: ${i.cancelPolicy}`);
+    notes.push('Cần đổi giờ nhận / trả xe, anh/chị vui lòng báo sớm cho cửa hàng.');
+    return {
+      ...base,
+      stage: 'book',
+      title: 'Xác nhận đặt xe',
+      icon: '📅',
+      lead: [...base.lead, `${shop} xác nhận đã giữ xe ${v.plate} cho anh/chị. Thông tin đặt xe:`],
+      blocks: [{ heading: 'Thông tin đặt xe', icon: '📅', rows: trip }, chargesBlock(i), { heading: 'Thanh toán', icon: '💰', rows: pay }],
+      notes,
+      photos: [],
+      pay: depositShort > 0 ? { label: 'Tiền cọc giữ chỗ', amount: depositShort, note: r.code } : m.due > 0 ? { label: 'Tiền thuê còn lại', amount: m.due, note: r.code } : null,
+    };
+  }
 
   if (i.stage === 'pickup') {
     const at = p?.at ?? r.scheduledStart;
@@ -155,6 +221,49 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
       notes,
       photos: p?.photos.map((x) => x.fileId) ?? [],
       pay: m.due > 0 ? { label: 'Còn phải trả', amount: m.due, note: r.code } : depositShort > 0 ? { label: 'Tiền cọc còn thiếu', amount: depositShort, note: r.code } : null,
+    };
+  }
+
+  if (i.stage === 'extend' && i.extension) {
+    const x = i.extension;
+    const longer = x.newEnd >= x.oldEnd;
+    const lateFee = pricing.overHourFee || pricing.priceHour;
+    const rows: ShareRow[] = [
+      row('Hợp đồng', r.code),
+      xe,
+      row('Nhận xe', fmtDateTime(p?.at ?? r.scheduledStart)),
+      row('Hẹn trả cũ', fmtDateTime(x.oldEnd)),
+      row('Hẹn trả mới', fmtDateTime(x.newEnd), { strong: true }),
+      row(longer ? 'Gia hạn thêm' : 'Rút ngắn', fmtDuration(Math.abs(x.newEnd - x.oldEnd))),
+    ];
+    if (r.kmLimit) rows.push(row('Giới hạn quãng đường', `${fmtNumber(r.kmLimit)} km${p ? ` (đến ODO ${fmtNumber(p.odo + r.kmLimit)})` : ''}`));
+    const diff = x.newTotal - x.oldTotal;
+    return {
+      ...base,
+      stage: 'extend',
+      title: longer ? 'Xác nhận gia hạn' : 'Xác nhận đổi giờ trả xe',
+      icon: '⏳',
+      lead: [...base.lead, `${shop} xác nhận ${longer ? 'gia hạn' : 'đổi giờ trả'} xe ${v.plate} cho anh/chị đến ${fmtDateTime(x.newEnd)}.`],
+      blocks: [
+        { heading: 'Thời gian thuê mới', icon: '⏳', rows },
+        chargesBlock(i),
+        {
+          heading: 'Thanh toán',
+          icon: '💰',
+          rows: [
+            row('Tổng tiền trước khi gia hạn', vnd(x.oldTotal)),
+            row(diff >= 0 ? 'Tăng thêm' : 'Giảm', vnd(Math.abs(diff))),
+            row('Đã thanh toán', vnd(m.rentPaid)),
+            m.due > 0 ? row('Còn phải trả', vnd(m.due), { strong: true, tone: 'red' }) : row('Còn phải trả', 'Đã thanh toán đủ', { tone: 'green' }),
+          ],
+        },
+      ],
+      notes: [
+        `Vui lòng trả xe đúng hẹn mới ${fmtDateTime(x.newEnd)}${lateFee ? `; trả trễ tính ${vnd(lateFee)}/giờ` : ''}.`,
+        'Các điều khoản khác của hợp đồng giữ nguyên.',
+      ],
+      photos: [],
+      pay: m.due > 0 ? { label: 'Còn phải trả', amount: m.due, note: r.code } : null,
     };
   }
 
@@ -237,7 +346,7 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
 
 /** Ghép phiếu thành tin nhắn chữ (dán Zalo / Messenger). */
 export function rentalShareText(doc: RentalShareDoc, shop: { name: string; phone: string; bank?: { name: string; account: string; holder: string } | null }): string {
-  const lines = [`${doc.icon} ${doc.title.toUpperCase()} — ${doc.code}`, ...doc.lead];
+  const lines = [`${doc.icon} ${doc.title.toUpperCase()}${doc.code ? ` — ${doc.code}` : ''}`, ...doc.lead];
   for (const b of doc.blocks) {
     if (!b.rows.length) continue;
     lines.push('', `${b.icon} ${b.heading}`);

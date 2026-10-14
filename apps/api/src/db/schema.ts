@@ -270,6 +270,10 @@ export const rentals = sqliteTable(
     accessories: text('accessories', { mode: 'json' }).$type<HandoverAccessory[]>(),
     notes: text('notes'),
     cancelReason: text('cancel_reason'),
+    /** Lần tra phạt nguội gần nhất cho riêng lượt này (trước khi hoàn cọc). */
+    fineCheckedAt: integer('fine_checked_at'),
+    /** Số vi phạm chưa xử phạt tìm thấy trong lúc khách giữ xe ở lần tra đó. */
+    fineCheckFound: integer('fine_check_found'),
     createdBy: integer('created_by'),
     handledBy: integer('handled_by'),
     createdAt: createdAt(),
@@ -280,6 +284,29 @@ export const rentals = sqliteTable(
     index('rentals_customer_idx').on(t.customerId),
     index('rentals_status_idx').on(t.status),
   ],
+);
+
+/**
+ * Mỗi lần đổi giờ trả khi khách đang giữ xe (gia hạn / trả sớm) — căn cứ in phụ lục hợp đồng.
+ * Tổng tiền = tổng các khoản phải trả của lượt trước/sau khi đổi.
+ */
+export const rentalExtensions = sqliteTable(
+  'rental_extensions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    rentalId: integer('rental_id').notNull(),
+    /** Lần thứ mấy (in số phụ lục). */
+    seq: integer('seq').notNull(),
+    oldEnd: integer('old_end').notNull(),
+    newEnd: integer('new_end').notNull(),
+    oldTotal: integer('old_total').notNull(),
+    newTotal: integer('new_total').notNull(),
+    oldKmLimit: integer('old_km_limit').notNull().default(0),
+    newKmLimit: integer('new_km_limit').notNull().default(0),
+    createdBy: integer('created_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('extensions_rental_idx').on(t.rentalId)],
 );
 
 /**
@@ -458,6 +485,9 @@ export const trafficFines = sqliteTable(
     customerId: integer('customer_id'),
     status: text('status').$type<FineStatus>().notNull().default('new'),
     notes: text('notes'),
+    /** Hồ sơ ghi nhầm / trùng: hủy (không xóa) — vẫn giữ để đối chiếu, không tính nhắc / công nợ. */
+    voidedAt: integer('voided_at'),
+    voidReason: text('void_reason'),
     createdBy: integer('created_by'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -536,6 +566,70 @@ export const reminderLog = sqliteTable('reminder_log', {
   sentAt: integer('sent_at').notNull(),
 });
 
+/**
+ * Hàng đợi thông báo Telegram (đặt xe mới, đã giao xe, phạt nguội mới…): gửi ngay, lỗi mạng thì
+ * gửi lại sau — không mất tin. Tin đã gửi được dọn sau 30 ngày.
+ */
+export const notifyQueue = sqliteTable(
+  'notify_queue',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    html: text('html').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    lastError: text('last_error'),
+    sentAt: integer('sent_at'),
+    /** Bỏ hẳn (quá 24 giờ vẫn không gửi được). */
+    droppedAt: integer('dropped_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('notify_queue_pending_idx').on(t.sentAt, t.nextAttemptAt)],
+);
+
+/**
+ * Lịch bảo dưỡng theo hạng mục của từng xe (thay dầu, lọc gió, má phanh, lốp…): mỗi mục một chu kỳ
+ * km và/hoặc tháng, tính từ lần làm gần nhất. Bỏ mục = archivedAt (giữ lịch sử).
+ */
+export const maintenanceItems = sqliteTable(
+  'maintenance_items',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    vehicleId: integer('vehicle_id').notNull(),
+    name: text('name').notNull(),
+    /** Mã hạng mục gợi ý (oil, brake_pads…); null = tự đặt. */
+    preset: text('preset'),
+    intervalKm: integer('interval_km'),
+    intervalMonths: integer('interval_months'),
+    /** Lần làm gần nhất: ODO + ngày "YYYY-MM-DD" (null = chưa biết). */
+    lastOdo: integer('last_odo'),
+    lastDate: text('last_date'),
+    notes: text('notes'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    archivedAt: integer('archived_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('maintenance_items_vehicle_idx').on(t.vehicleId)],
+);
+
+/** Mỗi lần làm một hạng mục bảo dưỡng (kèm phiếu chi nếu có). */
+export const maintenanceRecords = sqliteTable(
+  'maintenance_records',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    itemId: integer('item_id').notNull(),
+    vehicleId: integer('vehicle_id').notNull(),
+    /** "YYYY-MM-DD" giờ VN. */
+    doneDate: text('done_date').notNull(),
+    odo: integer('odo'),
+    cashEntryId: integer('cash_entry_id'),
+    notes: text('notes'),
+    createdBy: integer('created_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('maintenance_records_item_idx').on(t.itemId, t.doneDate)],
+);
+
 export type User = typeof users.$inferSelect;
 export type Vehicle = typeof vehicles.$inferSelect;
 export type AccessoryCatalogItem = typeof accessoryCatalog.$inferSelect;
@@ -544,6 +638,7 @@ export type VehicleBlock = typeof vehicleBlocks.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type Rental = typeof rentals.$inferSelect;
 export type RentalSegment = typeof rentalSegments.$inferSelect;
+export type RentalExtension = typeof rentalExtensions.$inferSelect;
 export type Handover = typeof handovers.$inferSelect;
 export type Charge = typeof charges.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
@@ -555,3 +650,5 @@ export type FileRow = typeof files.$inferSelect;
 export type AuditRow = typeof auditLog.$inferSelect;
 export type CashEntry = typeof cashEntries.$inferSelect;
 export type RecurringCost = typeof recurringCosts.$inferSelect;
+export type MaintenanceItem = typeof maintenanceItems.$inferSelect;
+export type MaintenanceRecord = typeof maintenanceRecords.$inferSelect;

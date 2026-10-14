@@ -1,7 +1,7 @@
 // Nghiệp vụ lượt thuê: kiểm trùng lịch, tạo, giao xe, nhận xe, quyết toán, hoàn cọc.
 // Mọi thay đổi trạng thái đi qua đây để luật được áp dụng một chỗ.
 
-import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import type { Customer, HandoverAccessory, HandoverDamage, HandoverPhoto, Rental, Vehicle } from '../db/schema.js';
 import { badRequest, conflict, notFound } from '../lib/http.js';
@@ -9,8 +9,9 @@ import { getSetting } from '../lib/settings.js';
 import { ageAt } from '../shared/cccd.js';
 import type { ChargeKind, CollateralKind, PaymentMethod, RentalStatus } from '../shared/constants.js';
 import { RENTAL_STATUS } from '../shared/constants.js';
-import { defaultFineHold, planCancellation, summarizeMoney, type PaymentPurpose } from '../shared/money.js';
+import { defaultFineHold, planCancellation, summarizeMoney, type MoneySummary, type PaymentPurpose } from '../shared/money.js';
 import { quoteRental, vehicleChargingPolicy, type Quote, type VehiclePricing } from '../shared/pricing.js';
+import { maintenanceWarnings } from './maintenance.js';
 import { fmtNumber } from '../shared/text.js';
 import { DAY_MS, fmtDateTime, vnDateKey, vnParts } from '../shared/time.js';
 
@@ -136,7 +137,7 @@ export function driverWarnings(c: Customer, atMs: number, role = 'Khách'): Warn
   const openFines = db
     .select({ id: schema.trafficFines.id })
     .from(schema.trafficFines)
-    .where(and(eq(schema.trafficFines.customerId, c.id), inArray(schema.trafficFines.status, ['new', 'notified', 'we_paid'])))
+    .where(and(eq(schema.trafficFines.customerId, c.id), inArray(schema.trafficFines.status, ['new', 'notified', 'we_paid']), isNull(schema.trafficFines.voidedAt)))
     .all();
   if (openFines.length) w.push({ code: 'open_fines', severity: 'danger', message: `${c.fullName} còn ${openFines.length} phạt nguội chưa xử lý xong` });
   return w;
@@ -315,6 +316,9 @@ export function updateRental(id: number, input: UpdateRentalInput, userId: numbe
     if (conflicts.length && !input.allowConflict) throw conflict('Xe đã có lịch trùng thời gian này', 'conflict', { conflicts });
   }
   return db.transaction(() => {
+    // Khách đang giữ xe mà đổi giờ trả = gia hạn (hoặc trả sớm) → ghi lại để in phụ lục hợp đồng.
+    const extending = r.status === 'active' && next.scheduledEnd !== r.scheduledEnd;
+    const oldTotal = extending ? rentalMoney(r.id).totalCharges : 0;
     let pricing = rentalPricing(r);
     if (next.vehicleId !== r.vehicleId) pricing = vehiclePricing(getVehicle(next.vehicleId));
     const patch: Partial<Rental> = {
@@ -335,7 +339,25 @@ export function updateRental(id: number, input: UpdateRentalInput, userId: numbe
       const quote = recomputeAutoCharges({ ...r, ...patch } as Rental, pricing, userId);
       patch.kmLimit = quote.kmLimit;
     }
-    return db.update(schema.rentals).set(patch).where(eq(schema.rentals.id, id)).returning().get();
+    const updated = db.update(schema.rentals).set(patch).where(eq(schema.rentals.id, id)).returning().get();
+    if (extending) {
+      const seq = db.select({ id: schema.rentalExtensions.id }).from(schema.rentalExtensions).where(eq(schema.rentalExtensions.rentalId, r.id)).all().length + 1;
+      db.insert(schema.rentalExtensions)
+        .values({
+          rentalId: r.id,
+          seq,
+          oldEnd: r.scheduledEnd,
+          newEnd: updated.scheduledEnd,
+          oldTotal,
+          newTotal: rentalMoney(r.id).totalCharges,
+          oldKmLimit: r.kmLimit,
+          newKmLimit: updated.kmLimit,
+          createdBy: userId,
+          createdAt: Date.now(),
+        })
+        .run();
+    }
+    return updated;
   });
 }
 
@@ -386,6 +408,41 @@ export function rentalMoney(rentalId: number) {
   const charges = db.select().from(schema.charges).where(eq(schema.charges.rentalId, rentalId)).all();
   const payments = db.select().from(schema.payments).where(eq(schema.payments.rentalId, rentalId)).all();
   return summarizeMoney(charges, payments);
+}
+
+/** Sổ tiền của mọi lượt ở các trạng thái này — 2 truy vấn cho cả danh sách (nhắc công nợ, hoàn tiền). */
+export function moneyByRental(statuses: RentalStatus[]): Map<number, MoneySummary> {
+  // Cộng sẵn trong SQL (mỗi lượt vài dòng) — Việc cần làm gọi mỗi phút, dữ liệu nhiều năm vẫn nhẹ.
+  const charges = db
+    .select({ rentalId: schema.charges.rentalId, amount: sql<number>`SUM(${schema.charges.amount})` })
+    .from(schema.charges)
+    .innerJoin(schema.rentals, eq(schema.rentals.id, schema.charges.rentalId))
+    .where(inArray(schema.rentals.status, statuses))
+    .groupBy(schema.charges.rentalId)
+    .all();
+  const payments = db
+    .select({ rentalId: schema.payments.rentalId, direction: schema.payments.direction, purpose: schema.payments.purpose, amount: sql<number>`SUM(${schema.payments.amount})` })
+    .from(schema.payments)
+    .innerJoin(schema.rentals, eq(schema.rentals.id, schema.payments.rentalId))
+    .where(and(inArray(schema.rentals.status, statuses), isNull(schema.payments.voidedAt)))
+    .groupBy(schema.payments.rentalId, schema.payments.direction, schema.payments.purpose)
+    .all();
+  const group = <T extends { rentalId: number }>(rows: T[]) => {
+    const m = new Map<number, T[]>();
+    for (const x of rows) {
+      const list = m.get(x.rentalId);
+      if (list) list.push(x);
+      else m.set(x.rentalId, [x]);
+    }
+    return m;
+  };
+  const byCharges = group(charges);
+  const byPayments = group(payments);
+  const out = new Map<number, MoneySummary>();
+  for (const id of new Set([...byCharges.keys(), ...byPayments.keys()])) {
+    out.set(id, summarizeMoney(byCharges.get(id) ?? [], byPayments.get(id) ?? []));
+  }
+  return out;
 }
 
 // ── Giao xe / nhận xe ─────────────────────────────────────────────────────
@@ -518,23 +575,39 @@ export function settle(id: number, input: SettleInput, userId: number): Rental {
 }
 
 export interface ReleaseHoldInput {
-  deductions: { kind: ChargeKind; description: string; amount: number }[];
+  /** `fineId`: khoản trừ cho một hồ sơ phạt nguội → hồ sơ chuyển "Đã thu lại / trừ cọc". */
+  deductions: { kind: ChargeKind; description: string; amount: number; fineId?: number | null }[];
   refund: { method: 'cash' | 'transfer' } | null;
   note: string | null;
 }
 
-/** Hết hạn giữ cọc: trừ phạt nguội (nếu có) rồi hoàn phần còn lại. */
+/** Ghi khoản phải trả rồi lấy cọc đang giữ bù vào — cọc không đủ thì phần thiếu thành công nợ của khách. */
+export function chargeFromDeposit(rentalId: number, c: { kind: ChargeKind; description: string; amount: number }, userId: number): { fromDeposit: number; owed: number } {
+  addCharge(rentalId, c, userId);
+  const take = Math.min(c.amount, Math.max(0, rentalMoney(rentalId).depositHeld));
+  if (take > 0) addPayment(rentalId, { direction: 'offset', purpose: 'deposit', method: 'offset', amount: take, note: `Trừ cọc: ${c.description}`.slice(0, 300) }, userId);
+  return { fromDeposit: take, owed: c.amount - take };
+}
+
+/** Hết hạn giữ cọc: trừ phạt nguội (nếu có) rồi hoàn phần còn lại. Phạt vượt cọc → phần vượt khách còn nợ (Việc cần làm nhắc thu). */
 export function releaseHold(id: number, input: ReleaseHoldInput, userId: number): Rental {
   const r = getRental(id);
   if (r.status !== 'settled') throw badRequest('Lượt thuê không ở trạng thái chờ hoàn cọc');
   return db.transaction(() => {
     for (const d of input.deductions) {
       if (d.amount <= 0) continue;
-      addCharge(r.id, d, userId);
-      addPayment(r.id, { direction: 'offset', purpose: 'deposit', method: 'offset', amount: d.amount, note: `Trừ cọc: ${d.description}` }, userId);
+      chargeFromDeposit(r.id, { kind: d.kind, description: d.description, amount: d.amount }, userId);
+      if (d.fineId) {
+        const f = db.select().from(schema.trafficFines).where(and(eq(schema.trafficFines.id, d.fineId), eq(schema.trafficFines.rentalId, r.id))).get();
+        if (!f) throw badRequest('Hồ sơ phạt nguội không thuộc lượt thuê này');
+        if (f.voidedAt) throw badRequest('Hồ sơ phạt nguội đã hủy');
+        db.update(schema.trafficFines)
+          .set({ status: 'recovered', amount: f.amount ?? d.amount, updatedAt: Date.now() })
+          .where(eq(schema.trafficFines.id, f.id))
+          .run();
+      }
     }
     const money = rentalMoney(r.id);
-    if (money.depositHeld < 0) throw badRequest('Khoản trừ vượt quá tiền cọc đang giữ');
     if (money.depositHeld > 0) {
       if (!input.refund) throw badRequest('Chọn hình thức hoàn cọc');
       addPayment(r.id, { direction: 'out', purpose: 'deposit', method: input.refund.method, amount: money.depositHeld, note: input.note ?? 'Hoàn cọc phạt nguội' }, userId);
@@ -602,11 +675,13 @@ export function rentalDetail(id: number) {
   const collaterals = db.select().from(schema.collaterals).where(eq(schema.collaterals.rentalId, id)).all();
   const documents = db.select().from(schema.documents).where(eq(schema.documents.rentalId, id)).orderBy(desc(schema.documents.createdAt)).all();
   const fines = db.select().from(schema.trafficFines).where(eq(schema.trafficFines.rentalId, id)).all();
+  const extensions = db.select().from(schema.rentalExtensions).where(eq(schema.rentalExtensions.rentalId, id)).orderBy(asc(schema.rentalExtensions.seq)).all();
   const userIds = [rental.createdBy, rental.handledBy, ...handovers.map((h) => h.staffUserId)].filter((x): x is number => x != null);
   const users = userIds.length
     ? db.select({ id: schema.users.id, displayName: schema.users.displayName }).from(schema.users).where(inArray(schema.users.id, userIds)).all()
     : [];
-  const warnings = rental.status === 'booked' ? [customer, ...drivers].flatMap((c, i) => driverWarnings(c, rental.scheduledStart, i === 0 ? 'Khách' : 'Lái phụ')) : [];
+  const warnings: Warning[] =
+    rental.status === 'booked' ? [...[customer, ...drivers].flatMap((c, i) => driverWarnings(c, rental.scheduledStart, i === 0 ? 'Khách' : 'Lái phụ')), ...maintenanceWarnings(vehicle)] : [];
   return {
     rental,
     customer,
@@ -619,6 +694,7 @@ export function rentalDetail(id: number) {
     collaterals,
     documents,
     fines,
+    extensions,
     users,
     warnings,
     money: summarizeMoney(charges, payments),

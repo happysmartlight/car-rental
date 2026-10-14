@@ -205,6 +205,24 @@ export const TEMPLATE_FIELDS: { group: string; fields: FieldDoc[] }[] = [
       { key: 'qt.giu_coc_ngay', label: 'Số ngày giữ lại' },
     ],
   },
+  {
+    group: 'Phụ lục gia hạn — lần gia hạn gần nhất (điều kiện {#co_gia_han}…{/co_gia_han})',
+    fields: [
+      { key: 'gia_han.so', label: 'Số phụ lục (HD-2026-0001-PL01)' },
+      { key: 'gia_han.lan', label: 'Lần gia hạn thứ' },
+      { key: 'gia_han.ngay', label: 'Ngày lập dạng "ngày 06 tháng 10 năm 2026"' },
+      { key: 'gia_han.tra_cu', label: 'Giờ trả xe trước khi gia hạn' },
+      { key: 'gia_han.tra_moi', label: 'Giờ trả xe mới' },
+      { key: 'gia_han.thay_doi', label: 'Thay đổi (vd "thêm 2 ngày")' },
+      { key: 'gia_han.km_cu', label: 'Giới hạn km trước khi gia hạn' },
+      { key: 'gia_han.km_moi', label: 'Giới hạn km mới' },
+      { key: 'gia_han.tien_cu', label: 'Tổng tiền trước khi gia hạn' },
+      { key: 'gia_han.tien_moi', label: 'Tổng tiền sau khi gia hạn' },
+      { key: 'gia_han.tang_giam', label: '"tăng thêm" / "giảm"' },
+      { key: 'gia_han.tien_them', label: 'Số tiền tăng thêm / giảm' },
+      { key: 'gia_han.tien_them_chu', label: 'Số tiền tăng thêm / giảm bằng chữ' },
+    ],
+  },
   { group: 'Khác', fields: [{ key: 'ngay_in', label: 'Thời điểm in' }] },
 ];
 
@@ -282,6 +300,8 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
   const giaoChecked = !!pickupHo?.accessories?.length;
   const start = r.actualStart ?? r.scheduledStart;
   const end = r.actualEnd ?? r.scheduledEnd;
+  const ext = d.extensions.at(-1);
+  const kmText = (n: number) => (n ? fmtNumber(n) : 'Không giới hạn');
 
   const data = {
     ben_a: {
@@ -390,6 +410,24 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
       giu_coc_ngay: holdDays,
     },
     co_qt_giu_coc: plan.keepHold > 0,
+    gia_han: ext
+      ? {
+          so: `${r.code}-PL${String(ext.seq).padStart(2, '0')}`,
+          lan: ext.seq,
+          ngay: vnDateLong(ext.createdAt),
+          tra_cu: fmtDateTime(ext.oldEnd),
+          tra_moi: fmtDateTime(ext.newEnd),
+          thay_doi: ext.newEnd >= ext.oldEnd ? `thêm ${fmtDuration(ext.newEnd - ext.oldEnd)}` : `rút ngắn ${fmtDuration(ext.oldEnd - ext.newEnd)}`,
+          km_cu: kmText(ext.oldKmLimit),
+          km_moi: kmText(ext.newKmLimit),
+          tien_cu: money(ext.oldTotal),
+          tien_moi: money(ext.newTotal),
+          tang_giam: ext.newTotal >= ext.oldTotal ? 'tăng thêm' : 'giảm',
+          tien_them: money(Math.abs(ext.newTotal - ext.oldTotal)),
+          tien_them_chu: vndInWords(Math.abs(ext.newTotal - ext.oldTotal)),
+        }
+      : {},
+    co_gia_han: !!ext,
     thoi_gian_thuc: `${fmtDateTime(start)} → ${fmtDateTime(end)}`,
     ngay_in: fmtDateTime(Date.now()),
     ngay_in_ngan: fmtDate(Date.now()),
@@ -529,6 +567,7 @@ const BUILTINS: { key: string; rev: number; file: string; name: string; kind: Te
   { key: 'contract', rev: 6, file: 'hop-dong-thue-xe.docx', name: 'Hợp đồng thuê xe tự lái', kind: 'contract' },
   { key: 'pickup', rev: 3, file: 'bien-ban-giao-xe.docx', name: 'Biên bản giao xe', kind: 'pickup' },
   { key: 'return', rev: 4, file: 'bien-ban-nhan-xe.docx', name: 'Biên bản nhận xe & quyết toán', kind: 'return' },
+  { key: 'extension', rev: 1, file: 'phu-luc-gia-han.docx', name: 'Phụ lục gia hạn hợp đồng', kind: 'extension' },
 ];
 
 export function builtinTemplatePath(file: string): string {

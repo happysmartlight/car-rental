@@ -28,6 +28,7 @@ function lazy<T extends ComponentType<any>>(load: () => Promise<{ default: T }>)
 }
 
 const Calendar = lazy(() => import('./pages/Calendar'));
+const Quote = lazy(() => import('./pages/Quote'));
 const RentalsList = lazy(() => import('./pages/rentals/RentalsList'));
 const RentalNew = lazy(() => import('./pages/rentals/RentalNew'));
 const RentalDetail = lazy(() => import('./pages/rentals/RentalDetail'));
@@ -72,6 +73,7 @@ export function App() {
           <Route element={<AppShell />}>
             <Route index element={<Dashboard />} />
             <Route path="calendar" element={<Calendar />} />
+            <Route path="quote" element={<Quote />} />
             <Route path="rentals" element={<RentalsList />} />
             <Route path="rentals/new" element={<RentalNew />} />
             <Route path="rentals/:id" element={<RentalDetail />} />

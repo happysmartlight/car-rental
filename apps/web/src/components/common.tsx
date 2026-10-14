@@ -19,7 +19,8 @@ export function RentalStatusBadge({ status, overdue }: { status: RentalStatus; o
   );
 }
 
-export function FineStatusBadge({ status }: { status: FineStatus }) {
+export function FineStatusBadge({ status, voided }: { status: FineStatus; voided?: boolean }) {
+  if (voided) return <Badge tone="gray">Đã hủy</Badge>;
   const s = FINE_STATUS[status];
   return <Badge tone={s.tone}>{s.label}</Badge>;
 }
@@ -66,8 +67,8 @@ export function VietQr({ amount, note, className }: { amount: number; note: stri
   );
 }
 
-/** Khung ký tên bằng ngón tay / bút. Trả về PNG blob. */
-export function SignaturePad({ onChange, className }: { onChange: (blob: Blob | null) => void; className?: string }) {
+/** Khung ký tên bằng ngón tay / bút. Trả về PNG blob. `initial` = chữ ký đã ký trước đó (khôi phục nháp). */
+export function SignaturePad({ onChange, className, initial }: { onChange: (blob: Blob | null) => void; className?: string; initial?: string | null }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const [empty, setEmpty] = useState(true);
@@ -84,6 +85,16 @@ export function SignaturePad({ onChange, className }: { onChange: (blob: Blob | 
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#0e1420';
+    if (initial) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, rect.width, rect.height);
+        setEmpty(false);
+      };
+      img.src = initial;
+    }
+    // Chỉ vẽ lại lúc mở khung ký; sau đó khung tự giữ nét.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const pos = (e: React.PointerEvent) => {

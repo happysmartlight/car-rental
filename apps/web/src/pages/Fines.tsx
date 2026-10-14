@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Car, ChevronDown, Clock, ExternalLink, MessageCircle, Phone, Plus, Receipt, Search, ShieldAlert, UserRound, Wrench } from 'lucide-react';
+import { AlertTriangle, ArchiveRestore, Ban, Car, ChevronDown, Clock, ExternalLink, HandCoins, MessageCircle, Phone, Plus, Receipt, Search, Send, ShieldAlert, UserRound, Wrench } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { CashEntryDialog, type CashDialogState } from '@/components/CashEntryDialog';
+import { FineRecoverDialog, FineShareDialog, fineCollectible, type FineLike } from '@/components/FineActions';
 import { Page } from '@/components/layout/AppShell';
 import { FineStatusBadge, Money } from '@/components/common';
 import { PhotoInput } from '@/components/images';
@@ -12,7 +13,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { DateTimeInput, Field, Input, MoneyInput, Segmented, Select, Textarea } from '@/components/ui/form';
 import { Badge, Card, CardBody, CardHeader, Empty, InfoRow, Notice, Spinner } from '@/components/ui/misc';
 import { api, qs } from '@/lib/api';
-import { useAction } from '@/lib/hooks';
+import { useAction, useAuth } from '@/lib/hooks';
 import type { FineListItem, FineLookup, TrafficFine, VehicleWithStatus } from '@/lib/types';
 import { cn, errorMessage, telLink, zaloLink } from '@/lib/utils';
 import { BLOCK_KIND_LABEL, FINE_SOURCES, FINE_SOURCE_LABEL, FINE_STATUS, FINE_STATUSES, type FineSource, type FineStatus } from '@shared/constants';
@@ -31,6 +32,9 @@ interface FineForm {
   rentalId: number | null;
   status: FineStatus;
   notes: string;
+  /** Hồ sơ đã hủy (ghi nhầm / trùng) — chỉ xem, khôi phục được. */
+  voidedAt?: number | null;
+  voidReason?: string | null;
 }
 
 const emptyForm = (plate = '', at: number | null = null, rentalId: number | null = null): FineForm => ({ plate, violatedAt: at, location: '', violation: '', amount: null, source: 'csgt', noticeFileId: null, rentalId, status: 'new', notes: '' });
@@ -153,6 +157,8 @@ export default function Fines() {
   const [form, setForm] = useState<FineForm | null>(null);
   const [cash, setCash] = useState<CashDialogState | null>(null);
   const [timeOpen, setTimeOpen] = useState(false);
+  const [share, setShare] = useState<FineLike | null>(null);
+  const [recover, setRecover] = useState<FineLike | null>(null);
 
   const { data: vehicles } = useQuery({ queryKey: ['vehicles'], queryFn: () => api.get<VehicleWithStatus[]>('/api/vehicles') });
   const { data: list, isLoading } = useQuery({ queryKey: ['fines', filter], queryFn: () => api.get<{ items: FineListItem[] }>(`/api/fines${qs({ status: filter })}`) });
@@ -265,12 +271,14 @@ export default function Fines() {
                         rentalId: f.rentalId,
                         status: f.status,
                         notes: f.notes ?? '',
+                        voidedAt: f.voidedAt,
+                        voidReason: f.voidReason,
                       })
                     }
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2/60 md:px-5"
+                    className={cn('flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2/60 md:px-5', f.voidedAt && 'opacity-60')}
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium">
+                      <p className={cn('font-medium', f.voidedAt && 'line-through')}>
                         {f.plate} · {f.violation || 'Vi phạm'}
                       </p>
                       <p className="text-sm text-muted">
@@ -280,7 +288,7 @@ export default function Fines() {
                         {f.rental && ` · ${f.rental.code}`}
                       </p>
                     </div>
-                    <FineStatusBadge status={f.status} />
+                    <FineStatusBadge status={f.status} voided={!!f.voidedAt} />
                   </button>
                 </li>
               ))}
@@ -303,8 +311,18 @@ export default function Fines() {
             description: `Nộp phạt ${x.plate}${x.violation ? ` · ${x.violation}` : ''}${x.violatedAt ? ` (${fmtDateTime(x.violatedAt)})` : ''}`,
           });
         }}
+        onShare={(x) => {
+          setForm(null);
+          setShare(x);
+        }}
+        onRecover={(x) => {
+          setForm(null);
+          setRecover(x);
+        }}
       />
       <CashEntryDialog state={cash} onClose={() => setCash(null)} />
+      <FineShareDialog fine={share} open={!!share} onOpenChange={(o) => !o && setShare(null)} />
+      <FineRecoverDialog fine={recover} open={!!recover} onOpenChange={(o) => !o && setRecover(null)} />
     </Page>
   );
 }
@@ -407,21 +425,40 @@ function HolderPanel({ plate, at, rentalId, onPick, autoPick }: { plate: string;
   );
 }
 
-function FineDialog({ form, onClose, vehicles, onExpense }: { form: FineForm | null; onClose: () => void; vehicles: VehicleWithStatus[]; onExpense: (f: FineForm) => void }) {
+function FineDialog({
+  form,
+  onClose,
+  vehicles,
+  onExpense,
+  onShare,
+  onRecover,
+}: {
+  form: FineForm | null;
+  onClose: () => void;
+  vehicles: VehicleWithStatus[];
+  onExpense: (f: FineForm) => void;
+  onShare: (f: FineLike) => void;
+  onRecover: (f: FineLike) => void;
+}) {
+  const { isAdmin } = useAuth();
   const [f, setF] = useState<FineForm | null>(form);
   const [otherPlate, setOtherPlate] = useState(false);
   const [touched, setTouched] = useState(false);
+  /** Đang nhập lý do hủy hồ sơ (null = không). */
+  const [voiding, setVoiding] = useState<string | null>(null);
   const inFleet = (plate: string) => vehicles.find((v) => plateKey(v.plate) === plateKey(plate));
   useEffect(() => {
     setF(form);
     setTouched(false);
+    setVoiding(null);
     setOtherPlate(!!form?.plate && !inFleet(form.plate));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
   const save = useAction(
     () => {
+      const { voidedAt: _v, voidReason: _r, ...rest } = f!;
       const body = {
-        ...f!,
+        ...rest,
         location: f!.location || null,
         violation: f!.violation || null,
         notes: f!.notes || null,
@@ -437,32 +474,77 @@ function FineDialog({ form, onClose, vehicles, onExpense }: { form: FineForm | n
       onSuccess: onClose,
     },
   );
+  const doVoid = useAction(() => api.post(`/api/fines/${form!.id}/void`, { reason: voiding }), { invalidate: [['fines'], ['dashboard'], ['rental']], success: 'Đã hủy hồ sơ', onSuccess: onClose });
+  const restore = useAction(() => api.post(`/api/fines/${form!.id}/restore`), { invalidate: [['fines'], ['dashboard'], ['rental']], success: 'Đã khôi phục hồ sơ', onSuccess: onClose });
   if (!f) return null;
+  const voided = !!form?.voidedAt;
   const set = <K extends keyof FineForm>(k: K, v: FineForm[K]) => setF((cur) => (cur ? { ...cur, [k]: v } : cur));
   const plateOk = plateKey(f.plate).length >= 5;
   const fleetValue = otherPlate ? OTHER_PLATE : (inFleet(f.plate)?.plate ?? '');
+  // Hồ sơ đã lưu, đã gắn lượt thuê, chưa thu tiền → gửi khách / ghi khách trả lại (theo số đang hiện trên form).
+  const asFine: FineLike | null =
+    f.id && form?.rentalId && f.rentalId === form.rentalId && f.violatedAt
+      ? { id: f.id, plate: f.plate, violatedAt: f.violatedAt, location: f.location || null, violation: f.violation || null, amount: f.amount, status: form.status, noticeFileId: f.noticeFileId, rentalId: f.rentalId, voidedAt: form.voidedAt ?? null }
+      : null;
 
   return (
     <Dialog
       open={!!form}
       onOpenChange={(o) => !o && onClose()}
-      title={f.id ? 'Vi phạm' : 'Ghi phạt nguội'}
+      title={f.id ? (voided ? 'Hồ sơ đã hủy' : 'Vi phạm') : 'Ghi phạt nguội'}
       description={!f.id ? 'Chọn xe và giờ vi phạm — app tra ngay ai đang giữ xe lúc đó' : undefined}
       size="lg"
       footer={
-        <>
-          {f.id && (
-            <Button variant="outline" className="mr-auto" onClick={() => onExpense(f)}>
-              <Receipt /> Ghi chi nộp phạt
+        voided ? (
+          isAdmin && (
+            <Button variant="outline" onClick={() => restore.mutate()} loading={restore.isPending}>
+              <ArchiveRestore /> Khôi phục hồ sơ
             </Button>
-          )}
-          <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!plateOk || !f.violatedAt}>
-            Lưu
-          </Button>
-        </>
+          )
+        ) : voiding != null ? (
+          <>
+            <Button variant="ghost" onClick={() => setVoiding(null)}>
+              Thôi
+            </Button>
+            <Button variant="danger" onClick={() => doVoid.mutate()} loading={doVoid.isPending} disabled={voiding.trim().length < 2}>
+              Hủy hồ sơ
+            </Button>
+          </>
+        ) : (
+          <>
+            {f.id && isAdmin && (
+              <Button variant="danger-ghost" size="icon" onClick={() => setVoiding('')} aria-label="Hủy hồ sơ" title="Hủy hồ sơ (ghi nhầm / trùng)">
+                <Ban />
+              </Button>
+            )}
+            {f.id && (
+              <Button variant="outline" className="mr-auto" onClick={() => onExpense(f)}>
+                <Receipt /> Ghi chi nộp phạt
+              </Button>
+            )}
+            <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!plateOk || !f.violatedAt}>
+              Lưu
+            </Button>
+          </>
+        )
       }
     >
-      <div className="space-y-4">
+      {voiding != null ? (
+        <div className="space-y-4">
+          <Notice tone="amber">
+            Hồ sơ bị hủy vẫn được giữ lại (gạch đi) để đối chiếu và có thể khôi phục, nhưng không còn nằm trong việc cần xử lý, không tính vào công nợ hay cảnh báo khách.
+          </Notice>
+          <Field label="Lý do hủy" required>
+            <Input autoFocus value={voiding} onChange={(e) => setVoiding(e.target.value)} placeholder="Ghi nhầm xe, ghi trùng, vi phạm không phải của xe mình…" />
+          </Field>
+        </div>
+      ) : (
+      <fieldset disabled={voided} className="min-w-0 space-y-4">
+        {voided && (
+          <Notice tone="red" icon={Ban}>
+            Đã hủy lúc {fmtDateTime(form!.voidedAt)} · {form!.voidReason}
+          </Notice>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Xe" required>
             <Select
@@ -503,6 +585,18 @@ function FineDialog({ form, onClose, vehicles, onExpense }: { form: FineForm | n
           <p className="rounded-2xl border border-dashed border-border-strong px-4 py-3 text-sm text-muted">Chọn xe và giờ vi phạm để xem ai đang giữ xe lúc đó.</p>
         )}
 
+        {asFine && !voided && fineCollectible(asFine) && (
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-surface-2 p-3">
+            <p className="w-full text-sm font-medium sm:w-auto sm:flex-1">Thu lại tiền phạt từ khách</p>
+            <Button size="sm" variant="outline" onClick={() => onShare(asFine)}>
+              <Send /> Gửi khách
+            </Button>
+            <Button size="sm" onClick={() => onRecover(asFine)}>
+              <HandCoins /> Khách đã trả lại
+            </Button>
+          </div>
+        )}
+
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Lỗi vi phạm" className="sm:col-span-2">
             <Input value={f.violation} onChange={(e) => set('violation', e.target.value)} placeholder="Chạy quá tốc độ, vượt đèn đỏ…" />
@@ -536,7 +630,8 @@ function FineDialog({ form, onClose, vehicles, onExpense }: { form: FineForm | n
           </Field>
           <PhotoInput kind="fine_notice" label="Ảnh thông báo vi phạm" value={f.noticeFileId} onChange={(v) => set('noticeFileId', v)} className="sm:col-span-2 sm:max-w-56" />
         </div>
-      </div>
+      </fieldset>
+      )}
     </Dialog>
   );
 }

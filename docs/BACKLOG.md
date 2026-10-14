@@ -1,6 +1,6 @@
 # Việc còn treo
 
-Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 2026-10-10.
+Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 2026-10-14.
 
 ## Câu hỏi chưa trả lời (từ PLAN mục 10)
 
@@ -26,13 +26,22 @@ Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 
 ### Phase 2–3
 - [ ] Đổi xe giữa chừng (dữ liệu `rental_segments` đã sẵn, thiếu giao diện + API).
 - [x] Chi phí xe, chi phí chung, khoản định kỳ; báo cáo thu chi / lãi theo xe, theo tháng; biểu đồ; xuất Excel — trang Thu chi (v0.3.0).
-- [ ] Lịch bảo dưỡng đầy đủ theo hạng mục (dầu, lốp, má phanh… mỗi thứ một chu kỳ km/tháng) — hiện có một mốc bảo dưỡng km/ngày + nhắc, ghi chi phí bảo dưỡng thì đặt được mốc mới.
+- [x] Lịch bảo dưỡng theo hạng mục (v0.4.1, bảng `maintenance_items` + `maintenance_records`). Mốc bảo dưỡng chung cũ trong Sửa xe vẫn giữ, nhắc gộp chung một dòng mỗi xe.
+- [ ] Bảo dưỡng: dự đoán ngày đến hạn theo số km trung bình mỗi ngày của xe; nhắc Telegram riêng khi một mục vừa chuyển sang quá hạn (hiện chỉ có trong bản tin sáng + Việc cần làm).
 - [ ] Nhập Excel dữ liệu khách/xe cũ. Báo cáo top khách.
 - [ ] Ghi chi phí từ Telegram (gửi ảnh hóa đơn + số tiền).
 - [ ] Biên bản nhận xe in SAU khi quyết toán: số liệu quyết toán đang là gợi ý tính lại, nên lấy từ các phiếu đã ghi.
 
 ### Ý tưởng thêm
-- [ ] Chia sẻ báo giá của một lượt đặt cụ thể (ngày nhận/trả + tổng tiền) cho khách trước khi chốt.
+- [x] Báo giá cho khách trước khi chốt — trang **Xe trống & báo giá** (v0.4.1): chọn ngày giờ → xe trống + giá từng xe → gửi Zalo.
+- [x] Phụ lục gia hạn + phiếu gửi khách khi gia hạn (v0.4.1, bảng `rental_extensions`).
+- [x] Hoàn cọc: tra phạt nguội riêng cho lượt ngay trong hộp thoại; tự tra ngày đến hạn + báo Telegram (v0.4.1).
+- [x] Thu lại tiền phạt nguội sau khi đã đóng lượt: gửi khách + ghi tiền vào sổ lượt thuê (v0.4.1).
+- [x] Lưu nháp biên bản giao/nhận xe và form Đặt xe mới trên máy (v0.4.1).
+- [x] Gửi khách phiếu xác nhận đặt xe ngay sau khi tạo lượt (v0.4.1).
+- [ ] Nguồn khách (Zalo, Facebook, Mioto, giới thiệu, khách quen) + báo cáo khách quay lại; nút "Đặt lại như lần trước" và công nợ trên trang khách.
+- [ ] Quyết toán khi khách chưa trả đủ: ghi nợ ngay trong hộp Quyết toán (hiện hộp luôn ghi khách trả đủ; tạm thời để lượt ở "Chờ quyết toán" — Việc cần làm sẽ nhắc).
+- [ ] Lưu nháp form Thêm khách (quét CCCD, chụp giấy tờ) — hiện chỉ biên bản giao/nhận và Đặt xe mới có nháp.
 - [ ] Ảnh riêng cho từng phụ kiện (đã có cột `photo_file_id`, chưa có giao diện).
 
 ### Phase 4
@@ -56,6 +65,8 @@ Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 
 
 ## Nợ kỹ thuật đã biết
 
-- Thông báo Telegram gửi kiểu "best-effort", không có hàng đợi gửi lại khi mất mạng.
+- ~~Thông báo Telegram mất khi lỗi mạng~~ — v0.4.1: thông báo một lần đi qua hàng đợi `notify_queue` (gửi lại 1/5/15/30/60 phút, bỏ sau 24 giờ); nhắc theo lịch chỉ đánh dấu đã gửi khi gửi được. Riêng file sao lưu gửi Telegram vẫn chỉ thử lại vào đêm sau.
+- Thông báo chỉ vào một chat Telegram: nhân viên giao xe thấy cả tin sao lưu / tiền nong, hoặc không nhận được gì. Nên tách: nhân viên chỉ nhận lịch giao/nhận (nhóm riêng hoặc Web Push).
+- ~~Xóa hồ sơ phạt nguội là xóa hẳn~~ — v0.4.1: đổi thành hủy có lý do (`voided_at`), khôi phục được.
 - Ảnh tải lên không bị xóa khi bỏ khỏi form (file mồ côi) — dung lượng nhỏ, sẽ dọn định kỳ sau.
 - Chưa có test giao diện tự động trong CI (đã chạy tay bằng Playwright khi phát triển).

@@ -1,4 +1,4 @@
-// Ảnh phiếu gửi khách của lượt thuê (giao xe / nhận xe / quyết toán), vẽ từ RentalShareDoc.
+// Ảnh phiếu gửi khách (giao xe / gia hạn / nhận xe / quyết toán, báo phạt nguội, báo giá), vẽ từ RentalShareDoc.
 
 import QRCode from 'qrcode';
 import type { RentalShareDoc, ShareRow } from '@shared/rentalShare';
@@ -106,10 +106,10 @@ export async function renderRentalCard(doc: RentalShareDoc, biz: BusinessSetting
   drawHeader(pen, biz, 'Thuê xe tự lái');
   pen.gap(44);
   pen.text(doc.title, { size: 56, weight: 700, lh: 70 });
-  pen.text(`${doc.code} · ${doc.plate}`, { size: 30, color: C.muted });
+  pen.text(doc.subtitle ?? [doc.code, doc.plate].filter(Boolean).join(' · '), { size: 30, color: C.muted });
   pen.gap(20);
   for (const l of doc.lead) pen.text(l, { size: 30, lh: 44 });
-  if (opt.photos && doc.photos.length) await drawPhotos(pen, doc.stage === 'pickup' ? 'Ảnh xe lúc giao' : 'Ảnh xe lúc nhận', doc.photos);
+  if (opt.photos && doc.photos.length) await drawPhotos(pen, doc.photosHeading ?? (doc.stage === 'pickup' ? 'Ảnh xe lúc giao' : 'Ảnh xe lúc nhận'), doc.photos);
   for (const b of doc.blocks) {
     if (!b.rows.length) continue;
     drawSection(pen, b.heading);

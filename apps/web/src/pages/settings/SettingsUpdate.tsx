@@ -52,17 +52,53 @@ const PHASE: Record<string, string> = {
   rolled_back: 'Đã quay về bản cũ',
 };
 
+/**
+ * Ghi chú phiên bản, mặc định gọn: mỗi mục chỉ hiện tiêu đề in đậm, bỏ dòng con; "Xem chi tiết" mở đầy đủ.
+ * Ghi chú các bản cũ trên GitHub lỡ gộp cả lịch sử (lỗi CI trước v0.4.1) → bản gọn dừng khi gặp lại tiêu đề đã có.
+ */
 function Changelog({ text }: { text: string }) {
+  const [full, setFull] = useState(false);
   if (!text.trim()) return <p className="text-sm text-muted">Không có ghi chú.</p>;
+  const lines = text.split('\n');
+  const compact: string[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    if (t.startsWith('#')) {
+      if (seen.has(t)) break;
+      seen.add(t);
+      compact.push(t);
+    } else if (/^[-*]\s/.test(line)) {
+      // Chỉ lấy tiêu đề in đậm đầu dòng ("**Lịch bảo dưỡng** — …" → "Lịch bảo dưỡng").
+      const title = /^[-*]\s+\*\*(.+?)\*\*/.exec(line)?.[1];
+      compact.push(`- ${title ?? t.replace(/^[-*]\s+/, '')}`);
+    }
+  }
+  const shown = full ? lines : compact;
+  const longer = lines.filter((l) => l.trim()).length > compact.length;
   return (
     <div className="space-y-1 text-sm">
-      {text.split('\n').map((line, i) => {
+      {shown.map((line, i) => {
         const t = line.trim();
         if (!t) return null;
-        if (t.startsWith('#')) return <p key={i} className="pt-2 font-semibold">{t.replace(/^#+\s*/, '')}</p>;
-        if (/^[-*]\s/.test(t)) return <p key={i} className="flex gap-2 pl-1"><span className="text-brand">•</span><span>{t.replace(/^[-*]\s+/, '').replace(/\*\*/g, '')}</span></p>;
-        return <p key={i}>{t.replace(/\*\*/g, '')}</p>;
+        if (t.startsWith('#')) return <p key={i} className="pt-2 font-semibold first:pt-0">{t.replace(/^#+\s*/, '')}</p>;
+        if (/^[-*]\s/.test(t)) {
+          const sub = /^\s{2,}[-*]\s/.test(line);
+          return (
+            <p key={i} className={`flex gap-2 ${sub ? 'pl-6 text-muted' : 'pl-1'}`}>
+              <span className="text-brand">•</span>
+              <span>{t.replace(/^[-*]\s+/, '').replace(/\*\*/g, '').replace(/`/g, '')}</span>
+            </p>
+          );
+        }
+        return <p key={i}>{t.replace(/\*\*/g, '').replace(/`/g, '')}</p>;
       })}
+      {longer && (
+        <button type="button" onClick={() => setFull(!full)} className="pt-1 text-sm font-medium text-brand">
+          {full ? 'Thu gọn' : 'Xem chi tiết'}
+        </button>
+      )}
     </div>
   );
 }

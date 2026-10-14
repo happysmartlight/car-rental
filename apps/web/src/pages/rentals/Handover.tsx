@@ -1,8 +1,9 @@
 // Giao xe / nhận xe trên điện thoại: ODO, xăng, ảnh theo khung, vết trầy, đồ kèm theo, chữ ký.
+// Đang làm dở mà iPhone tải lại trang (mở camera nhiều lần, có cuộc gọi…) → mở lại vẫn còn nguyên (nháp trên máy).
 
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownToLine, ArrowUpFromLine, Check, Plus, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ArrowDownToLine, ArrowUpFromLine, Check, History, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
 import { Page } from '@/components/layout/AppShell';
@@ -10,9 +11,11 @@ import { FuelGauge, SignaturePad } from '@/components/common';
 import { Gallery, PhotoInput } from '@/components/images';
 import { AccessoryAdder, handoverItems } from '@/components/RentalAccessories';
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/ui/dialog';
 import { Checkbox, DateTimeInput, Field, Input, MoneyInput, NumberInput, Select, Textarea } from '@/components/ui/form';
 import { Card, CardBody, CardHeader, Notice, PageLoader } from '@/components/ui/misc';
 import { api, uploadFile } from '@/lib/api';
+import { blobToDataUrl, clearDraft, dataUrlToBlob, loadDraft, useDraftAutosave } from '@/lib/draft';
 import { useSettings } from '@/lib/hooks';
 import type { HandoverAccessory, RentalDetail, VehicleAccessoriesData } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
@@ -20,7 +23,7 @@ import { mergeAccessoryPlan } from '@shared/accessories';
 import { CHARGE_KINDS, CHARGE_KIND_LABEL, DAMAGE_ZONES, PHOTO_SLOTS, type ChargeKind } from '@shared/constants';
 import { chargeDays, chargingCharge, rentalChargingPolicy, tripChargingText, type VehiclePricing } from '@shared/pricing';
 import { fmtNumber, fmtVnd } from '@shared/text';
-import { fmtDateTime, fmtDuration } from '@shared/time';
+import { fmtDateTime, fmtDuration, fmtTime } from '@shared/time';
 import { useQueryClient } from '@tanstack/react-query';
 
 interface Damage {
@@ -41,6 +44,28 @@ interface Suggestion {
   description: string;
   amount: number;
 }
+type Collect = { amount: number | null; method: 'cash' | 'transfer' };
+
+/** Những gì đang nhập dở — ảnh đã tải lên máy chủ nên chỉ cần nhớ mã ảnh. */
+interface HandoverDraft {
+  at: number | null;
+  odo: number | null;
+  fuel: number;
+  photos: Record<string, string | null>;
+  extraPhotos: string[];
+  damages: Damage[];
+  checklist: Record<string, boolean>;
+  notes: string;
+  /** Chữ ký dạng data URL. */
+  signature: string | null;
+  charges: ChargeRow[];
+  acc: HandoverAccessory[];
+  chargeSessions: number | null;
+  collect: Collect;
+  collectDeposit: Collect;
+}
+
+const DRAFT_TTL = 24 * 3600_000;
 
 function Step({ n, title, children, description }: { n: number; title: string; children: ReactNode; description?: ReactNode }) {
   return (
@@ -60,12 +85,20 @@ function Step({ n, title, children, description }: { n: number; title: string; c
 }
 
 export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
+  // Đổi key = dựng lại form trống (nút "Làm lại từ đầu").
+  const [round, setRound] = useState(0);
+  return <HandoverForm key={round} kind={kind} onReset={() => setRound((n) => n + 1)} />;
+}
+
+function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: () => void }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const { data: settings } = useSettings();
   const { data: d, isLoading } = useQuery({ queryKey: ['rental', id], queryFn: () => api.get<RentalDetail>(`/api/rentals/${id}`) });
   const isPickup = kind === 'pickup';
+  const draftKey = `handover:${kind}:${id}`;
 
   const [at, setAt] = useState<number | null>(Date.now());
   const [odo, setOdo] = useState<number | null>(null);
@@ -76,14 +109,19 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState('');
   const [signature, setSignature] = useState<Blob | null>(null);
+  const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
   const [charges, setCharges] = useState<ChargeRow[]>([]);
   const [acc, setAcc] = useState<HandoverAccessory[]>([]);
   const [accReady, setAccReady] = useState(false);
   const [chargeSessions, setChargeSessions] = useState<number | null>(null);
-  const [collect, setCollect] = useState<{ amount: number | null; method: 'cash' | 'transfer' }>({ amount: null, method: 'transfer' });
-  const [collectDeposit, setCollectDeposit] = useState<{ amount: number | null; method: 'cash' | 'transfer' }>({ amount: null, method: 'transfer' });
+  const [collect, setCollect] = useState<Collect>({ amount: null, method: 'transfer' });
+  const [collectDeposit, setCollectDeposit] = useState<Collect>({ amount: null, method: 'transfer' });
   const [saving, setSaving] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  /** Người dùng đã đụng vào form — chỉ từ lúc này mới lưu nháp (mở ra xem rồi thoát thì thôi). */
+  const [touched, setTouched] = useState(false);
+  const [restoredAt, setRestoredAt] = useState<number | null>(null);
+  const done = useRef(false);
 
   const pickupHo = d?.handovers.find((h) => h.kind === 'pickup');
   const { data: vehAcc } = useQuery({
@@ -123,6 +161,30 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
   useEffect(() => {
     if (!d || !settings || initialized) return;
     setInitialized(true);
+    const wrong = isPickup ? d.rental.status !== 'booked' : d.rental.status !== 'active';
+    const saved = wrong ? null : loadDraft<HandoverDraft>(draftKey, DRAFT_TTL);
+    if (wrong) clearDraft(draftKey);
+    if (saved) {
+      const x = saved.data;
+      setAt(x.at);
+      setOdo(x.odo);
+      setFuel(x.fuel);
+      setPhotos(x.photos);
+      setExtraPhotos(x.extraPhotos);
+      setDamages(x.damages);
+      setChecklist(x.checklist);
+      setNotes(x.notes);
+      setSignatureUrl(x.signature);
+      setCharges(x.charges);
+      setAcc(x.acc);
+      setAccReady(true);
+      setChargeSessions(x.chargeSessions);
+      setCollect(x.collect);
+      setCollectDeposit(x.collectDeposit);
+      setRestoredAt(saved.savedAt);
+      setTouched(true);
+      return;
+    }
     if (isPickup) {
       setOdo(d.vehicle.odo);
       setChecklist(Object.fromEntries(settings.rules.checklist.map((c) => [c, true])));
@@ -136,6 +198,7 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
       );
       setDamages((pickupHo?.damages ?? []).map((x) => ({ ...x, fileId: x.fileId ?? null, isNew: false })));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d, settings, initialized, isPickup, pickupHo]);
 
   // Gợi ý phụ phí khi nhận xe (trễ giờ, vượt km)
@@ -166,9 +229,19 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
 
   const stamp = useMemo(() => () => `${d?.vehicle.plate ?? ''} • ${fmtDateTime(Date.now())} • ${isPickup ? 'Giao xe' : 'Nhận xe'} ${d?.rental.code ?? ''}`, [d, isPickup]);
 
+  const wrongStatus = !d || (isPickup ? d.rental.status !== 'booked' : d.rental.status !== 'active');
+  const draft: HandoverDraft = { at, odo, fuel, photos, extraPhotos, damages, checklist, notes, signature: signatureUrl, charges, acc, chargeSessions, collect, collectDeposit };
+  useDraftAutosave(draftKey, draft, initialized && touched && !wrongStatus && !saving && !done.current);
+  const touch = () => !touched && setTouched(true);
+  const startOver = async () => {
+    if (!(await confirm({ title: 'Bỏ biên bản đang làm dở?', description: 'Số liệu, ảnh và chữ ký đã nhập ở máy này sẽ bị xóa để làm lại từ đầu.', confirmText: 'Làm lại', danger: true }))) return;
+    done.current = true;
+    clearDraft(draftKey);
+    onReset();
+  };
+
   if (isLoading || !d) return <PageLoader />;
   const r = d.rental;
-  const wrongStatus = isPickup ? r.status !== 'booked' : r.status !== 'active';
   const missingPhotos = PHOTO_SLOTS.filter((s) => !photos[s.key]).length;
   const extraTotal = charges.reduce((s, c) => s + (c.amount ?? 0), 0);
 
@@ -177,7 +250,8 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
     if (odo == null) return toast.error('Nhập số ODO');
     setSaving(true);
     try {
-      const signatureFileId = signature ? (await uploadFile(signature, 'signature', { name: 'signature.png' })).id : null;
+      const sigBlob = signature ?? (signatureUrl ? await dataUrlToBlob(signatureUrl) : null);
+      const signatureFileId = sigBlob ? (await uploadFile(sigBlob, 'signature', { name: 'signature.png' })).id : null;
       const body = {
         at,
         odo,
@@ -192,6 +266,10 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
         notes: notes || null,
         signatureFileId,
       };
+      const finish = () => {
+        done.current = true;
+        clearDraft(draftKey);
+      };
       if (isPickup) {
         await api.post(`/api/rentals/${id}/pickup`, {
           ...body,
@@ -200,10 +278,12 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
             ...(collectDeposit.amount ? [{ purpose: 'deposit', method: collectDeposit.method, amount: collectDeposit.amount }] : []),
           ],
         });
+        finish();
         toast.success('Đã giao xe');
         navigate(`/rentals/${id}`, { replace: true });
       } else {
         await api.post(`/api/rentals/${id}/return`, { ...body, charges: charges.filter((c) => c.amount).map((c) => ({ kind: c.kind, description: c.description || CHARGE_KIND_LABEL[c.kind], amount: c.amount })) });
+        finish();
         toast.success('Đã nhận lại xe — tiếp theo: quyết toán');
         navigate(`/rentals/${id}?settle=1`, { replace: true });
       }
@@ -220,7 +300,17 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
       {wrongStatus ? (
         <Notice tone="amber">Lượt thuê này không ở trạng thái {isPickup ? 'chờ giao xe' : 'đang thuê'}.</Notice>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4" onPointerDownCapture={touch} onChangeCapture={touch} onKeyDownCapture={touch}>
+          {restoredAt && (
+            <Notice tone="blue" icon={History}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span>Đã mở lại biên bản đang làm dở (lưu lúc {fmtTime(restoredAt)}) — ảnh đã chụp và số liệu còn nguyên.</span>
+                <Button size="sm" variant="ghost" onClick={startOver}>
+                  Làm lại từ đầu
+                </Button>
+              </div>
+            </Notice>
+          )}
           {isPickup && at && Math.abs(at - r.scheduledStart) > 6 * 3600_000 && (
             <Notice tone="amber">
               Giao xe {at < r.scheduledStart ? 'sớm' : 'trễ'} {fmtDuration(Math.abs(at - r.scheduledStart))} so với lịch hẹn ({fmtDateTime(r.scheduledStart)}). Tiền thuê đang tính theo lịch hẹn — sửa lịch ở trang lượt thuê nếu khách đổi giờ.
@@ -417,7 +507,14 @@ export default function Handover({ kind }: { kind: 'pickup' | 'return' }) {
             </Field>
             <div className="mt-4">
               <p className="mb-1.5 text-sm font-medium">Khách ký xác nhận</p>
-              <SignaturePad onChange={setSignature} />
+              <SignaturePad
+                initial={signatureUrl}
+                onChange={(b) => {
+                  setSignature(b);
+                  if (!b) setSignatureUrl(null);
+                  else void blobToDataUrl(b).then(setSignatureUrl);
+                }}
+              />
             </div>
           </Step>
 

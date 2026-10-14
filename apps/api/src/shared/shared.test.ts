@@ -22,6 +22,9 @@ import { mergeAccessoryPlan } from './accessories.js';
 import { CAR_MAKES, findCarMake, findCarModel } from './carModels.js';
 import { suggestBookingSlot } from './booking.js';
 import { buildRentalShare, rentalShareStages, rentalShareText, type RentalShareInput } from './rentalShare.js';
+import { buildFineShare } from './fineShare.js';
+import { buildQuoteShare } from './quoteShare.js';
+import { intervalText, maintenanceStatus, presetsFor, statusText } from './maintenance.js';
 import { addMonthsVn, fmtDateTime, msToVnLocalInput, vnDateLong, vnLocalInputToMs } from './time.js';
 import {
   CASH_CATEGORY,
@@ -629,7 +632,7 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
   const shop = { name: 'Xe Happy', phone: '0901 234 567', bank: { name: 'Vietcombank', account: '0123456789', holder: 'NGUYEN VAN B' } };
 
   it('giai đoạn gửi được theo trạng thái', () => {
-    expect(rentalShareStages('booked', false, false)).toEqual([]);
+    expect(rentalShareStages('booked', false, false)).toEqual(['book']);
     expect(rentalShareStages('active', true, false)).toEqual(['pickup']);
     expect(rentalShareStages('returned', true, true)).toEqual(['pickup', 'return']);
     expect(rentalShareStages('settled', true, true)).toEqual(['pickup', 'return', 'settle']);
@@ -697,6 +700,90 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
     expect(text).not.toContain('Chuyển khoản');
     expect(doc.pay).toBeNull();
   });
+
+  it('đặt xe: giờ nhận/trả, nơi giao, tiền thuê còn lại, cọc còn thiếu kèm QR, giấy tờ, chính sách hủy, giữ cọc phạt nguội', () => {
+    const paidDeposit = [{ direction: 'in' as const, purpose: 'deposit' as const, amount: 2000000 }];
+    const doc = buildRentalShare({
+      ...base,
+      stage: 'book',
+      rental: { ...base.rental, status: 'booked', pickupMethod: 'delivery', pickupLocation: '12 Nguyễn Huệ, Q1' },
+      pickup: null,
+      money: summarizeMoney(rent, paidDeposit),
+      cancelPolicy: 'Hủy trong vòng 72 giờ trước giờ nhận xe: mất toàn bộ tiền cọc.',
+      fineHold: { amount: 2000000, days: 15 },
+      requirements: ['CCCD + GPLX bản gốc'],
+      shopAddress: '1 Lê Lợi',
+    });
+    const text = rentalShareText(doc, shop);
+    expect(text).toContain('XÁC NHẬN ĐẶT XE — HD-2026-0001');
+    expect(text).toContain('• Nhận xe: 08:00 01/12/2026');
+    expect(text).toContain('• Trả xe: 08:00 04/12/2026');
+    expect(text).toContain('• Giao xe tận nơi: 12 Nguyễn Huệ, Q1');
+    expect(text).toContain('• Tiền thuê còn lại: 3.000.000đ');
+    expect(text).toContain('• Tiền cọc: 2.000.000đ / 5.000.000đ (còn thiếu 3.000.000đ)');
+    expect(text).toContain('mang theo: CCCD + GPLX bản gốc');
+    expect(text).toContain('giữ lại 2.000.000đ tiền cọc trong 15 ngày');
+    expect(text).toContain('Chính sách hủy: Hủy trong vòng 72 giờ');
+    expect(doc.pay).toMatchObject({ label: 'Tiền cọc giữ chỗ', amount: 3000000 });
+    const shopPickup = rentalShareText(buildRentalShare({ ...base, stage: 'book', rental: { ...base.rental, status: 'booked', pickupMethod: 'at_shop' }, pickup: null, shopAddress: '1 Lê Lợi' }), shop);
+    expect(shopPickup).toContain('• Nhận xe tại: 1 Lê Lợi');
+  });
+
+  it('gia hạn: hẹn trả cũ → mới, tiền tăng thêm, còn phải trả kèm chuyển khoản', () => {
+    expect(rentalShareStages('active', true, false, true)).toEqual(['pickup', 'extend']);
+    expect(rentalShareStages('settled', true, true, true)).toEqual(['pickup', 'extend', 'return', 'settle']);
+    const charges = [{ kind: 'rental' as const, description: 'Tiền thuê 4 ngày × 1.000.000', amount: 4000000 }];
+    const doc = buildRentalShare({
+      ...base,
+      stage: 'extend',
+      rental: { ...base.rental, scheduledEnd: at('2026-12-05T08:00'), kmLimit: 1200 },
+      charges,
+      money: summarizeMoney(charges, paid),
+      extension: { oldEnd: at('2026-12-04T08:00'), newEnd: at('2026-12-05T08:00'), oldTotal: 3000000, newTotal: 4000000 },
+    });
+    const text = rentalShareText(doc, shop);
+    expect(text).toContain('XÁC NHẬN GIA HẠN — HD-2026-0001');
+    expect(text).toContain('• Hẹn trả cũ: 08:00 04/12/2026');
+    expect(text).toContain('• Hẹn trả mới: 08:00 05/12/2026');
+    expect(text).toContain('• Gia hạn thêm: 1 ngày');
+    expect(text).toContain('• Giới hạn quãng đường: 1.200 km (đến ODO 2.200)');
+    expect(text).toContain('• Tăng thêm: 1.000.000đ');
+    expect(text).toContain('• Còn phải trả: 3.000.000đ');
+    expect(doc.pay).toMatchObject({ amount: 3000000, note: 'HD-2026-0001' });
+  });
+
+  it('báo phạt nguội: giờ, lỗi, mức phạt, mình đã nộp thay thì xin hoàn lại kèm QR', () => {
+    const doc = buildFineShare({
+      fine: { plate: '51K-999.88', violatedAt: at('2026-12-02T14:30'), location: 'Cầu Sài Gòn', violation: 'Vượt đèn đỏ', amount: 4000000, status: 'we_paid', noticeFileId: 'n1' },
+      rental: { code: 'HD-2026-0001', start: at('2026-12-01T08:10'), end: at('2026-12-04T11:00') },
+      customerName: 'Nguyễn Văn A',
+      shopName: 'Xe Happy',
+    });
+    const text = rentalShareText(doc, shop);
+    expect(text).toContain('THÔNG BÁO PHẠT NGUỘI — HD-2026-0001');
+    expect(text).toContain('trong thời gian anh/chị thuê xe (hợp đồng HD-2026-0001, từ 08:10 01/12/2026 đến 11:00 04/12/2026)');
+    expect(text).toContain('• Thời gian vi phạm: 14:30 02/12/2026');
+    expect(text).toContain('• Mức phạt: 4.000.000đ');
+    expect(text).toContain('Cửa hàng đã nộp phạt thay anh/chị');
+    expect(text).toContain('💳 Chuyển khoản 4.000.000đ (hoàn lại tiền phạt)');
+    expect(doc.photos).toEqual(['n1']);
+    const noAmount = buildFineShare({ fine: { plate: '51K-999.88', violatedAt: 0, location: null, violation: null, amount: null, status: 'new', noticeFileId: null }, rental: null, customerName: 'A', shopName: '' });
+    expect(rentalShareText(noAmount, shop)).toContain('• Mức phạt: Chờ quyết định xử phạt');
+    expect(noAmount.pay).toBeNull();
+  });
+
+  it('báo giá nhanh nhiều xe: thời gian, từng xe một khối, ẩn biển số khi không chọn', () => {
+    const item = (name: string, plate: string, total: number) => ({ name, plate, details: '5 chỗ · số tự động', lines: [{ description: `Tiền thuê 2 ngày`, amount: total }], total, deposit: 3000000, kmLimit: 600, photoFileId: `p-${plate}` });
+    const doc = buildQuoteShare({ start: at('2026-12-01T08:00'), end: at('2026-12-03T08:00'), items: [item('Toyota Vios', '51A-111.11', 1600000), item('VinFast VF 5', '51A-222.22', 1200000)], showPlate: false, shopName: 'Xe Happy' });
+    const text = rentalShareText(doc, { ...shop, bank: null });
+    expect(text.split('\n')[0]).toBe('📋 BÁO GIÁ 2 XE TRỐNG');
+    expect(text).toContain('từ 08:00 01/12/2026 đến 08:00 03/12/2026 (2 ngày)');
+    expect(text).toContain('🚗 Toyota Vios\n• Xe: 5 chỗ · số tự động');
+    expect(text).toContain('• Tổng tiền thuê: 1.200.000đ');
+    expect(text).not.toContain('51A-111.11');
+    expect(doc.photos).toEqual(['p-51A-111.11', 'p-51A-222.22']);
+    expect(rentalShareText(buildQuoteShare({ start: 0, end: 1, items: [item('Kia Morning', '51A-333.33', 1)], showPlate: true, shopName: '' }), shop)).toContain('🚗 Kia Morning · 51A-333.33');
+  });
 });
 
 describe('thu chi: kỳ báo cáo, khoản định kỳ, chia chi phí chung', () => {
@@ -745,5 +832,26 @@ describe('thu chi: kỳ báo cáo, khoản định kỳ, chia chi phí chung', (
     expect(fmtCompactVnd(12_500_000)).toBe('12,5tr');
     expect(fmtCompactVnd(950_000)).toBe('950k');
     expect(fmtCompactVnd(-1_200_000_000)).toBe('−1,2 tỷ');
+  });
+});
+
+describe('lịch bảo dưỡng theo hạng mục', () => {
+  const item = { intervalKm: 5000, intervalMonths: 6, lastOdo: 40000, lastDate: '2026-04-14' };
+  it('đến hạn theo km hoặc tháng, cái nào tới trước', () => {
+    expect(maintenanceStatus(item, 42000, '2026-06-01')).toMatchObject({ nextOdo: 45000, nextDate: '2026-10-14', kmLeft: 3000, state: 'ok' });
+    expect(maintenanceStatus(item, 44600, '2026-06-01').state).toBe('soon'); // còn 400 km (≤ 500)
+    expect(maintenanceStatus(item, 42000, '2026-10-05').state).toBe('soon'); // còn 9 ngày
+    expect(maintenanceStatus(item, 45000, '2026-06-01').state).toBe('overdue');
+    expect(maintenanceStatus(item, 42000, '2026-10-15')).toMatchObject({ daysLeft: -1, state: 'overdue' });
+    expect(maintenanceStatus({ ...item, lastOdo: null, lastDate: null }, 42000, '2026-06-01').state).toBe('unknown');
+    expect(maintenanceStatus({ intervalKm: null, intervalMonths: 12, lastOdo: null, lastDate: '2025-12-31' }, 0, '2026-06-01')).toMatchObject({ nextDate: '2026-12-31', kmLeft: null });
+  });
+  it('chữ hiển thị + gợi ý theo nhiên liệu', () => {
+    expect(intervalText(item)).toBe('mỗi 5.000 km hoặc 6 tháng');
+    expect(statusText(maintenanceStatus(item, 45800, '2026-11-01'))).toBe('Quá 800 km · quá 18 ngày');
+    expect(statusText(maintenanceStatus(item, 42000, '2026-10-14'))).toBe('Còn 3.000 km · đến hạn hôm nay');
+    expect(presetsFor('electric').map((p) => p.key)).toContain('ev_service');
+    expect(presetsFor('electric').map((p) => p.key)).not.toContain('oil');
+    expect(presetsFor(null).map((p) => p.key)).toContain('spark_plugs');
   });
 });

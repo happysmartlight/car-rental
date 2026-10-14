@@ -1,6 +1,7 @@
 import {
   CalendarRange,
   Car,
+  CarFront,
   KeyRound,
   LayoutDashboard,
   LogOut,
@@ -53,6 +54,7 @@ const NAV: NavItem[] = [
 
 const QUICK: { to: string; label: string; desc: string; icon: LucideIcon }[] = [
   { to: '/rentals/new', label: 'Đặt xe mới', desc: 'Chọn khách, xe, giờ — tự tính giá', icon: KeyRound },
+  { to: '/quote', label: 'Xe trống & báo giá', desc: 'Khách hỏi ngày này còn xe nào, bao nhiêu — gửi Zalo', icon: CarFront },
   { to: '/customers/new?scan=1', label: 'Thêm khách bằng CCCD', desc: 'Quét mã QR trên căn cước', icon: ScanLine },
   { to: '#cash', label: 'Ghi chi phí', desc: 'Xăng, rửa xe, sửa chữa, bến bãi…', icon: Receipt },
   { to: '/fines', label: 'Tra phạt nguội', desc: 'Biển số + giờ vi phạm → ai giữ xe', icon: ShieldAlert },

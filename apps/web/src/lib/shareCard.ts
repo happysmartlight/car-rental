@@ -98,7 +98,8 @@ export function upcomingHolidays(rules: RulesSettings) {
     .sort((a, b) => a.from.localeCompare(b.from));
 }
 
-function requirements(rules: RulesSettings): string[] {
+/** Giấy tờ / điều kiện khách cần khi nhận xe (bảng giá, phiếu xác nhận đặt xe). */
+export function requirements(rules: RulesSettings): string[] {
   const r = ['CCCD gắn chip / thẻ Căn cước + giấy phép lái xe (bản gốc)'];
   if (rules.minDriverAge) r.push(`Người lái từ ${rules.minDriverAge} tuổi`);
   return r;

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Car, Check, CircleAlert, Info, Plus, Trash2, UserPlus, X } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AlertTriangle, Car, Check, CircleAlert, History, Info, Plus, Trash2, UserPlus, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Page } from '@/components/layout/AppShell';
@@ -12,8 +12,9 @@ import { useConfirm } from '@/components/ui/dialog';
 import { DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select, Textarea } from '@/components/ui/form';
 import { Card, CardBody, CardHeader, Notice, Spinner } from '@/components/ui/misc';
 import { ApiError, api, fileUrl, qs } from '@/lib/api';
+import { clearDraft, loadDraft, useDraftAutosave, type Draft } from '@/lib/draft';
 import { useAuth, useSettings } from '@/lib/hooks';
-import type { CalendarData, Customer, Precheck, Rental, VehicleWithStatus } from '@/lib/types';
+import type { CalendarData, Customer, HandoverAccessory, Precheck, Rental, VehicleWithStatus } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
 import { cancelPolicyText, defaultFineHold } from '@shared/money';
 import { COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, type CollateralKind } from '@shared/constants';
@@ -30,6 +31,33 @@ interface CollRow {
   description: string;
   photoFileIds: string[];
 }
+
+/** Đơn đang nhập dở (lưu trên máy) — khách chỉ nhớ mã, mở lại thì tải lại hồ sơ. */
+interface RentalDraft {
+  customerId: number | null;
+  customerName: string | null;
+  driverIds: number[];
+  vehicleId: number | null;
+  start: number | null;
+  end: number | null;
+  pickupMethod: 'at_shop' | 'delivery';
+  pickupLocation: string;
+  returnLocation: string;
+  deliveryFee: number | null;
+  discount: number | null;
+  discountNote: string;
+  deposit: number | null;
+  depositTouched: boolean;
+  fineHold: number | null;
+  holdDays: number | null;
+  payments: PayRow[];
+  collaterals: CollRow[];
+  notes: string;
+  accessories: HandoverAccessory[] | null;
+}
+
+const DRAFT_KEY = 'rental-new';
+const DRAFT_TTL = 3 * DAY_MS;
 
 function nextHalfHour(ms: number) {
   const step = 30 * 60_000;
@@ -91,6 +119,14 @@ export default function RentalNew() {
   const [collaterals, setCollaterals] = useState<CollRow[]>([]);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  // Nháp đơn đang nhập dở lần trước: hỏi nhập tiếp hay bỏ, chưa quyết thì không ghi đè.
+  const [pending, setPending] = useState<Draft<RentalDraft> | null>(() => {
+    const x = loadDraft<RentalDraft>(DRAFT_KEY, DRAFT_TTL);
+    return x && (x.data.customerId || x.data.vehicleId) ? x : null;
+  });
+  const [touched, setTouched] = useState(false);
+  const [pendingAcc, setPendingAcc] = useState<HandoverAccessory[] | null>(null);
+  const done = useRef(false);
 
   // Mở từ hồ sơ khách: chọn sẵn khách
   const presetCustomer = params.get('customerId');
@@ -108,6 +144,13 @@ export default function RentalNew() {
     if (vehicle && !depositTouched) setDeposit(vehicle.depositAmount);
   }, [vehicle, depositTouched]);
   const acc = useRentalAccessories(vehicleId, null);
+  // Khôi phục nháp: đặt lại phụ kiện đã chỉnh SAU khi danh sách phụ kiện tự làm mới theo xe.
+  useEffect(() => {
+    if (!pendingAcc) return;
+    acc.setItems(pendingAcc);
+    setPendingAcc(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAcc]);
   const excluded = acc.items.filter((a) => !a.present);
   const added = acc.items.filter((a) => a.id == null && a.present);
 
@@ -143,6 +186,64 @@ export default function RentalNew() {
   const paidDeposit = payments.filter((p) => p.purpose === 'deposit').reduce((s, p) => s + (p.amount ?? 0), 0);
   const dangerWarnings = (pre?.warnings ?? []).filter((w) => w.severity === 'danger');
 
+  const draft: RentalDraft = {
+    customerId: customer?.id ?? null,
+    customerName: customer?.fullName ?? null,
+    driverIds,
+    vehicleId,
+    start,
+    end,
+    pickupMethod,
+    pickupLocation,
+    returnLocation,
+    deliveryFee,
+    discount,
+    discountNote,
+    deposit,
+    depositTouched,
+    fineHold,
+    holdDays,
+    payments,
+    collaterals,
+    notes,
+    accessories: acc.edited,
+  };
+  useDraftAutosave(DRAFT_KEY, draft, touched && !pending && !saving && !done.current && !!(customer || vehicleId));
+  const touch = () => !touched && setTouched(true);
+
+  const restore = async () => {
+    if (!pending) return;
+    const x = pending.data;
+    setPending(null);
+    setTouched(true);
+    setVehicleId(x.vehicleId);
+    setStart(x.start);
+    setEnd(x.end);
+    setPickupMethod(x.pickupMethod);
+    setPickupLocation(x.pickupLocation);
+    setReturnLocation(x.returnLocation);
+    setDeliveryFee(x.deliveryFee);
+    setDiscount(x.discount);
+    setDiscountNote(x.discountNote);
+    setDeposit(x.deposit);
+    setDepositTouched(x.depositTouched);
+    setFineHold(x.fineHold);
+    setHoldDays(x.holdDays);
+    setPayments(x.payments);
+    setCollaterals(x.collaterals);
+    setNotes(x.notes);
+    if (x.accessories) setPendingAcc(x.accessories);
+    const people = await Promise.all(
+      [x.customerId, ...x.driverIds].map((cid) => (cid ? api.get<{ customer: Customer }>(`/api/customers/${cid}`).then((r) => r.customer, () => null) : Promise.resolve(null))),
+    );
+    setCustomer(people[0]);
+    setDrivers(people.slice(1).filter((c): c is Customer => !!c));
+  };
+  const discard = () => {
+    clearDraft(DRAFT_KEY);
+    setPending(null);
+  };
+
   const setDays = (n: number) => start && setEnd(start + n * DAY_MS);
   const setMonths = (n: number) => start && setEnd(addMonthsVn(start, n));
   const chip = (active: boolean) =>
@@ -177,6 +278,8 @@ export default function RentalNew() {
         allowConflict: force,
         allowBlacklisted: force && isAdmin,
       });
+      done.current = true;
+      clearDraft(DRAFT_KEY);
       toast.success(`Đã tạo ${r.code}`);
       navigate(`/rentals/${r.id}?created=1`, { replace: true });
     } catch (err) {
@@ -286,7 +389,33 @@ export default function RentalNew() {
 
   return (
     <Page title="Đặt xe mới" back width="default">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      {pending && (
+        <Notice tone="blue" icon={History} className="mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Có đơn đặt xe đang nhập dở (lưu lúc {fmtDateTime(pending.savedAt)}):{' '}
+              <b>
+                {[
+                  pending.data.customerName,
+                  vehicles?.find((v) => v.id === pending.data.vehicleId)?.plate,
+                  pending.data.start && pending.data.end ? `${fmtDateTime(pending.data.start)} → ${fmtDateTime(pending.data.end)}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </b>
+            </span>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={restore}>
+                Nhập tiếp
+              </Button>
+              <Button size="sm" variant="ghost" onClick={discard}>
+                Bỏ
+              </Button>
+            </div>
+          </div>
+        </Notice>
+      )}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]" onPointerDownCapture={touch} onChangeCapture={touch} onKeyDownCapture={touch}>
         <div className="space-y-4">
           <Section n={1} title="Khách thuê">
             <CustomerPicker value={customer} onChange={setCustomer} />

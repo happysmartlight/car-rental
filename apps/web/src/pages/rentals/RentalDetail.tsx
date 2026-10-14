@@ -10,6 +10,7 @@ import {
   FileText,
   HandCoins,
   History,
+  Hourglass,
   MessageCircle,
   MoreHorizontal,
   Pencil,
@@ -18,6 +19,7 @@ import {
   QrCode,
   Receipt,
   RotateCcw,
+  Send,
   Share2,
   ShieldCheck,
   Trash2,
@@ -29,6 +31,7 @@ import { Link, useParams, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Page } from '@/components/layout/AppShell';
 import { FineStatusBadge, FuelGauge, Money, RentalStatusBadge, VietQr } from '@/components/common';
+import { FineRecoverDialog, FineShareDialog, fineCollectible, type FineLike } from '@/components/FineActions';
 import { Gallery } from '@/components/images';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Dialog, useConfirm } from '@/components/ui/dialog';
@@ -43,8 +46,9 @@ import { fmtNumber, fmtVnd } from '@shared/text';
 import { fmtDate, fmtDateTime, fmtDuration } from '@shared/time';
 import { CancelDialog, ChargeDialog, CollateralDialog, DriverDialog, EditRentalDialog, PaymentDialog, ReleaseHoldDialog, ScanDialog, SettleDialog } from './RentalDialogs';
 import { RentalShareDialog, rentalShareStagesOf } from './RentalShare';
+import type { RentalShareStage } from '@shared/rentalShare';
 
-type DialogName = 'pay' | 'charge' | 'settle' | 'hold' | 'edit' | 'cancel' | 'collateral' | 'driver' | 'scan' | 'qr' | 'audit' | 'share' | null;
+type DialogName = 'pay' | 'charge' | 'settle' | 'hold' | 'edit' | 'cancel' | 'collateral' | 'driver' | 'scan' | 'qr' | 'audit' | 'share' | 'fineShare' | 'fineRecover' | null;
 
 function HandoverCard({ h, title, prev }: { h: Handover; title: string; prev?: Handover }) {
   const photos = h.photos.map((p) => ({ fileId: p.fileId, label: PHOTO_SLOTS.find((s) => s.key === p.slot)?.label ?? p.slot }));
@@ -129,6 +133,8 @@ export default function RentalDetail() {
   const [payPreset, setPayPreset] = useState<'rent_in' | 'deposit_in' | 'deposit_out' | 'rent_out'>('rent_in');
   const [scanDoc, setScanDoc] = useState<number | null>(null);
   const [generating, setGenerating] = useState<TemplateKind | null>(null);
+  const [shareStage, setShareStage] = useState<RentalShareStage | undefined>(undefined);
+  const [fineSel, setFineSel] = useState<FineLike | null>(null);
   const { data: d, isLoading } = useQuery({ queryKey: ['rental', id], queryFn: () => api.get<Detail>(`/api/rentals/${id}`) });
   const { data: audit } = useQuery({
     queryKey: ['audit', 'rental', id],
@@ -155,6 +161,11 @@ export default function RentalDetail() {
   const accNotIncluded = r.status === 'booked' ? (r.accessories ?? []).filter((a) => !a.present).map((a) => a.name) : [];
   const accExtra = r.status === 'booked' ? (r.accessories ?? []).filter((a) => a.id == null && a.present).map((a) => a.name) : [];
   const canShare = rentalShareStagesOf(d).length > 0;
+  const lastExt = d.extensions.at(-1);
+  const openShare = (stage?: RentalShareStage) => {
+    setShareStage(stage);
+    setDialog('share');
+  };
 
   const generate = async (kind: TemplateKind) => {
     setGenerating(kind);
@@ -220,7 +231,7 @@ export default function RentalDetail() {
             {primary}
           </span>
           {canShare && (
-            <Button variant="outline" onClick={() => setDialog('share')} aria-label="Gửi khách">
+            <Button variant="outline" onClick={() => openShare()} aria-label="Gửi khách">
               <Share2 /> <span className="hidden sm:inline">Gửi khách</span>
             </Button>
           )}
@@ -260,9 +271,12 @@ export default function RentalDetail() {
         {params.get('created') === '1' && (
           <Notice tone="green" icon={CheckCircle2}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span>Đã tạo lượt thuê. In hợp đồng để hai bên ký khi giao xe.</span>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={() => generate('contract')} loading={generating === 'contract'}>
+              <span>Đã tạo lượt thuê. Gửi khách xác nhận đặt xe (kèm mã QR tiền cọc), in hợp đồng để hai bên ký khi giao xe.</span>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => openShare('book')}>
+                  <Send /> Gửi khách
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => generate('contract')} loading={generating === 'contract'}>
                   <FileSignature /> In hợp đồng
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setParams({}, { replace: true })}>
@@ -275,6 +289,25 @@ export default function RentalDetail() {
         {overdue && (
           <Notice tone="red">
             Quá hạn trả xe {fmtDuration(now - r.scheduledEnd)}. Gọi khách: <a href={telLink(d.customer.phone)} className="font-semibold underline">{d.customer.phone}</a>
+          </Notice>
+        )}
+        {lastExt && ['active', 'returned'].includes(r.status) && (
+          <Notice tone="violet" icon={Hourglass}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                Đã {lastExt.newEnd >= lastExt.oldEnd ? 'gia hạn' : 'đổi giờ trả'}
+                {d.extensions.length > 1 && ` (lần ${lastExt.seq})`}: trả xe {fmtDateTime(lastExt.oldEnd)} → <b>{fmtDateTime(lastExt.newEnd)}</b>, tổng tiền {fmtVnd(lastExt.oldTotal)} →{' '}
+                <b>{fmtVnd(lastExt.newTotal)}</b>.
+              </span>
+              <span className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => generate('extension')} loading={generating === 'extension'}>
+                  <FileSignature /> In phụ lục
+                </Button>
+                <Button size="sm" onClick={() => openShare('extend')}>
+                  <Send /> Gửi khách
+                </Button>
+              </span>
+            </div>
           </Notice>
         )}
         {r.status === 'settled' && r.fineHoldUntil && (
@@ -478,11 +511,13 @@ export default function RentalDetail() {
           <CardHeader icon={FileText} title="Hợp đồng & biên bản" />
           <CardBody className="space-y-3">
             <div className="flex flex-wrap gap-2">
-              {(['contract', 'pickup', 'return'] as TemplateKind[]).map((k) => (
-                <Button key={k} variant="outline" size="sm" onClick={() => generate(k)} loading={generating === k} disabled={k === 'return' && !returnHo}>
-                  <Plus /> {TEMPLATE_KIND_LABEL[k]}
-                </Button>
-              ))}
+              {(['contract', 'pickup', 'return', 'extension'] as TemplateKind[])
+                .filter((k) => k !== 'extension' || lastExt)
+                .map((k) => (
+                  <Button key={k} variant="outline" size="sm" onClick={() => generate(k)} loading={generating === k} disabled={k === 'return' && !returnHo}>
+                    <Plus /> {TEMPLATE_KIND_LABEL[k]}
+                  </Button>
+                ))}
             </div>
             {d.documents.length > 0 && (
               <ul className="divide-y divide-border rounded-2xl border border-border">
@@ -568,14 +603,38 @@ export default function RentalDetail() {
             <CardHeader title="Phạt nguội trong lượt thuê này" />
             <ul className="divide-y divide-border">
               {d.fines.map((f) => (
-                <li key={f.id} className="flex items-center gap-3 px-4 py-3 md:px-5">
+                <li key={f.id} className="flex flex-wrap items-center gap-3 px-4 py-3 md:px-5">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{f.violation ?? 'Vi phạm'}</p>
                     <p className="text-xs text-muted">
                       {fmtDateTime(f.violatedAt)} · {f.location} {f.amount ? `· ${fmtVnd(f.amount)}` : ''}
                     </p>
                   </div>
-                  <FineStatusBadge status={f.status} />
+                  <FineStatusBadge status={f.status} voided={!!f.voidedAt} />
+                  {fineCollectible(f) && (
+                    <span className="flex w-full justify-end gap-2 sm:w-auto">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setFineSel(f);
+                          setDialog('fineShare');
+                        }}
+                      >
+                        <Send /> Gửi khách
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          setFineSel(f);
+                          setDialog('fineRecover');
+                        }}
+                      >
+                        <HandCoins /> Thu lại
+                      </Button>
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -594,7 +653,9 @@ export default function RentalDetail() {
         }}
       />
       <ReleaseHoldDialog d={d} open={dialog === 'hold'} onOpenChange={(o) => setDialog(o ? 'hold' : null)} />
-      {canShare && <RentalShareDialog d={d} open={dialog === 'share'} onOpenChange={(o) => setDialog(o ? 'share' : null)} />}
+      {canShare && <RentalShareDialog d={d} open={dialog === 'share'} initialStage={shareStage} onOpenChange={(o) => setDialog(o ? 'share' : null)} />}
+      <FineShareDialog fine={fineSel} open={dialog === 'fineShare'} onOpenChange={(o) => setDialog(o ? 'fineShare' : null)} />
+      <FineRecoverDialog fine={fineSel} open={dialog === 'fineRecover'} onOpenChange={(o) => setDialog(o ? 'fineRecover' : null)} />
       <EditRentalDialog d={d} open={dialog === 'edit'} onOpenChange={(o) => setDialog(o ? 'edit' : null)} />
       <CancelDialog d={d} open={dialog === 'cancel'} onOpenChange={(o) => setDialog(o ? 'cancel' : null)} />
       <CollateralDialog d={d} open={dialog === 'collateral'} onOpenChange={(o) => setDialog(o ? 'collateral' : null)} />

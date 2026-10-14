@@ -1,7 +1,7 @@
 // Lịch xe dạng timeline: mỗi hàng một xe, mỗi cột một ngày.
 
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { CarFront, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Page } from '@/components/layout/AppShell';
@@ -177,9 +177,15 @@ export default function Calendar() {
       title="Lịch xe"
       width="wide"
       actions={
-        <ButtonLink to="/rentals/new">
-          <Plus /> <span className="hidden sm:inline">Đặt xe</span>
-        </ButtonLink>
+        <>
+          <ButtonLink to="/quote" variant="outline">
+            <CarFront /> <span className="hidden sm:inline">Xe trống & báo giá</span>
+            <span className="sm:hidden">Báo giá</span>
+          </ButtonLink>
+          <ButtonLink to="/rentals/new">
+            <Plus /> <span className="hidden sm:inline">Đặt xe</span>
+          </ButtonLink>
+        </>
       }
     >
       <div className="mb-4 flex flex-wrap items-center gap-2">

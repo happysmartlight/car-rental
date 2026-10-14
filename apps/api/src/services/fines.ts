@@ -5,11 +5,13 @@
 
 import { and, eq, inArray, isNull, lte, or, gte } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import type { Customer, Rental, RentalSegment, Vehicle, VehicleBlock } from '../db/schema.js';
+import type { Customer, Rental, RentalSegment, TrafficFine, Vehicle, VehicleBlock } from '../db/schema.js';
+import { badRequest, notFound } from '../lib/http.js';
 import { escapeHtml, notify } from '../lib/telegram.js';
-import type { FineSource, FineStatus } from '../shared/constants.js';
+import { FINE_DONE_STATUSES, type FineSource, type FineStatus } from '../shared/constants.js';
 import { HOUR_MS, fmtDateTime } from '../shared/time.js';
 import { fmtVnd, formatPlate, plateKey } from '../shared/text.js';
+import { addCharge, addPayment, chargeFromDeposit, getRental, rentalMoney } from './rentals.js';
 
 export interface FineMatch {
   segment: RentalSegment;
@@ -166,4 +168,49 @@ export function recordFine(body: NewFine, userId: number | null) {
     `🚨 <b>Phạt nguội mới</b> ${escapeHtml(f.plate)} lúc ${fmtDateTime(f.violatedAt)}\n${escapeHtml(f.violation ?? '')}${f.amount ? ` · ${fmtVnd(f.amount)}` : ''}\n${who ? `Người giữ xe: ${escapeHtml(who.fullName)} · ${escapeHtml(who.phone ?? '')}` : 'Chưa xác định người giữ xe'}`,
   );
   return f;
+}
+
+export interface RecoverFineInput {
+  amount: number;
+  /** deposit = trừ vào cọc đang giữ chờ phạt nguội. */
+  method: 'cash' | 'transfer' | 'deposit';
+  at?: number;
+}
+
+/**
+ * Khách trả lại tiền phạt nguội (mình nộp thay, hoặc phát hiện sau khi đã hoàn cọc):
+ * ghi khoản "Phạt nguội" vào lượt thuê + phiếu thu (hoặc cấn từ cọc đang giữ) → sổ tiền và Thu chi khớp nhau.
+ */
+export function recoverFine(id: number, input: RecoverFineInput, userId: number): TrafficFine {
+  const f = db.select().from(schema.trafficFines).where(eq(schema.trafficFines.id, id)).get();
+  if (!f) throw notFound('Không tìm thấy hồ sơ vi phạm');
+  if (f.voidedAt) throw badRequest('Hồ sơ đã hủy');
+  if (!f.rentalId) throw badRequest('Vi phạm chưa gắn với lượt thuê nào — chọn người giữ xe trước');
+  if (FINE_DONE_STATUSES.includes(f.status)) throw badRequest('Vi phạm này đã thu tiền / xử lý xong');
+  if (!(input.amount > 0)) throw badRequest('Nhập số tiền phạt');
+  const r = getRental(f.rentalId);
+  if (r.status === 'cancelled') throw badRequest('Lượt thuê đã hủy');
+  if (input.method === 'deposit' && r.status !== 'settled') throw badRequest('Chỉ trừ cọc khi lượt thuê đang giữ cọc chờ phạt nguội');
+  const description = `Phạt nguội ${fmtDateTime(f.violatedAt)}${f.violation ? `: ${f.violation}` : ''}`.slice(0, 300);
+  return db.transaction(() => {
+    if (input.method === 'deposit') {
+      // Cọc không đủ thì trừ hết cọc, phần thiếu thành khoản khách còn nợ (Việc cần làm nhắc thu).
+      chargeFromDeposit(r.id, { kind: 'fine', description, amount: input.amount }, userId);
+      const held = rentalMoney(r.id).depositHeld;
+      // Hết cọc giữ lại thì lượt thuê xong luôn, không còn gì để hoàn.
+      db.update(schema.rentals)
+        .set(held > 0 ? { fineHoldAmount: held, updatedAt: Date.now() } : { status: 'closed', fineHoldAmount: 0, updatedAt: Date.now() })
+        .where(eq(schema.rentals.id, r.id))
+        .run();
+    } else {
+      addCharge(r.id, { kind: 'fine', description, amount: input.amount }, userId);
+      addPayment(r.id, { direction: 'in', purpose: 'rent', method: input.method, amount: input.amount, at: input.at, note: 'Khách trả lại tiền phạt nguội' }, userId);
+    }
+    return db
+      .update(schema.trafficFines)
+      .set({ status: 'recovered', amount: f.amount ?? input.amount, updatedAt: Date.now() })
+      .where(eq(schema.trafficFines.id, id))
+      .returning()
+      .get();
+  });
 }

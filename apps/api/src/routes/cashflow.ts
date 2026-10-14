@@ -123,14 +123,14 @@ export async function cashflowRoutes(app: FastifyInstance) {
 
   app.post('/api/cash-entries', async (req) => {
     requireRole(req, 'staff');
-    const body = parse(zEntry.extend({ renewal: zRenewal.optional() }), req.body);
-    const { renewal, ...input } = body;
+    const body = parse(zEntry.extend({ renewal: zRenewal.optional(), maintenanceDone: z.array(z.number().int()).max(50).optional() }), req.body);
+    const { renewal, maintenanceDone, ...input } = body;
     // Nhân viên chỉ ghi được khoản chi (đổ xăng, rửa xe…); thu khác và gia hạn giấy tờ xe do quản trị làm.
     if (req.user!.role !== 'admin' && (CASH_CATEGORY[input.category].dir !== 'out' || renewal)) throw forbidden();
-    const { entry, renewed } = createEntry(input, userId(req), renewal);
-    audit(req, 'cash.create', 'cash_entry', entry.id, { ...input, renewed });
+    const { entry, renewed, maintenance } = createEntry(input, userId(req), renewal, maintenanceDone);
+    audit(req, 'cash.create', 'cash_entry', entry.id, { ...input, renewed, maintenanceDone });
     if (Object.keys(renewed).length) audit(req, 'vehicle.renew', 'vehicle', entry.vehicleId, { fromCashEntry: entry.id, ...renewed });
-    return { entry, renewed };
+    return { entry, renewed, maintenance };
   });
 
   app.put('/api/cash-entries/:id', async (req) => {

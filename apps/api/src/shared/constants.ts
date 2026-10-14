@@ -73,6 +73,9 @@ export const FINE_STATUS: Record<FineStatus, { label: string; tone: Tone }> = {
   closed: { label: 'Đóng', tone: 'gray' },
 };
 
+/** Hồ sơ đã xong phần tiền (khách tự nộp / đã thu lại / đóng) — không thu, không trừ cọc nữa. */
+export const FINE_DONE_STATUSES: FineStatus[] = ['customer_paid', 'recovered', 'closed'];
+
 export const FINE_SOURCES = ['csgt', 'vnetraffic', 'notice', 'other'] as const;
 export type FineSource = (typeof FINE_SOURCES)[number];
 export const FINE_SOURCE_LABEL: Record<FineSource, string> = {
@@ -90,12 +93,13 @@ export const COLLATERAL_KIND_LABEL: Record<CollateralKind, string> = {
   other: 'Tài sản khác',
 };
 
-export const TEMPLATE_KINDS = ['contract', 'pickup', 'return', 'other'] as const;
+export const TEMPLATE_KINDS = ['contract', 'pickup', 'return', 'extension', 'other'] as const;
 export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
 export const TEMPLATE_KIND_LABEL: Record<TemplateKind, string> = {
   contract: 'Hợp đồng thuê xe',
   pickup: 'Biên bản giao xe',
   return: 'Biên bản nhận xe & quyết toán',
+  extension: 'Phụ lục gia hạn',
   other: 'Văn bản khác',
 };
 

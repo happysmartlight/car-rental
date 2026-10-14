@@ -38,8 +38,10 @@ jobs:
 
       - name: Ghi chú phát hành từ CHANGELOG.md
         run: |
+          # So khớp chuỗi thường (index), không dùng regex: "\[" trong chuỗi awk thành "[" làm
+          # biểu thức khớp mọi dòng "## …" → trước v0.4.1 ghi chú mỗi bản gộp cả lịch sử.
           awk -v v="${{ steps.v.outputs.version }}" '
-            $0 ~ "^## \[?"v"\]?" {on=1; next}
+            index($0, "## [" v "]") == 1 || $0 == "## " v {on=1; next}
             on && /^## / {exit}
             on {print}
           ' CHANGELOG.md > RELEASE_NOTES.md

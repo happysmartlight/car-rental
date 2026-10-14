@@ -16,6 +16,7 @@ import { customerRoutes } from './routes/customers.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { fileRoutes } from './routes/files.js';
 import { fineRoutes } from './routes/fines.js';
+import { maintenanceRoutes } from './routes/maintenance.js';
 import { rentalRoutes } from './routes/rentals.js';
 import { settingsRoutes } from './routes/settings.js';
 import { systemRoutes } from './routes/system.js';
@@ -67,6 +68,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(accessoryRoutes);
   await app.register(rentalRoutes);
   await app.register(fineRoutes);
+  await app.register(maintenanceRoutes);
   await app.register(settingsRoutes);
   await app.register(dashboardRoutes);
   await app.register(cashflowRoutes);

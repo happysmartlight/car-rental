@@ -1,4 +1,4 @@
-// Sinh 3 mẫu Word dựng sẵn vào apps/api/assets/templates/.
+// Sinh các mẫu Word dựng sẵn vào apps/api/assets/templates/.
 // Chạy lại khi sửa nội dung mẫu:  npm run templates -w apps/api
 //
 // Mỗi biến {…} phải nằm trọn trong MỘT TextRun — Word tách run giữa chừng thì
@@ -337,10 +337,41 @@ const ret = doc([
   signatures(['BÊN A', '{ben_a.dai_dien}'], ['BÊN B', '{khach.ho_ten}']),
 ]);
 
+// ── Phụ lục gia hạn ─────────────────────────────────────────────────────────
+
+const extension = doc([
+  ...header('PHỤ LỤC HỢP ĐỒNG THUÊ XE', ['Số: ', { b: '{gia_han.so}' }]),
+  C([{ i: 'Kèm theo Hợp đồng thuê xe số ' }, { b: '{hd.so}' }, { i: ' — điều chỉnh thời gian thuê (lần ' }, { i: '{gia_han.lan}' }, { i: ')' }], 200),
+  P(['Hôm nay, ', '{gia_han.ngay}', ', tại ', '{hd.noi_ky}', ', chúng tôi gồm:'], { after: 160 }),
+  P([{ b: 'BÊN CHO THUÊ (Bên A): ' }, { b: '{ben_a.ten}' }, ' — đại diện ', '{ben_a.dai_dien}', ' — ĐT ', '{ben_a.dien_thoai}']),
+  P([{ b: 'BÊN THUÊ (Bên B): ' }, { b: '{khach.ho_ten}' }, ' — CCCD ', '{khach.cccd}', ' — ĐT ', '{khach.dien_thoai}'], { after: 160 }),
+  P(['Hai bên thống nhất điều chỉnh thời gian thuê xe ', { b: '{xe.bien_so}' }, ' (', '{xe.hang}', ' ', '{xe.dong}', ') theo Hợp đồng số ', '{hd.so}', ' như sau:'], { after: 120 }),
+
+  H('Điều 1. Thời gian thuê'),
+  P(['– Giờ trả xe theo hợp đồng: ', '{gia_han.tra_cu}', '.']),
+  P(['– Giờ trả xe mới: ', { b: '{gia_han.tra_moi}' }, ' (', '{gia_han.thay_doi}', ').']),
+  P(['– Giới hạn quãng đường cho cả thời gian thuê: ', '{gia_han.km_moi}', ' km (trước đây ', '{gia_han.km_cu}', ' km).']),
+
+  H('Điều 2. Tiền thuê'),
+  P(['– Tổng tiền theo hợp đồng trước khi điều chỉnh: ', '{gia_han.tien_cu}', ' đồng.']),
+  P(['– Tổng tiền sau khi điều chỉnh: ', { b: '{gia_han.tien_moi}' }, ' đồng; ', '{gia_han.tang_giam}', ' ', { b: '{gia_han.tien_them}' }, ' đồng (bằng chữ: ', { i: '{gia_han.tien_them_chu}' }, ').']),
+  P(['– Chi tiết các khoản sau điều chỉnh:']),
+  loopTable(['Khoản', 'Diễn giải', 'Số tiền (đồng)'], [22, 53, 25], 'khoan', ['loai', 'mo_ta', 'so_tien'], [AlignmentType.LEFT, AlignmentType.LEFT, AlignmentType.RIGHT]),
+  P([''], { after: 40 }),
+  P(['– Bên B đã thanh toán: ', '{tien.da_tra}', ' đồng. Còn phải trả: ', { b: '{tien.con_lai}' }, ' đồng.']),
+  P(['– Trả xe trễ so với giờ trả mới tính phụ phí ', '{gia.qua_gio}', ' đồng/giờ; vượt quãng đường ', '{gia.vuot_km}', ' đồng/km như Điều 3 của hợp đồng.']),
+
+  H('Điều 3. Điều khoản chung'),
+  P(['1. Các nội dung khác của Hợp đồng số ', '{hd.so}', ' (đặt cọc, trách nhiệm về vi phạm giao thông và phạt nguội, bồi thường…) giữ nguyên hiệu lực và áp dụng cho cả thời gian thuê sau điều chỉnh.']),
+  P(['2. Phụ lục này là một phần không tách rời của hợp đồng, có hiệu lực từ thời điểm ký, lập thành 02 bản có giá trị như nhau, mỗi bên giữ 01 bản.'], { after: 240 }),
+  signatures(['BÊN A', '{ben_a.dai_dien}'], ['BÊN B', '{khach.ho_ten}']),
+]);
+
 for (const [name, d] of [
   ['hop-dong-thue-xe.docx', contract],
   ['bien-ban-giao-xe.docx', pickup],
   ['bien-ban-nhan-xe.docx', ret],
+  ['phu-luc-gia-han.docx', extension],
 ] as const) {
   fs.writeFileSync(path.join(OUT, name), await Packer.toBuffer(d));
   console.log('✓', name);

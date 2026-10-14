@@ -7,13 +7,14 @@
 //    nên app không tự tra được) hoặc từ thông báo trên app VNeTraffic → dán vào app.
 // Mỗi vi phạm tìm được được khớp với lượt thuê đang giữ xe lúc đó (lookupFine).
 
-import { and, eq, gte, isNull, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lte } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { getLocalConfig, updateLocalConfig } from '../lib/localConfig.js';
 import { escapeHtml, notify } from '../lib/telegram.js';
 import { plateKey } from '../shared/text.js';
 import { normalizeViolation, type FoundViolation } from '../shared/violationText.js';
 import { lookupFine, recordFine } from './fines.js';
+import { getRental } from './rentals.js';
 
 export { parseViolationText } from '../shared/violationText.js';
 export type { FoundViolation } from '../shared/violationText.js';
@@ -73,6 +74,49 @@ export function matchViolations(plate: string, list: FoundViolation[]): MatchedV
       recordedFineId: recorded?.id ?? null,
     };
   });
+}
+
+export interface RentalFineCheck {
+  ok: boolean;
+  error: string | null;
+  checkedAt: number;
+  /** Vi phạm trong lúc khách của lượt này giữ xe (kể cả cái đã xử phạt). */
+  violations: MatchedViolation[];
+  /** Số vi phạm chưa xử phạt trong lúc khách giữ xe. */
+  found: number;
+  /** Số hồ sơ mới ghi ở lần tra này. */
+  recorded: number;
+}
+
+/**
+ * Tra phạt nguội cho đúng một lượt thuê — trước khi hoàn cọc giữ lại. Tra mọi xe khách đã giữ,
+ * chỉ lấy vi phạm rơi vào lúc khách giữ xe; cái chưa xử phạt mà chưa có hồ sơ thì tự ghi (gắn sẵn lượt này).
+ */
+export async function checkRentalFines(rentalId: number, userId: number | null): Promise<RentalFineCheck> {
+  getRental(rentalId);
+  const segments = db.select().from(schema.rentalSegments).where(eq(schema.rentalSegments.rentalId, rentalId)).orderBy(asc(schema.rentalSegments.startAt)).all();
+  const result: RentalFineCheck = { ok: true, error: null, checkedAt: Date.now(), violations: [], found: 0, recorded: 0 };
+  for (const vehicleId of new Set(segments.map((s) => s.vehicleId))) {
+    const v = db.select().from(schema.vehicles).where(eq(schema.vehicles.id, vehicleId)).get();
+    if (!v) continue;
+    const r = await checkProvider(v.plate);
+    if (!r.ok) return { ...result, ok: false, error: r.error };
+    for (const m of matchViolations(v.plate, r.violations)) {
+      if (m.rental?.id !== rentalId) continue;
+      if (!m.recordedFineId && m.violatedAt != null && m.status !== 'paid') {
+        const f = recordFine(
+          { plate: v.plate, violatedAt: m.violatedAt, location: m.location, violation: m.violation, source: 'csgt', rentalId, notes: ['Tự phát hiện khi tra trước hạn hoàn cọc', m.unit && `Phát hiện: ${m.unit}`].filter(Boolean).join(' · ') },
+          userId,
+        );
+        m.recordedFineId = f.id;
+        result.recorded++;
+      }
+      if (m.status !== 'paid') result.found++;
+      result.violations.push(m);
+    }
+  }
+  db.update(schema.rentals).set({ fineCheckedAt: result.checkedAt, fineCheckFound: result.found }).where(eq(schema.rentals.id, rentalId)).run();
+  return result;
 }
 
 export interface FleetCheckResult {

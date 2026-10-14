@@ -1,12 +1,12 @@
-import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { badRequest, idParam, notFound, parse, requireRole, userId, zFileId, zMs, zOptText } from '../lib/http.js';
+import { badRequest, idParam, notFound, parse, requireRole, userId, zFileId, zMoney, zMs, zOptText } from '../lib/http.js';
 import { getLocalConfig, updateLocalConfig } from '../lib/localConfig.js';
 import { checkProvider, matchViolations, parseViolationText, runFleetFineCheck } from '../services/fineCheck.js';
-import { lookupFine, recordFine } from '../services/fines.js';
+import { lookupFine, recordFine, recoverFine } from '../services/fines.js';
 import { FINE_SOURCES, FINE_STATUSES } from '../shared/constants.js';
 import { formatPlate, plateKey } from '../shared/text.js';
 
@@ -38,8 +38,9 @@ export async function fineRoutes(app: FastifyInstance) {
     requireRole(req, 'staff');
     const q = parse(z.object({ status: z.enum(['open', 'all', ...FINE_STATUSES]).default('open') }), req.query);
     const conds: SQL[] = [];
-    if (q.status === 'open') conds.push(inArray(schema.trafficFines.status, ['new', 'notified', 'we_paid']));
-    else if (q.status !== 'all') conds.push(eq(schema.trafficFines.status, q.status));
+    // Hồ sơ đã hủy chỉ hiện ở "Tất cả" (gạch đi) — không lẫn vào việc cần xử lý.
+    if (q.status === 'open') conds.push(inArray(schema.trafficFines.status, ['new', 'notified', 'we_paid']), isNull(schema.trafficFines.voidedAt));
+    else if (q.status !== 'all') conds.push(eq(schema.trafficFines.status, q.status), isNull(schema.trafficFines.voidedAt));
     const rows = db
       .select({ f: schema.trafficFines, c: { id: schema.customers.id, fullName: schema.customers.fullName, phone: schema.customers.phone }, r: { id: schema.rentals.id, code: schema.rentals.code } })
       .from(schema.trafficFines)
@@ -49,7 +50,7 @@ export async function fineRoutes(app: FastifyInstance) {
       .orderBy(desc(schema.trafficFines.violatedAt))
       .limit(500)
       .all();
-    const counts = db.select({ status: schema.trafficFines.status, n: count() }).from(schema.trafficFines).groupBy(schema.trafficFines.status).all();
+    const counts = db.select({ status: schema.trafficFines.status, n: count() }).from(schema.trafficFines).where(isNull(schema.trafficFines.voidedAt)).groupBy(schema.trafficFines.status).all();
     return { items: rows.map(({ f, c, r }) => ({ ...f, customer: c?.id ? c : null, rental: r?.id ? r : null })), counts };
   });
 
@@ -148,6 +149,9 @@ export async function fineRoutes(app: FastifyInstance) {
     requireRole(req, 'staff');
     const id = idParam(req);
     const body = parse(zFine.partial(), req.body);
+    const cur = db.select().from(schema.trafficFines).where(eq(schema.trafficFines.id, id)).get();
+    if (!cur) throw notFound();
+    if (cur.voidedAt) throw badRequest('Hồ sơ đã hủy — khôi phục trước khi sửa');
     const patch: Record<string, unknown> = { ...body, updatedAt: Date.now() };
     if (body.plate) {
       patch.plateKey = plateKey(body.plate);
@@ -162,11 +166,48 @@ export async function fineRoutes(app: FastifyInstance) {
     return f;
   });
 
-  app.delete('/api/fines/:id', async (req) => {
+  /** Khách trả lại tiền phạt: ghi vào sổ tiền của lượt thuê (tiền mặt / chuyển khoản / trừ cọc đang giữ). */
+  app.post('/api/fines/:id/recover', async (req) => {
+    requireRole(req, 'staff');
+    const id = idParam(req);
+    const body = parse(
+      z.object({
+        amount: zMoney.refine((n) => n > 0, 'số tiền phải lớn hơn 0'),
+        method: z.enum(['cash', 'transfer', 'deposit']),
+        at: zMs.optional(),
+      }),
+      req.body,
+    );
+    const f = recoverFine(id, body, userId(req));
+    audit(req, 'fine.recover', 'fine', id, body);
+    return f;
+  });
+
+  /**
+   * Hủy hồ sơ ghi nhầm / trùng — KHÔNG xóa: hồ sơ vẫn giữ (gạch đi) để đối chiếu, chỉ không còn
+   * tính vào việc cần xử lý, công nợ, cảnh báo khách. Khôi phục được.
+   */
+  app.post('/api/fines/:id/void', async (req) => {
     requireRole(req, 'admin');
     const id = idParam(req);
-    const f = db.delete(schema.trafficFines).where(eq(schema.trafficFines.id, id)).returning().get();
-    if (f) audit(req, 'fine.delete', 'fine', id, f);
-    return { ok: true };
+    const { reason } = parse(z.object({ reason: z.string().trim().min(2, 'nhập lý do hủy').max(300) }), req.body);
+    const f = db
+      .update(schema.trafficFines)
+      .set({ voidedAt: Date.now(), voidReason: reason, updatedAt: Date.now() })
+      .where(and(eq(schema.trafficFines.id, id), isNull(schema.trafficFines.voidedAt)))
+      .returning()
+      .get();
+    if (!f) throw notFound('Không tìm thấy hồ sơ (hoặc đã hủy)');
+    audit(req, 'fine.void', 'fine', id, { reason, plate: f.plate, violatedAt: f.violatedAt, rentalId: f.rentalId });
+    return f;
+  });
+
+  app.post('/api/fines/:id/restore', async (req) => {
+    requireRole(req, 'admin');
+    const id = idParam(req);
+    const f = db.update(schema.trafficFines).set({ voidedAt: null, voidReason: null, updatedAt: Date.now() }).where(eq(schema.trafficFines.id, id)).returning().get();
+    if (!f) throw notFound();
+    audit(req, 'fine.restore', 'fine', id);
+    return f;
   });
 }

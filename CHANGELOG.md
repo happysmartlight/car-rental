@@ -3,6 +3,22 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.4.1] - 2026-10-14
+
+### Mới
+- **Xe trống & báo giá** — chọn ngày giờ là thấy xe nào trống kèm giá, gửi báo giá qua Zalo, bấm để đặt luôn (nút **+** hoặc trên Lịch xe).
+- **Gửi khách xác nhận đặt xe** ngay sau khi tạo lượt thuê, kèm mã QR tiền cọc.
+- **Phụ lục gia hạn** — gia hạn khi khách đang giữ xe: in phụ lục, gửi khách phiếu gia hạn.
+- **Lịch bảo dưỡng theo hạng mục** (thay dầu, lọc gió, má phanh, lốp…) ở trang xe: nhắc khi đến hạn, ghi đã làm kèm chi phí.
+- **Phạt nguội** — nút Kiểm tra ngay khi hoàn cọc, tự tra vào ngày đến hạn hoàn cọc; gửi khách thông báo phạt và ghi khách trả lại tiền; hồ sơ ghi nhầm thì hủy (không xóa).
+- **Lưu nháp** biên bản giao/nhận xe và đơn đặt xe — iPhone tải lại trang không mất dữ liệu.
+
+### Cải tiến
+- Việc cần làm nhắc thêm: chờ quyết toán, khách còn nợ, chưa hoàn tiền cho khách.
+- Telegram nhắc trước giờ giao xe; tin nhắn không còn mất khi lỗi mạng (tự gửi lại).
+- Phạt lớn hơn cọc đang giữ: trừ hết cọc, phần vượt ghi thành khách còn nợ.
+- Ghi chú phiên bản ở trang Cập nhật hiển thị gọn, bấm "Xem chi tiết" để xem đầy đủ.
+
 ## [0.4.0] - 2026-10-13
 
 ### Mới

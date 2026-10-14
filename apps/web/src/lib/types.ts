@@ -10,9 +10,12 @@ import type {
   DocumentRow,
   Handover,
   HandoverAccessory,
+  MaintenanceItem,
+  MaintenanceRecord,
   Payment,
   RecurringCost,
   Rental,
+  RentalExtension,
   RentalSegment,
   TrafficFine,
   Vehicle,
@@ -22,9 +25,10 @@ import type {
 import type { CashCategory, Period } from '@shared/cashflow';
 import type { MoneySummary, PaymentDirection } from '@shared/money';
 import type { Quote } from '@shared/pricing';
+import type { MaintenancePreset, MaintenanceStatus } from '@shared/maintenance';
 import type { AccessoryCategory, PaymentMethod, RentalStatus, Role } from '@shared/constants';
 
-export type { AccessoryCatalogItem, CashEntry, RecurringCost, HandoverAccessory, VehicleAccessory, Charge, Collateral, ContractTemplate, Customer, DocumentRow, Handover, Payment, Rental, RentalSegment, TrafficFine, Vehicle, VehicleBlock, MoneySummary, Quote };
+export type { AccessoryCatalogItem, CashEntry, RecurringCost, HandoverAccessory, VehicleAccessory, Charge, Collateral, ContractTemplate, Customer, DocumentRow, Handover, Payment, Rental, RentalExtension, RentalSegment, TrafficFine, Vehicle, VehicleBlock, MoneySummary, Quote };
 
 export interface SessionUser {
   id: number;
@@ -105,9 +109,29 @@ export interface RentalDetail {
   collaterals: Collateral[];
   documents: DocumentRow[];
   fines: TrafficFine[];
+  /** Các lần gia hạn khi khách đang giữ xe (cũ → mới). */
+  extensions: RentalExtension[];
   users: { id: number; displayName: string }[];
   warnings: Warning[];
   money: MoneySummary;
+}
+
+export type MaintenanceItemView = MaintenanceItem & { status: MaintenanceStatus };
+
+/** Lịch bảo dưỡng theo hạng mục của một xe. */
+export interface MaintenanceData {
+  items: MaintenanceItemView[];
+  records: MaintenanceRecord[];
+  presets: MaintenancePreset[];
+}
+
+/** Xe trống & giá cho một khoảng thời gian (báo giá nhanh). */
+export interface AvailabilityItem {
+  vehicle: Vehicle;
+  available: boolean;
+  conflicts: Conflict[];
+  quote: Quote;
+  deposit: number;
 }
 
 export interface CustomerDetail {
@@ -261,6 +285,16 @@ export interface MatchedViolation {
   rental: { id: number; code: string } | null;
   nearBoundary: boolean;
   recordedFineId: number | null;
+}
+
+/** Tra phạt nguội riêng cho một lượt thuê (trước khi hoàn cọc). */
+export interface RentalFineCheck {
+  ok: boolean;
+  error: string | null;
+  checkedAt: number;
+  violations: MatchedViolation[];
+  found: number;
+  recorded: number;
 }
 
 export interface ViolationCheckResult {
