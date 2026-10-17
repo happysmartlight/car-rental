@@ -3,6 +3,16 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.4.3] - 2026-10-17
+
+### Mới
+- **Ảnh giao/nhận xe đóng dấu tọa độ GPS** (kèm sai số) dưới dòng giờ và biển số. Lần đầu iPhone hỏi quyền vị trí — chọn Cho phép.
+- **Sửa ODO lúc giao** khi lỡ nhập nhầm: trong **Gia hạn / sửa thông tin** của lượt đang thuê.
+- Nút **0% / 50% / 70% / 100%** điền nhanh tiền thuê thu khi giao xe.
+
+### Sửa lỗi
+- Sao lưu lên Telegram: ảnh/văn bản đọc lỗi hoặc gửi hỏng giữa chừng không còn bị bỏ sót, đêm sau tự gửi tiếp. Trang Sao lưu báo nếu có file chưa gửi được.
+
 ## [0.4.2] - 2026-10-17
 
 ### Sửa lỗi

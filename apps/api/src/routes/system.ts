@@ -87,6 +87,7 @@ export async function systemRoutes(app: FastifyInstance) {
         lastTelegramDate: lc.lastTelegramDate ?? null,
         lastTelegramError: lc.lastTelegramError ?? null,
         filesSyncedUntil: lc.filesSyncedUntil ?? null,
+        filesSkipped: lc.filesSkipped ?? 0,
       },
     };
   });

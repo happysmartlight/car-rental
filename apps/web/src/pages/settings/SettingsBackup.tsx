@@ -31,6 +31,7 @@ interface BackupData {
     lastTelegramDate: string | null;
     lastTelegramError: string | null;
     filesSyncedUntil: number | null;
+    filesSkipped: number;
   };
 }
 interface Stats {
@@ -67,9 +68,10 @@ export function SettingsBackup() {
     onSuccess: () => setPreview(null),
   });
   const saveCfg = useAction((body: Record<string, unknown>) => api.put('/api/system/backups/config', body), { ...inv, success: 'Đã lưu', onSuccess: () => setPass('') });
-  const sendNow = useAction(() => api.post<{ dbBytes: number; files: number; parts: number }>('/api/system/telegram/backup'), {
+  const sendNow = useAction(() => api.post<{ dbBytes: number; files: number; parts: number; skipped: number }>('/api/system/telegram/backup'), {
     ...inv,
-    success: (r) => `Đã gửi lên Telegram: dữ liệu ${fmtBytes(r.dbBytes)} + ${r.files} file ảnh/văn bản (${r.parts} gói)`,
+    success: (r) =>
+      `Đã gửi lên Telegram: dữ liệu ${fmtBytes(r.dbBytes)} + ${r.files} file ảnh/văn bản (${r.parts} gói)${r.skipped ? ` · ${r.skipped} file không đọc được` : ''}`,
   });
 
   const openPreview = async (name: string) => {
@@ -136,10 +138,15 @@ export function SettingsBackup() {
             </Button>
           </div>
           <Notice tone="amber">Ghi mật khẩu này ra giấy / trình quản lý mật khẩu. Mất mật khẩu = không mở được bản sao lưu trên Telegram.</Notice>
-          <Switch checked={c.telegramEnabled} onChange={(v) => saveCfg.mutate({ telegramEnabled: v })} disabled={!c.hasPassphrase} label="Tự gửi mỗi đêm" description="Gửi bản dữ liệu đầy đủ + ảnh, văn bản mới phát sinh (chia gói ≤ 40MB)" />
+          <Switch checked={c.telegramEnabled} onChange={(v) => saveCfg.mutate({ telegramEnabled: v })} disabled={!c.hasPassphrase} label="Tự gửi mỗi đêm" description="Gửi bản dữ liệu đầy đủ + ảnh, văn bản chưa gửi (chia gói ≤ 40MB)" />
           <div className="divide-y divide-border rounded-2xl border border-border px-4 py-1">
             <InfoRow label="Lần gửi thành công gần nhất">{c.lastTelegramDate ? fmtDateKey(c.lastTelegramDate) : 'Chưa gửi'}</InfoRow>
             <InfoRow label="Ảnh đã gửi đến">{c.filesSyncedUntil ? fmtDateTime(c.filesSyncedUntil) : '—'}</InfoRow>
+            {c.filesSkipped > 0 && (
+              <InfoRow label="Chưa gửi được">
+                <span className="text-amber-700 dark:text-amber-400">{c.filesSkipped} file không đọc được trên Pi · thử lại mỗi đêm</span>
+              </InfoRow>
+            )}
             {c.lastTelegramError && <InfoRow label="Lỗi gần nhất"><span className="text-red-600">{c.lastTelegramError}</span></InfoRow>}
           </div>
           <Button variant="outline" onClick={() => sendNow.mutate()} loading={sendNow.isPending} disabled={!c.hasPassphrase}>

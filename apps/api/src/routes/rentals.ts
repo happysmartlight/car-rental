@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, count, eq, gte, inArray, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
@@ -23,6 +23,7 @@ import {
   getVehicle,
   occupiedRange,
   pickup,
+  pickupHandover,
   quoteFor,
   releaseHold,
   rentalDetail,
@@ -266,11 +267,12 @@ export async function rentalRoutes(app: FastifyInstance) {
         fineHoldDays: zFineHoldDays.optional(),
         accessories: zAccessories.nullable().optional(),
         notes: zOptText,
+        pickupOdo: z.number().int().min(0).optional(),
         allowConflict: z.boolean().optional(),
       }),
       req.body,
     );
-    const before = getRental(id);
+    const before = { ...getRental(id), pickupOdo: body.pickupOdo !== undefined ? pickupHandover(id)?.odo : undefined };
     const r = updateRental(id, body, userId(req));
     audit(req, 'rental.update', 'rental', id, {
       changes: Object.fromEntries(
@@ -302,12 +304,7 @@ export async function rentalRoutes(app: FastifyInstance) {
     const r = getRental(id);
     const pricing = rentalPricing(r);
     const rules = getSetting('rules');
-    const pickupHo = db
-      .select()
-      .from(schema.handovers)
-      .where(and(eq(schema.handovers.rentalId, id), eq(schema.handovers.kind, 'pickup')))
-      .orderBy(desc(schema.handovers.at))
-      .get();
+    const pickupHo = pickupHandover(id);
     const suggestions = [
       overtimeCharge(r.scheduledEnd, body.at, pricing, rules),
       pickupHo ? overKmCharge(pickupHo.odo, body.odo, r.kmLimit, pricing.overKmFee) : null,

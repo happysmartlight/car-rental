@@ -32,7 +32,12 @@ export interface LocalConfig {
     lastLocalDate?: string;
     lastTelegramDate?: string;
     lastTelegramError?: string;
+    /** File mới nhất đã gửi (hiển thị; bản cũ dùng làm mốc nên vẫn ghi để quay về bản cũ được). */
     filesSyncedUntil?: number;
+    /** Mốc của bản cũ lúc lên bản đánh dấu từng file: file tạo trước mốc này coi như đã gửi. */
+    filesLegacyUntil?: number;
+    /** Số file lần gửi gần nhất không đọc được trên Pi (chưa ra ngoài, lần sau thử lại). */
+    filesSkipped?: number;
   };
   update: {
     autoUpdate: boolean;

@@ -133,6 +133,18 @@ describe('luồng một lượt thuê', () => {
     expect(img.headers['content-type']).toBe('image/webp');
   });
 
+  it('sửa ODO lúc giao (nhập nhầm): biên bản giao + ODO xe đổi theo', async () => {
+    const odoOf = async () => {
+      const d = (await call('GET', `/api/rentals/${rentalId}`)).json;
+      return [d.handovers.find((h: any) => h.kind === 'pickup').odo, d.vehicle.odo];
+    };
+    const r = await call('PATCH', `/api/rentals/${rentalId}`, { pickupOdo: 10150 });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(await odoOf()).toEqual([10150, 10150]);
+    await call('PATCH', `/api/rentals/${rentalId}`, { pickupOdo: 10050 });
+    expect(await odoOf()).toEqual([10050, 10050]);
+  });
+
   it('nhận xe: gợi ý phụ phí trễ giờ + vượt km', async () => {
     const preview = await call('POST', `/api/rentals/${rentalId}/return-preview`, { at: at('2026-10-12T10:30'), odo: 10750 });
     expect(preview.json.kmDriven).toBe(700);
@@ -144,6 +156,7 @@ describe('luồng một lượt thuê', () => {
     const r = await call('POST', `/api/rentals/${rentalId}/return`, { at: at('2026-10-12T10:30'), odo: 10750, fuelLevel: 75, charges: preview.json.suggestions, damages: [{ zone: 'Cửa trước trái', note: 'móp', isNew: true }] });
     expect(r.status, JSON.stringify(r.json)).toBe(200);
     expect(r.json.status).toBe('returned');
+    expect((await call('PATCH', `/api/rentals/${rentalId}`, { pickupOdo: 10000 })).status).toBe(400);
   });
 
   it('quyết toán: cấn trừ cọc, giữ cọc phạt nguội', async () => {
@@ -1109,6 +1122,79 @@ describe('thông báo Telegram một lần: có hàng đợi gửi lại', () =>
       vi.unstubAllGlobals();
       updateLocalConfig((c) => {
         c.telegram = { ...c.telegram, botToken: '', chatId: '' };
+      });
+    }
+  });
+});
+
+describe('sao lưu ảnh lên Telegram: không sót file', () => {
+  it('file đọc lỗi / gửi hỏng giữa chừng → lần sau gửi tiếp; ảnh + thumbnail cùng gói; giữ mốc của bản cũ', async () => {
+    const { getLocalConfig, updateLocalConfig } = await import('./lib/localConfig.js');
+    const { runOffsiteBackup } = await import('./lib/backup.js');
+    const { decryptPack } = await import('./lib/pack.js');
+    const { absPath, getFileRow } = await import('./lib/files.js');
+    const { db, schema } = await import('./db/index.js');
+    const { eq } = await import('drizzle-orm');
+    const PASS = 'matkhau-sao-luu';
+    const packs: string[][] = [];
+    let filesDown = false;
+    vi.stubGlobal('fetch', async (url: string | URL, init?: RequestInit) => {
+      if (!String(url).includes('api.telegram.org')) throw new Error(`fetch không mong đợi: ${url}`);
+      const doc = init!.body instanceof FormData ? (init!.body.get('document') as File) : null;
+      if (doc?.name.includes('-files-')) {
+        if (filesDown) return new Response(JSON.stringify({ ok: false, description: 'Bad Gateway' }), { status: 502 });
+        packs.push(decryptPack(Buffer.from(await doc.arrayBuffer()), PASS).entries.map((e) => e.path));
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    updateLocalConfig((c) => {
+      c.telegram = { ...c.telegram, botToken: '123:abc', chatId: '1', notify: false };
+      c.backup.passphrase = PASS;
+    });
+    const sentPaths = () => packs.flat();
+    const tick = () => new Promise((ok) => setTimeout(ok, 5));
+    try {
+      // Bản cũ đã gửi tới mốc này: mọi file tạo trước đó (cả của các test trên) không gửi lại.
+      const old = getFileRow(await upload('vehicle_photo'));
+      await tick();
+      updateLocalConfig((c) => {
+        c.backup.filesSyncedUntil = Date.now();
+      });
+      await tick();
+      const b = getFileRow(await upload('vehicle_photo'));
+      const c = getFileRow(await upload('id_front'));
+      fs.renameSync(absPath(c.path), `${absPath(c.path)}.bak`);
+
+      const r1 = await runOffsiteBackup();
+      expect(r1).toMatchObject({ files: 1, parts: 1, skipped: 1 });
+      expect(packs).toEqual([[b.path, b.thumbPath]]);
+      expect(sentPaths()).not.toContain(old.path);
+      expect(getLocalConfig().backup.filesSkipped).toBe(1);
+      expect((await call('GET', '/api/system/backups')).json.config.filesSkipped).toBe(1);
+
+      // File đọc được lại, nhưng gói ảnh gửi hỏng → không đánh dấu, lần sau gửi tiếp.
+      fs.renameSync(`${absPath(c.path)}.bak`, absPath(c.path));
+      const d = getFileRow(await upload('vehicle_photo'));
+      filesDown = true;
+      await expect(runOffsiteBackup()).rejects.toThrow('Bad Gateway');
+      expect(getFileRow(c.id).offsiteAt).toBeNull();
+      expect(getFileRow(d.id).offsiteAt).toBeNull();
+      filesDown = false;
+      const r2 = await runOffsiteBackup();
+      expect(r2).toMatchObject({ files: 2, skipped: 0 });
+      expect(sentPaths()).toEqual(expect.arrayContaining([c.path, c.thumbPath, d.path, d.thumbPath]));
+      expect(getLocalConfig().backup.filesSkipped).toBeUndefined();
+      expect(getLocalConfig().backup.filesSyncedUntil).toBe(d.createdAt);
+
+      expect(await runOffsiteBackup()).toMatchObject({ files: 0, parts: 0 });
+      // Khôi phục một DB cũ chưa có dấu đã gửi: file trước mốc bản cũ vẫn không gửi lại.
+      db.update(schema.files).set({ offsiteAt: null }).where(eq(schema.files.id, old.id)).run();
+      expect(await runOffsiteBackup()).toMatchObject({ files: 0, parts: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+      updateLocalConfig((c) => {
+        c.telegram = { ...c.telegram, botToken: '', chatId: '' };
+        c.backup.passphrase = '';
       });
     }
   });

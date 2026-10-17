@@ -1,8 +1,8 @@
-// Giao xe / nhận xe trên điện thoại: ODO, xăng, ảnh theo khung, vết trầy, đồ kèm theo, chữ ký.
+// Giao xe / nhận xe trên điện thoại: ODO, xăng, ảnh theo khung (đóng dấu giờ, biển số, tọa độ GPS), vết trầy, đồ kèm theo, chữ ký.
 // Đang làm dở mà iPhone tải lại trang (mở camera nhiều lần, có cuộc gọi…) → mở lại vẫn còn nguyên (nháp trên máy).
 
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownToLine, ArrowUpFromLine, Check, History, Plus, Trash2 } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, Check, History, MapPin, MapPinOff, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -12,10 +12,11 @@ import { Gallery, PhotoInput } from '@/components/images';
 import { AccessoryAdder, handoverItems } from '@/components/RentalAccessories';
 import { Button } from '@/components/ui/button';
 import { useConfirm } from '@/components/ui/dialog';
-import { Checkbox, DateTimeInput, Field, Input, MoneyInput, NumberInput, Select, Textarea } from '@/components/ui/form';
+import { Checkbox, DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select, Textarea } from '@/components/ui/form';
 import { Card, CardBody, CardHeader, Notice, PageLoader } from '@/components/ui/misc';
 import { api, uploadFile } from '@/lib/api';
 import { blobToDataUrl, clearDraft, dataUrlToBlob, loadDraft, useDraftAutosave } from '@/lib/draft';
+import { fmtGeo, useGeolocation, type GeoState } from '@/lib/geo';
 import { useSettings } from '@/lib/hooks';
 import type { HandoverAccessory, RentalDetail, VehicleAccessoriesData } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
@@ -67,6 +68,9 @@ interface HandoverDraft {
 
 const DRAFT_TTL = 24 * 3600_000;
 
+/** Nút điền nhanh phần tiền thuê khách trả lúc nhận xe (% của số còn phải trả). */
+const PAY_SHARES = [0, 50, 70, 100];
+
 function Step({ n, title, children, description }: { n: number; title: string; children: ReactNode; description?: ReactNode }) {
   return (
     <Card>
@@ -81,6 +85,26 @@ function Step({ n, title, children, description }: { n: number; title: string; c
       />
       <CardBody>{children}</CardBody>
     </Card>
+  );
+}
+
+function GeoStatus({ state }: { state: GeoState }) {
+  if (state.status === 'ok' || state.status === 'locating') {
+    return (
+      <p className="mb-3 flex items-center gap-1.5 text-xs text-muted">
+        <MapPin className={cn('size-3.5 shrink-0', state.status === 'ok' && 'text-emerald-600 dark:text-emerald-400')} />
+        {state.status === 'ok' ? `Đã có vị trí GPS (sai số ±${Math.round(state.fix.accuracy)} m) — đóng kèm lên ảnh` : 'Đang lấy vị trí GPS…'}
+      </p>
+    );
+  }
+  return (
+    <Notice tone="amber" icon={MapPinOff} className="mb-3">
+      {state.status === 'denied'
+        ? 'Chưa cho phép vị trí nên ảnh sẽ không có tọa độ GPS. iPhone: Cài đặt → Quyền riêng tư & Bảo mật → Dịch vụ định vị → bật, mục Trang web Safari chọn "Khi dùng ứng dụng", rồi mở lại trang này.'
+        : state.status === 'insecure'
+          ? 'Vị trí GPS chỉ lấy được khi mở app qua địa chỉ https (Tailscale). Ảnh chụp lúc này sẽ không có tọa độ.'
+          : 'Chưa lấy được GPS (trong nhà, hầm xe hoặc máy tắt định vị). Ảnh chụp lúc này sẽ không có tọa độ.'}
+    </Notice>
   );
 }
 
@@ -227,9 +251,18 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
     setCharges((rows) => [...rows.filter((r) => r.auto !== 'charging'), ...(line ? [{ ...line, auto: 'charging' }] : [])]);
   }, [chargeSessions, charging]);
 
-  const stamp = useMemo(() => () => `${d?.vehicle.plate ?? ''} • ${fmtDateTime(Date.now())} • ${isPickup ? 'Giao xe' : 'Nhận xe'} ${d?.rental.code ?? ''}`, [d, isPickup]);
-
   const wrongStatus = !d || (isPickup ? d.rental.status !== 'booked' : d.rental.status !== 'active');
+  // Bắt GPS ngay khi mở trang để lúc chụp ảnh đã có tọa độ.
+  const geo = useGeolocation(!wrongStatus);
+  const geoNow = geo.current;
+  const stamp = useMemo(
+    () => () => {
+      const line = `${d?.vehicle.plate ?? ''} • ${fmtDateTime(Date.now())} • ${isPickup ? 'Giao xe' : 'Nhận xe'} ${d?.rental.code ?? ''}`;
+      const fix = geoNow();
+      return fix ? `${line}\n${fmtGeo(fix)}` : line;
+    },
+    [d, isPickup, geoNow],
+  );
   const draft: HandoverDraft = { at, odo, fuel, photos, extraPhotos, damages, checklist, notes, signature: signatureUrl, charges, acc, chargeSessions, collect, collectDeposit };
   useDraftAutosave(draftKey, draft, initialized && touched && !wrongStatus && !saving && !done.current);
   const touch = () => !touched && setTouched(true);
@@ -244,6 +277,9 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
   const r = d.rental;
   const missingPhotos = PHOTO_SLOTS.filter((s) => !photos[s.key]).length;
   const extraTotal = charges.reduce((s, c) => s + (c.amount ?? 0), 0);
+  const due = Math.max(0, d.money.due);
+  // Trả một phần thì làm tròn nghìn đồng; 100% giữ đúng số còn phải trả.
+  const shareAmount = (pct: number) => (pct === 100 ? due : Math.round((due * pct) / 100 / 1000) * 1000);
 
   const submit = async () => {
     if (!at) return toast.error('Chọn thời điểm');
@@ -339,7 +375,8 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
             </div>
           </Step>
 
-          <Step n={2} title="Chụp ảnh xe" description={missingPhotos ? `Còn ${missingPhotos} khung chưa chụp — ảnh tự đóng dấu giờ và biển số` : 'Đủ ảnh theo khung'}>
+          <Step n={2} title="Chụp ảnh xe" description={missingPhotos ? `Còn ${missingPhotos} khung chưa chụp — ảnh tự đóng dấu giờ, biển số và vị trí GPS` : 'Đủ ảnh theo khung'}>
+            <GeoStatus state={geo.state} />
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {PHOTO_SLOTS.map((s) => (
                 <PhotoInput key={s.key} kind="handover_photo" label={s.label} camera stamp={stamp} value={photos[s.key]} onChange={(v) => setPhotos({ ...photos, [s.key]: v })} />
@@ -444,10 +481,18 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
           </Step>
 
           {isPickup ? (
-            <Step n={5} title="Thu tiền khi giao xe" description={`Còn phải trả ${fmtVnd(Math.max(0, d.money.due))} · cọc đã nhận ${fmtVnd(d.money.depositHeld)}/${fmtVnd(r.depositRequired)}`}>
+            <Step n={5} title="Thu tiền khi giao xe" description={`Còn phải trả ${fmtVnd(due)} · cọc đã nhận ${fmtVnd(d.money.depositHeld)}/${fmtVnd(r.depositRequired)}`}>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Thu tiền thuê">
                   <MoneyInput value={collect.amount} onChange={(v) => setCollect({ ...collect, amount: v })} />
+                  {due > 0 && (
+                    <Segmented
+                      className="mt-2 flex w-full"
+                      value={String(PAY_SHARES.find((p) => (collect.amount ?? 0) === shareAmount(p)) ?? '')}
+                      onChange={(v) => setCollect({ ...collect, amount: shareAmount(Number(v)) || null })}
+                      options={PAY_SHARES.map((p) => ({ value: String(p), label: `${p}%` }))}
+                    />
+                  )}
                   <Select className="mt-2" value={collect.method} onChange={(e) => setCollect({ ...collect, method: e.target.value as 'cash' | 'transfer' })}>
                     <option value="transfer">Chuyển khoản</option>
                     <option value="cash">Tiền mặt</option>

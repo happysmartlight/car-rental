@@ -408,6 +408,9 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
   const [pickupLocation, setPickupLocation] = useState(r.pickupLocation ?? '');
   const [returnLocation, setReturnLocation] = useState(r.returnLocation ?? '');
   const [notes, setNotes] = useState(r.notes ?? '');
+  // Xe đang trong tay khách: cho sửa ODO lúc giao khi nhân viên nhập nhầm.
+  const pickupHo = r.status === 'active' ? d.handovers.find((h) => h.kind === 'pickup') : undefined;
+  const [pickupOdo, setPickupOdo] = useState<number | null>(pickupHo?.odo ?? null);
   const acc = useRentalAccessories(vehicleId, vehicleId === r.vehicleId ? r.accessories : null, open && booked);
   const resetAcc = acc.reset;
   useEffect(() => {
@@ -422,13 +425,15 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
     setPickupLocation(r.pickupLocation ?? '');
     setReturnLocation(r.returnLocation ?? '');
     setNotes(r.notes ?? '');
+    setPickupOdo(pickupHo?.odo ?? null);
     resetAcc();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, r, settings]);
   const hasDeposit = (deposit ?? 0) > 0;
   const holdError = hasDeposit && (hold ?? 0) > (deposit ?? 0) ? 'Không được lớn hơn tiền cọc' : null;
   const { data: vehicles } = useQuery({ queryKey: ['vehicles'], queryFn: () => api.get<VehicleWithStatus[]>('/api/vehicles'), enabled: open && booked });
-  const valid = start != null && end != null && end > start;
+  const odoChanged = !!pickupHo && pickupOdo != null && pickupOdo !== pickupHo.odo;
+  const valid = start != null && end != null && end > start && (!pickupHo || pickupOdo != null);
   const { data: pre } = useQuery({
     queryKey: ['precheck', 'edit', r.id, vehicleId, start, end],
     queryFn: () => api.post<Precheck>('/api/rentals/precheck', { vehicleId, customerId: r.customerId, scheduledStart: start, scheduledEnd: end, excludeRentalId: r.id }),
@@ -446,10 +451,11 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
         pickupLocation: pickupLocation || null,
         returnLocation: returnLocation || null,
         notes: notes || null,
+        ...(odoChanged ? { pickupOdo } : {}),
         allowConflict,
       }),
     {
-      ...inv(r.id),
+      invalidate: [...inv(r.id).invalidate, ...(odoChanged ? [['vehicles'], ['vehicle', String(r.vehicleId)]] : [])],
       success: r.status === 'active' && end !== r.scheduledEnd ? 'Đã gia hạn — in phụ lục và gửi khách ngay trên trang lượt thuê' : 'Đã lưu',
       onSuccess: () => onOpenChange(false),
     },
@@ -512,6 +518,14 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
             Trùng lịch: {c.label}
           </Notice>
         ))}
+        {pickupHo && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="ODO lúc giao xe" hint={odoChanged ? `Đã ghi lúc giao: ${fmtNumber(pickupHo.odo)} km` : 'Sửa nếu lúc giao nhập nhầm'}>
+              <NumberInput value={pickupOdo} onChange={setPickupOdo} suffix="km" />
+            </Field>
+          </div>
+        )}
+        {odoChanged && d.documents.length > 0 && <Notice tone="amber">Văn bản đã tạo (biên bản giao xe…) vẫn ghi ODO cũ. Tạo lại nếu cần gửi khách.</Notice>}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Tiền cọc thỏa thuận">
             <MoneyInput value={deposit} onChange={setDeposit} />

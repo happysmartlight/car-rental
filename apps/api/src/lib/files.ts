@@ -35,14 +35,24 @@ function storagePath(id: string, ext: string, suffix = ''): { rel: string; abs: 
 
 const escapeXml = (s: string) => s.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
+/** Dải chữ ở đáy ảnh; mỗi dòng của `text` (giờ + biển số, tọa độ GPS…) là một dòng chữ. */
 function stampSvg(width: number, height: number, text: string): Buffer {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 3);
   const fontSize = Math.max(16, Math.round(width / 40));
   const pad = Math.round(fontSize * 0.6);
-  const boxH = fontSize + pad * 2;
+  const lineH = Math.round(fontSize * 1.3);
+  const boxH = fontSize + (lines.length - 1) * lineH + pad * 2;
+  const baseline = height - pad - Math.round(fontSize * 0.15);
   return Buffer.from(
     `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <rect x="0" y="${height - boxH}" width="${width}" height="${boxH}" fill="rgba(0,0,0,0.45)"/>
-      <text x="${pad}" y="${height - pad - Math.round(fontSize * 0.15)}" font-family="DejaVu Sans, Arial, sans-serif" font-size="${fontSize}" fill="#fff">${escapeXml(text)}</text>
+      ${lines
+        .map((l, i) => `<text x="${pad}" y="${baseline - (lines.length - 1 - i) * lineH}" font-family="DejaVu Sans, Arial, sans-serif" font-size="${fontSize}" fill="#fff">${escapeXml(l)}</text>`)
+        .join('')}
     </svg>`,
   );
 }
@@ -51,7 +61,7 @@ export interface SaveOptions {
   kind: FileKind;
   originalName?: string | null;
   userId?: number | null;
-  /** Dòng chữ đóng lên ảnh (vd "51K-123.45 • 14:30 06/10/2026 • Giao xe"). */
+  /** Chữ đóng lên ảnh (vd "51K-123.45 • 14:30 06/10/2026 • Giao xe"), xuống dòng để thêm dòng (tọa độ GPS). */
   stamp?: string | null;
 }
 
@@ -96,6 +106,7 @@ export async function saveImage(input: Buffer, opts: SaveOptions): Promise<FileR
     takenAt: Date.now(),
     createdBy: opts.userId ?? null,
     createdAt: Date.now(),
+    offsiteAt: null,
   };
   db.insert(schema.files).values(row).run();
   return row;
@@ -126,6 +137,7 @@ export function saveBinary(data: Buffer, mime: string, opts: SaveOptions): FileR
     takenAt: null,
     createdBy: opts.userId ?? null,
     createdAt: Date.now(),
+    offsiteAt: null,
   };
   db.insert(schema.files).values(row).run();
   return row;

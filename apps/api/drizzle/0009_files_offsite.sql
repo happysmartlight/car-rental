@@ -1,0 +1,1 @@
+ALTER TABLE `files` ADD `offsite_at` integer;

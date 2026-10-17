@@ -3,22 +3,22 @@
 // Local:   data/backups/db-YYYYMMDD-HHmmss-<tag>.sqlite.gz (VACUUM INTO → gzip).
 //          Không mã hóa vì nằm cùng ổ với DB gốc; chỉ admin tải được.
 // Offsite: Telegram, file .crbk mã hóa (xem pack.ts). DB gửi nguyên bản mỗi đêm;
-//          ảnh/văn bản gửi phần mới phát sinh, chia gói ≤ 40MB.
+//          ảnh/văn bản gửi phần chưa ra ngoài (đánh dấu từng file), chia gói ≤ 40MB.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import zlib from 'node:zlib';
 import Database from 'better-sqlite3';
-import { asc, gt } from 'drizzle-orm';
+import { and, asc, inArray, isNull, lte } from 'drizzle-orm';
 import { config } from '../config.js';
 import { closeDb, db, openDb, rawDb, schema } from '../db/index.js';
 import { vnDateKey, vnParts } from '../shared/time.js';
 import { absPath } from './files.js';
 import { badRequest, notFound } from './http.js';
 import { getLocalConfig, updateLocalConfig } from './localConfig.js';
-import { decryptPack, encryptPack } from './pack.js';
-import { escapeHtml, notify, sendTelegramDocument, telegramConfigured } from './telegram.js';
+import { decryptPack, encryptPack, type PackEntry } from './pack.js';
+import { escapeHtml, notify, sendTelegramDocument, TELEGRAM_MAX_BYTES, telegramConfigured } from './telegram.js';
 
 export type BackupTag = 'nightly' | 'manual' | 'pre-update' | 'pre-restore' | 'uploaded';
 
@@ -238,60 +238,104 @@ export async function sendDbToTelegram(): Promise<number> {
   }
 }
 
-/** Gửi các file (ảnh, hợp đồng) phát sinh kể từ lần gửi trước. */
-export async function sendNewFilesToTelegram(): Promise<{ files: number; parts: number }> {
+/** Một file to hơn gói vẫn được gửi riêng, miễn lọt trần Telegram (gzip + mã hóa thêm rất ít). */
+const FILE_LIMIT = TELEGRAM_MAX_BYTES - 1024 * 1024;
+
+/**
+ * Bản cũ chỉ nhớ mốc thời gian `filesSyncedUntil`. Lần đầu lên bản này, chốt mốc đó lại và
+ * coi mọi file tạo trước mốc là đã gửi. Chạy lại mỗi lần (rẻ) để khôi phục một DB cũ chưa có
+ * cột `offsite_at` cũng không gửi lại toàn bộ ảnh.
+ */
+function markLegacySynced(): void {
+  let legacy = getLocalConfig().backup.filesLegacyUntil;
+  if (legacy === undefined) {
+    legacy = getLocalConfig().backup.filesSyncedUntil ?? 0;
+    updateLocalConfig((c) => {
+      c.backup.filesLegacyUntil = legacy;
+    });
+  }
+  if (!legacy) return;
+  db.update(schema.files)
+    .set({ offsiteAt: legacy })
+    .where(and(isNull(schema.files.offsiteAt), lte(schema.files.createdAt, legacy)))
+    .run();
+}
+
+/**
+ * Gửi các file (ảnh, hợp đồng) chưa ra khỏi Pi. Mỗi file được đánh dấu `offsite_at` ngay khi
+ * gói chứa nó gửi xong, nên gửi hỏng giữa chừng, file tạm đọc không được hay đồng hồ Pi lệch
+ * lúc khởi động đều không làm sót file: lần sau gửi tiếp phần còn thiếu.
+ */
+export async function sendNewFilesToTelegram(): Promise<{ files: number; parts: number; skipped: number }> {
+  markLegacySynced();
   const cfg = getLocalConfig().backup;
-  const since = cfg.filesSyncedUntil ?? 0;
-  const rows = db.select().from(schema.files).where(gt(schema.files.createdAt, since)).orderBy(asc(schema.files.createdAt)).all();
+  const rows = db.select().from(schema.files).where(isNull(schema.files.offsiteAt)).orderBy(asc(schema.files.createdAt)).all();
   let parts = 0;
   let files = 0;
-  let batch: { path: string; data: Buffer; createdAt: number }[] = [];
+  let skipped = 0;
+  let entries: PackEntry[] = [];
+  let ids: string[] = [];
+  let newest = 0;
   let batchSize = 0;
 
   const flush = async () => {
-    if (!batch.length) return;
+    if (!ids.length) return;
     parts++;
     const now = Date.now();
-    const pack = encryptPack({ kind: 'files', createdAt: now, appVersion: config.version, part: parts }, batch, cfg.passphrase);
-    await sendTelegramDocument(pack, `car-rental-files-${stamp(now)}-p${parts}.crbk`, `🖼 Ảnh & văn bản mới · ${batch.length} file · gói ${parts}`);
-    files += batch.length;
-    const last = batch[batch.length - 1].createdAt;
+    const pack = encryptPack({ kind: 'files', createdAt: now, appVersion: config.version, part: parts }, entries, cfg.passphrase);
+    await sendTelegramDocument(pack, `car-rental-files-${stamp(now)}-p${parts}.crbk`, `🖼 Ảnh & văn bản mới · ${ids.length} file · gói ${parts}`);
+    db.update(schema.files).set({ offsiteAt: now }).where(inArray(schema.files.id, ids)).run();
+    files += ids.length;
+    const last = newest;
     updateLocalConfig((c) => {
-      c.backup.filesSyncedUntil = last;
+      c.backup.filesSyncedUntil = Math.max(c.backup.filesSyncedUntil ?? 0, last);
     });
-    batch = [];
+    entries = [];
+    ids = [];
     batchSize = 0;
   };
 
   for (const r of rows) {
-    const rels = [r.path, r.thumbPath].filter((x): x is string => !!x);
-    for (const rel of rels) {
-      let data: Buffer;
-      try {
-        data = fs.readFileSync(absPath(rel));
-      } catch {
-        continue;
-      }
-      if (data.length > PART_LIMIT) continue;
-      if (batchSize + data.length > PART_LIMIT) await flush();
-      batch.push({ path: rel, data, createdAt: r.createdAt });
-      batchSize += data.length;
+    // Ảnh chính + thumbnail luôn đi chung một gói vì cả hai được đánh dấu cùng lúc.
+    let own: PackEntry[];
+    try {
+      own = [r.path, r.thumbPath].filter((x): x is string => !!x).map((rel) => ({ path: rel, data: fs.readFileSync(absPath(rel)) }));
+    } catch (err) {
+      console.warn(`offsite: không đọc được file ${r.id} (${r.path}): ${(err as Error).message}`);
+      skipped++;
+      continue;
     }
+    const size = own.reduce((s, e) => s + e.data.length, 0);
+    if (size > FILE_LIMIT) {
+      console.warn(`offsite: file ${r.id} (${r.path}) quá lớn để gửi qua Telegram`);
+      skipped++;
+      continue;
+    }
+    if (batchSize + size > PART_LIMIT) await flush();
+    entries.push(...own);
+    ids.push(r.id);
+    newest = Math.max(newest, r.createdAt);
+    batchSize += size;
   }
   await flush();
-  return { files, parts };
+  return { files, parts, skipped };
 }
 
-export async function runOffsiteBackup(): Promise<{ dbBytes: number; files: number; parts: number }> {
+export async function runOffsiteBackup(): Promise<{ dbBytes: number; files: number; parts: number; skipped: number }> {
   if (!telegramConfigured()) throw new Error('Chưa cấu hình Telegram');
   if (!getLocalConfig().backup.passphrase) throw new Error('Chưa đặt mật khẩu mã hóa bản sao lưu');
   const dbBytes = await sendDbToTelegram();
-  const { files, parts } = await sendNewFilesToTelegram();
+  const { files, parts, skipped } = await sendNewFilesToTelegram();
+  const prevSkipped = getLocalConfig().backup.filesSkipped ?? 0;
   updateLocalConfig((c) => {
     c.backup.lastTelegramDate = vnDateKey(Date.now());
     c.backup.lastTelegramError = undefined;
+    c.backup.filesSkipped = skipped || undefined;
   });
-  return { dbBytes, files, parts };
+  if (skipped > prevSkipped) {
+    notify(`⚠️ <b>${skipped} file ảnh/văn bản chưa gửi ra ngoài được</b>\nFile không đọc được trên Pi (mất hoặc hỏng). App sẽ thử lại mỗi đêm. Xem Cài đặt → Sao lưu.`);
+  }
+  return { dbBytes, files, parts, skipped };
 }
 
 let nightlyRunning = false;

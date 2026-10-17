@@ -1,7 +1,7 @@
 // Nghiệp vụ lượt thuê: kiểm trùng lịch, tạo, giao xe, nhận xe, quyết toán, hoàn cọc.
 // Mọi thay đổi trạng thái đi qua đây để luật được áp dụng một chỗ.
 
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import type { Customer, HandoverAccessory, HandoverDamage, HandoverPhoto, Rental, Vehicle } from '../db/schema.js';
 import { badRequest, conflict, notFound } from '../lib/http.js';
@@ -285,6 +285,8 @@ export interface UpdateRentalInput {
   /** null = bỏ chỉnh, theo lại danh sách của xe. */
   accessories?: HandoverAccessory[] | null;
   notes?: string | null;
+  /** Sửa ODO đã ghi lúc giao xe (nhập nhầm) — chỉ khi xe đang trong tay khách. */
+  pickupOdo?: number;
   allowConflict?: boolean;
 }
 
@@ -310,6 +312,17 @@ export function updateRental(id: number, input: UpdateRentalInput, userId: numbe
   // Hạ tiền cọc mà không sửa mức giữ → tự hạ theo; nhập mức giữ lớn hơn cọc thì báo lỗi.
   const fineHold = input.fineHoldRequired ?? (r.fineHoldRequired == null ? null : Math.min(r.fineHoldRequired, deposit));
   if (fineHold != null && fineHold > deposit) throw badRequest('Tiền giữ chờ phạt nguội không được lớn hơn tiền cọc');
+  const pickupHo = input.pickupOdo !== undefined ? pickupHandover(r.id) : undefined;
+  if (input.pickupOdo !== undefined) {
+    if (r.status !== 'active' || !pickupHo) throw badRequest('Chỉ sửa ODO lúc giao khi xe đang trong tay khách');
+    const prev = db
+      .select({ odo: schema.handovers.odo })
+      .from(schema.handovers)
+      .where(and(eq(schema.handovers.vehicleId, r.vehicleId), ne(schema.handovers.rentalId, r.id), lt(schema.handovers.at, pickupHo.at)))
+      .orderBy(desc(schema.handovers.at))
+      .get();
+    if (prev && input.pickupOdo < prev.odo - 5) throw badRequest(`ODO ${input.pickupOdo} nhỏ hơn ODO lần trước (${prev.odo}). Kiểm tra lại số trên táp-lô.`);
+  }
   const scheduleChanged = next.vehicleId !== r.vehicleId || next.scheduledStart !== r.scheduledStart || next.scheduledEnd !== r.scheduledEnd;
   if (scheduleChanged && OPEN_STATUSES.includes(r.status)) {
     const conflicts = findConflicts(next.vehicleId, next.scheduledStart, next.scheduledEnd, r.id);
@@ -340,6 +353,14 @@ export function updateRental(id: number, input: UpdateRentalInput, userId: numbe
       patch.kmLimit = quote.kmLimit;
     }
     const updated = db.update(schema.rentals).set(patch).where(eq(schema.rentals.id, id)).returning().get();
+    if (pickupHo && input.pickupOdo !== undefined && input.pickupOdo !== pickupHo.odo) {
+      db.update(schema.handovers).set({ odo: input.pickupOdo }).where(eq(schema.handovers.id, pickupHo.id)).run();
+      // Xe chưa ghi ODO nào mới hơn số lúc giao → sửa theo, để lịch bảo dưỡng tính đúng.
+      db.update(schema.vehicles)
+        .set({ odo: input.pickupOdo, updatedAt: Date.now() })
+        .where(and(eq(schema.vehicles.id, r.vehicleId), eq(schema.vehicles.odo, pickupHo.odo)))
+        .run();
+    }
     if (extending) {
       const seq = db.select({ id: schema.rentalExtensions.id }).from(schema.rentalExtensions).where(eq(schema.rentalExtensions.rentalId, r.id)).all().length + 1;
       db.insert(schema.rentalExtensions)
@@ -459,6 +480,16 @@ export interface HandoverInput {
   signatureFileId: string | null;
 }
 
+/** Biên bản giao xe của lượt thuê. */
+export function pickupHandover(rentalId: number) {
+  return db
+    .select()
+    .from(schema.handovers)
+    .where(and(eq(schema.handovers.rentalId, rentalId), eq(schema.handovers.kind, 'pickup')))
+    .orderBy(desc(schema.handovers.at))
+    .get();
+}
+
 export function pickup(id: number, input: HandoverInput & { payments: NewPayment[]; collaterals: NewCollateral[] }, userId: number): Rental {
   const r = getRental(id);
   if (r.status !== 'booked') throw badRequest(`Lượt thuê đang ở trạng thái "${RENTAL_STATUS[r.status].label}", không giao xe được`);
@@ -500,12 +531,7 @@ export function returnVehicle(
   const r = getRental(id);
   if (r.status !== 'active') throw badRequest('Chỉ nhận lại xe của lượt đang thuê');
   if (r.actualStart && input.at < r.actualStart) throw badRequest('Giờ nhận lại xe không thể trước giờ giao xe');
-  const pickupHo = db
-    .select()
-    .from(schema.handovers)
-    .where(and(eq(schema.handovers.rentalId, r.id), eq(schema.handovers.kind, 'pickup')))
-    .orderBy(desc(schema.handovers.at))
-    .get();
+  const pickupHo = pickupHandover(r.id);
   if (pickupHo && input.odo < pickupHo.odo) throw badRequest(`ODO lúc trả (${input.odo}) nhỏ hơn lúc giao (${pickupHo.odo})`);
 
   return db.transaction(() => {

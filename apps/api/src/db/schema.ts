@@ -90,6 +90,8 @@ export const files = sqliteTable('files', {
   takenAt: integer('taken_at'),
   createdBy: integer('created_by'),
   createdAt: createdAt(),
+  /** Lúc đã gửi ra ngoài Pi (Telegram). NULL = chưa gửi → lần sao lưu sau gửi tiếp. */
+  offsiteAt: integer('offsite_at'),
 });
 
 export const vehicles = sqliteTable('vehicles', {
