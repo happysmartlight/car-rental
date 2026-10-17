@@ -17,7 +17,7 @@ import {
   vehicleChargingPolicy,
   type VehiclePricing,
 } from './pricing.js';
-import { cancelForfeit, cancelMessage, cancelPolicyText, defaultFineHold, planCancellation, planSettlement, rentalFineHold, summarizeMoney } from './money.js';
+import { cancelForfeit, cancelMessage, cancelPolicyText, defaultFineHold, monthPeriods, monthsNote, planCancellation, planSettlement, rentalFineHold, summarizeMoney } from './money.js';
 import { mergeAccessoryPlan } from './accessories.js';
 import { CAR_MAKES, findCarMake, findCarModel } from './carModels.js';
 import { suggestBookingSlot } from './booking.js';
@@ -853,5 +853,32 @@ describe('lịch bảo dưỡng theo hạng mục', () => {
     expect(presetsFor('electric').map((p) => p.key)).toContain('ev_service');
     expect(presetsFor('electric').map((p) => p.key)).not.toContain('oil');
     expect(presetsFor(null).map((p) => p.key)).toContain('spark_plugs');
+  });
+});
+
+describe('thuê tháng: thu tiền từng tháng', () => {
+  const start = at('2025-05-05T05:30');
+  const end = at('2027-05-04T20:30');
+
+  it('23 tháng + phần lẻ, đã trả 306 triệu → đủ 17 tháng', () => {
+    const ps = monthPeriods(start, end, 23, 18_000_000, 432_000_000, 306_000_000);
+    expect(ps).toHaveLength(24);
+    expect(ps.filter((p) => p.paid === p.amount)).toHaveLength(17);
+    expect(ps[17]).toMatchObject({ n: 18, from: at('2026-10-05T05:30'), to: at('2026-11-05T05:30'), paid: 0 });
+    expect(ps[23]).toMatchObject({ n: 24, from: at('2027-04-05T05:30'), to: end, amount: 18_000_000 });
+    expect(ps.reduce((s, p) => s + p.amount, 0)).toBe(432_000_000);
+    expect(monthsNote(ps.slice(17, 20))).toBe('Tháng 18–20 (05/10/2026 → 05/01/2027)');
+    expect(monthsNote(ps.slice(17, 18))).toBe('Tháng 18 (05/10 → 05/11/2026)');
+  });
+
+  it('trả lẻ: phần dư vào tháng kế; trả thừa không vượt số tháng', () => {
+    const ps = monthPeriods(start, at('2025-08-10T05:30'), 3, 18_000_000, 57_000_000, 27_000_000);
+    expect(ps.map((p) => [p.amount, p.paid])).toEqual([
+      [18_000_000, 18_000_000],
+      [18_000_000, 9_000_000],
+      [18_000_000, 0],
+      [3_000_000, 0],
+    ]);
+    expect(monthPeriods(start, at('2025-08-05T05:30'), 3, 18_000_000, 54_000_000, 60_000_000).every((p) => p.paid === p.amount)).toBe(true);
   });
 });

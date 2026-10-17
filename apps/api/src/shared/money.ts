@@ -9,7 +9,7 @@
 //   offset         cấn trừ: chuyển một phần cọc sang tiền thuê (không có tiền mặt đi lại)
 
 import { fmtVnd } from './text.js';
-import { HOUR_MS, fmtDateTime, fmtDuration } from './time.js';
+import { HOUR_MS, addMonthsVn, fmtDateRange, fmtDateTime, fmtDuration } from './time.js';
 
 export type PaymentDirection = 'in' | 'out' | 'offset';
 export type PaymentPurpose = 'rent' | 'deposit';
@@ -185,4 +185,46 @@ export function cancelMessage(i: CancelMessageInput): string {
   );
   if (i.shopPhone?.trim()) lines.push(`Mọi thắc mắc xin liên hệ ${i.shopPhone.trim()}.`);
   return lines.join('\n');
+}
+
+// ── Thuê tháng: thu tiền từng tháng ─────────────────────────────────────────
+
+/** Một kỳ (tháng) của lượt thuê tháng. */
+export interface MonthPeriod {
+  /** Tháng thứ mấy (từ 1). */
+  n: number;
+  from: number;
+  to: number;
+  amount: number;
+  /** Phần đã trả của kỳ này. */
+  paid: number;
+}
+
+/**
+ * Chia tiền thuê thành từng tháng tính từ giờ nhận xe hẹn; phần lẻ cuối (nếu có) là một kỳ riêng.
+ * Tiền thuê khách đã trả được phân bổ lần lượt từ tháng đầu, nên trả trước nhiều tháng là phủ nhiều kỳ.
+ */
+export function monthPeriods(start: number, end: number, months: number, priceMonth: number, rentTotal: number, rentPaid: number): MonthPeriod[] {
+  const out: MonthPeriod[] = [];
+  let left = rentTotal;
+  for (let i = 0; i < months && left > 0; i++) {
+    const amount = Math.min(priceMonth, left);
+    out.push({ n: i + 1, from: addMonthsVn(start, i), to: addMonthsVn(start, i + 1), amount, paid: 0 });
+    left -= amount;
+  }
+  if (left > 0) out.push({ n: out.length + 1, from: addMonthsVn(start, out.length), to: Math.max(end, addMonthsVn(start, out.length)), amount: left, paid: 0 });
+  let credit = rentPaid;
+  for (const p of out) {
+    p.paid = Math.max(0, Math.min(p.amount, credit));
+    credit -= p.paid;
+  }
+  return out;
+}
+
+/** Ghi chú phiếu thu cho các tháng liên tiếp: "Tháng 18–20 (05/10/2026 → 05/01/2027)", "Tháng 18 (05/10 → 05/11/2026)". */
+export function monthsNote(ps: MonthPeriod[]): string {
+  if (!ps.length) return '';
+  const a = ps[0];
+  const b = ps[ps.length - 1];
+  return `Tháng ${a.n}${b.n !== a.n ? `–${b.n}` : ''} (${fmtDateRange(a.from, b.to)})`;
 }

@@ -3,6 +3,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Ban,
+  CalendarCheck,
   Camera,
   CheckCircle2,
   Download,
@@ -43,12 +44,65 @@ import { cn, errorMessage, telLink, zaloLink } from '@/lib/utils';
 import { CHARGE_KIND_LABEL, COLLATERAL_KIND_LABEL, PAYMENT_METHOD_LABEL, PHOTO_SLOTS, TEMPLATE_KIND_LABEL, type TemplateKind } from '@shared/constants';
 import { rentalFineHold } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
-import { fmtDate, fmtDateTime, fmtDuration } from '@shared/time';
+import { DAY_MS, fmtDate, fmtDateRange, fmtDateTime, fmtDuration } from '@shared/time';
+import type { MonthPeriod } from '@shared/money';
 import { CancelDialog, ChargeDialog, CollateralDialog, DriverDialog, EditRentalDialog, PaymentDialog, ReleaseHoldDialog, ScanDialog, SettleDialog } from './RentalDialogs';
 import { RentalShareDialog, rentalShareStagesOf } from './RentalShare';
 import type { RentalShareStage } from '@shared/rentalShare';
 
 type DialogName = 'pay' | 'charge' | 'settle' | 'hold' | 'edit' | 'cancel' | 'collateral' | 'driver' | 'scan' | 'qr' | 'audit' | 'share' | 'fineShare' | 'fineRecover' | null;
+
+/** Thuê tháng: đã trả đến tháng mấy, tháng kế tiếp tới hạn chưa, lịch từng tháng. */
+function MonthlyPlan({ periods, now, started }: { periods: MonthPeriod[]; now: number; started: boolean }) {
+  const [open, setOpen] = useState(false);
+  const paidFull = periods.filter((p) => p.paid >= p.amount).length;
+  const next = periods.find((p) => p.paid < p.amount);
+  const lateDays = next && started ? Math.floor((now - next.from) / DAY_MS) : -1;
+  return (
+    <div className="border-b border-border px-4 pb-3 md:px-5">
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="font-medium">Tiền thuê theo tháng</span>
+        <span className="tabular text-muted">
+          Đã trả {paidFull}/{periods.length} tháng
+        </span>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-2">
+        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${(paidFull / periods.length) * 100}%` }} />
+      </div>
+      {next ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+          <span>
+            Tiếp theo: <b>tháng {next.n}</b> · {fmtDateRange(next.from, next.to)} · <b className="tabular whitespace-nowrap">{fmtVnd(next.amount - next.paid)}</b>
+            {next.paid > 0 && <span className="text-muted"> (còn lại)</span>}
+          </span>
+          {lateDays > 0 ? <Badge tone="red">Quá hạn {lateDays} ngày</Badge> : lateDays === 0 ? <Badge tone="amber">Đến hạn hôm nay</Badge> : null}
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-emerald-600 dark:text-emerald-400">Đã trả đủ tất cả {periods.length} tháng</p>
+      )}
+      <button type="button" onClick={() => setOpen(!open)} className="mt-1.5 text-xs font-medium text-brand">
+        {open ? 'Ẩn lịch từng tháng' : 'Xem lịch từng tháng'}
+      </button>
+      {open && (
+        <ul className="mt-2 divide-y divide-border rounded-xl border border-border">
+          {periods.map((p) => {
+            const done = p.paid >= p.amount;
+            const late = !done && started && p.from <= now;
+            return (
+              <li key={p.n} className="flex items-center gap-3 px-3 py-1.5 text-sm">
+                <span className="w-[4.5rem] shrink-0 font-medium whitespace-nowrap">Tháng {p.n}</span>
+                <span className="min-w-0 flex-1 text-xs text-muted">{fmtDateRange(p.from, p.to)}</span>
+                <span className={cn('tabular text-xs whitespace-nowrap', done ? 'text-emerald-600 dark:text-emerald-400' : late ? 'font-medium text-red-600 dark:text-red-400' : '')}>
+                  {done ? 'Đã trả' : p.paid > 0 ? `Còn ${fmtNumber(p.amount - p.paid)}` : fmtNumber(p.amount)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function HandoverCard({ h, title, prev }: { h: Handover; title: string; prev?: Handover }) {
   const photos = h.photos.map((p) => ({ fileId: p.fileId, label: PHOTO_SLOTS.find((s) => s.key === p.slot)?.label ?? p.slot }));
@@ -161,6 +215,8 @@ export default function RentalDetail() {
   const accNotIncluded = r.status === 'booked' ? (r.accessories ?? []).filter((a) => !a.present).map((a) => a.name) : [];
   const accExtra = r.status === 'booked' ? (r.accessories ?? []).filter((a) => a.id == null && a.present).map((a) => a.name) : [];
   const canShare = rentalShareStagesOf(d).length > 0;
+  const nextMonth = d.monthly?.find((p) => p.paid < p.amount);
+  const canCollect = ['booked', 'active', 'returned'].includes(r.status);
   const lastExt = d.extensions.at(-1);
   const openShare = (stage?: RentalShareStage) => {
     setShareStage(stage);
@@ -412,9 +468,9 @@ export default function RentalDetail() {
                 )}
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
-                {m.due > 0 && (
+                {(m.due > 0 || (nextMonth && canCollect)) && (
                   <Button size="sm" variant="secondary" onClick={() => openPay('rent_in')}>
-                    Thu tiền thuê
+                    {nextMonth && canCollect ? `Thu tiền tháng ${nextMonth.n}` : 'Thu tiền thuê'}
                   </Button>
                 )}
                 {r.depositRequired > m.depositHeld && ['booked', 'active'].includes(r.status) && (
@@ -468,7 +524,19 @@ export default function RentalDetail() {
           </Card>
 
           <Card>
-            <CardHeader icon={HandCoins} title="Thu / chi" />
+            <CardHeader
+              icon={HandCoins}
+              title="Thu / chi"
+              action={
+                nextMonth &&
+                canCollect && (
+                  <Button variant="ghost" size="sm" onClick={() => openPay('rent_in')}>
+                    <CalendarCheck /> Thu tháng
+                  </Button>
+                )
+              }
+            />
+            {d.monthly && <MonthlyPlan periods={d.monthly} now={now} started={r.status !== 'booked'} />}
             {d.payments.length ? (
               <ul className="divide-y divide-border">
                 {d.payments.map((p) => (

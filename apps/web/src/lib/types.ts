@@ -23,7 +23,7 @@ import type {
   VehicleBlock,
 } from '@api/db/schema';
 import type { CashCategory, Period } from '@shared/cashflow';
-import type { MoneySummary, PaymentDirection } from '@shared/money';
+import type { MonthPeriod, MoneySummary, PaymentDirection } from '@shared/money';
 import type { Quote } from '@shared/pricing';
 import type { MaintenancePreset, MaintenanceStatus } from '@shared/maintenance';
 import type { AccessoryCategory, PaymentMethod, RentalStatus, Role } from '@shared/constants';
@@ -114,6 +114,8 @@ export interface RentalDetail {
   users: { id: number; displayName: string }[];
   warnings: Warning[];
   money: MoneySummary;
+  /** Thuê tháng: lịch từng tháng (đã trả bao nhiêu); null = không phải thuê tháng. */
+  monthly: MonthPeriod[] | null;
 }
 
 export type MaintenanceItemView = MaintenanceItem & { status: MaintenanceStatus };

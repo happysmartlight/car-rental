@@ -79,6 +79,13 @@ export function fmtDate(ms: number | null | undefined): string {
   return `${p2(p.day)}/${p2(p.month)}/${p.year}`;
 }
 
+/** "05/10 → 05/11/2026"; khác năm thì ghi đủ: "05/12/2026 → 05/01/2027". */
+export function fmtDateRange(from: number, to: number): string {
+  const a = fmtDate(from);
+  const b = fmtDate(to);
+  return `${a.slice(6) === b.slice(6) ? a.slice(0, 5) : a} → ${b}`;
+}
+
 export function fmtTime(ms: number | null | undefined): string {
   if (ms == null) return '';
   const p = vnParts(ms);

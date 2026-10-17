@@ -3,6 +3,11 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.4.4] - 2026-10-17
+
+### Mới
+- **Thuê tháng: thu tiền từng tháng** — panel Thu/chi hiện đã trả đến tháng mấy, tháng tiếp theo (báo quá hạn), lịch từng tháng; nút **Thu tháng** chọn 1 / 2 / 3 / 6 tháng hoặc tất cả, tự điền số tiền và ghi chú.
+
 ## [0.4.3] - 2026-10-17
 
 ### Mới

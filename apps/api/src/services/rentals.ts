@@ -9,7 +9,7 @@ import { getSetting } from '../lib/settings.js';
 import { ageAt } from '../shared/cccd.js';
 import type { ChargeKind, CollateralKind, PaymentMethod, RentalStatus } from '../shared/constants.js';
 import { RENTAL_STATUS } from '../shared/constants.js';
-import { defaultFineHold, planCancellation, summarizeMoney, type MoneySummary, type PaymentPurpose } from '../shared/money.js';
+import { defaultFineHold, monthPeriods, planCancellation, summarizeMoney, type MonthPeriod, type MoneySummary, type PaymentPurpose } from '../shared/money.js';
 import { quoteRental, vehicleChargingPolicy, type Quote, type VehiclePricing } from '../shared/pricing.js';
 import { maintenanceWarnings } from './maintenance.js';
 import { fmtNumber } from '../shared/text.js';
@@ -706,6 +706,7 @@ export function rentalDetail(id: number) {
   const users = userIds.length
     ? db.select({ id: schema.users.id, displayName: schema.users.displayName }).from(schema.users).where(inArray(schema.users.id, userIds)).all()
     : [];
+  const money = summarizeMoney(charges, payments);
   const warnings: Warning[] =
     rental.status === 'booked' ? [...[customer, ...drivers].flatMap((c, i) => driverWarnings(c, rental.scheduledStart, i === 0 ? 'Khách' : 'Lái phụ')), ...maintenanceWarnings(vehicle)] : [];
   return {
@@ -723,8 +724,21 @@ export function rentalDetail(id: number) {
     extensions,
     users,
     warnings,
-    money: summarizeMoney(charges, payments),
+    money,
+    monthly: monthlyPlan(rental, charges, money),
   };
+}
+
+/** Lượt thuê tháng (từ 2 kỳ trở lên): lịch từng tháng để thu tiền dần. null = không phải thuê tháng. */
+function monthlyPlan(r: Rental, charges: { kind: ChargeKind; amount: number }[], money: MoneySummary): MonthPeriod[] | null {
+  if (r.status === 'cancelled') return null;
+  const pricing = rentalPricing(r);
+  if (!pricing.priceMonth) return null;
+  const quote = quoteRental(r.scheduledStart, r.scheduledEnd, pricing, getSetting('rules'));
+  if (quote.mode !== 'month') return null;
+  const rentTotal = charges.filter((c) => c.kind === 'rental').reduce((s, c) => s + c.amount, 0);
+  const periods = monthPeriods(r.scheduledStart, r.scheduledEnd, quote.months, pricing.priceMonth, rentTotal, money.rentPaid);
+  return periods.length >= 2 ? periods : null;
 }
 
 export type RentalDetail = ReturnType<typeof rentalDetail>;

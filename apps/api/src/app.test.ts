@@ -373,6 +373,26 @@ describe('phụ kiện trên xe', () => {
     expect(xml).toContain('18.000.000');
     expect(xml).toContain('3.500');
     expect(xml).not.toContain('Sạc pin');
+    expect((await call('GET', `/api/rentals/${r.json.id}`)).json.monthly).toBeNull(); // 1 tháng: không cần lịch
+
+    // 3 tháng + 5 ngày lẻ: lịch 4 kỳ, tiền trả trước phủ dần từ tháng đầu.
+    const long = await call('POST', '/api/rentals', {
+      vehicleId: vid,
+      customerId: custId,
+      scheduledStart: at('2027-05-01T08:00'),
+      scheduledEnd: at('2027-08-06T08:00'),
+      payments: [{ purpose: 'rent', method: 'transfer', amount: 27_000_000, note: 'Tháng 1–2' }],
+    });
+    expect(long.status, JSON.stringify(long.json)).toBe(200);
+    const plan = (await call('GET', `/api/rentals/${long.json.id}`)).json.monthly;
+    expect(plan.map((p: any) => [p.n, p.amount, p.paid])).toEqual([
+      [1, 18_000_000, 18_000_000],
+      [2, 18_000_000, 9_000_000],
+      [3, 18_000_000, 0],
+      [4, 3_000_000, 0],
+    ]);
+    expect(plan[1].from).toBe(at('2027-06-01T08:00'));
+    await call('POST', `/api/rentals/${long.json.id}/cancel`, { reason: 'Dọn dữ liệu test' });
   });
 
   it('xe điện: lượt sạc miễn phí theo số ngày thuê + phí mỗi lượt chốt vào lượt thuê, hợp đồng ghi rõ', async () => {

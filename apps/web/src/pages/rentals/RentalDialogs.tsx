@@ -17,7 +17,7 @@ import { useAction, useSettings } from '@/lib/hooks';
 import type { Customer, Precheck, RentalDetail, RentalFineCheck, VehicleWithStatus } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
 import { CHARGE_KINDS, CHARGE_KIND_LABEL, COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, FINE_DONE_STATUSES, type ChargeKind, type CollateralKind } from '@shared/constants';
-import { cancelForfeit, cancelMessage, cancelPolicyText, planCancellation, planSettlement, rentalFineHold } from '@shared/money';
+import { cancelForfeit, cancelMessage, cancelPolicyText, monthsNote, planCancellation, planSettlement, rentalFineHold } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime, fmtDuration, fmtTime } from '@shared/time';
 
@@ -40,6 +40,15 @@ export function PaymentDialog({ d, open, onOpenChange, preset = 'rent_in' }: Dia
   const [method, setMethod] = useState<'cash' | 'transfer'>('transfer');
   const [at, setAt] = useState<number | null>(Date.now());
   const [note, setNote] = useState('');
+  // Thuê tháng: thu theo số tháng, tính từ tháng đầu tiên chưa trả đủ.
+  const unpaid = useMemo(() => (d.monthly ?? []).filter((p) => p.paid < p.amount), [d]);
+  const byMonth = kind === 'rent_in' && unpaid.length > 0;
+  const monthAmount = (n: number) => unpaid.slice(0, n).reduce((s, p) => s + p.amount - p.paid, 0);
+  const monthChoices = unpaid.length ? [...[1, 2, 3, 6, 12].filter((n) => n < unpaid.length), unpaid.length] : [];
+  const pickMonths = (n: number) => {
+    setAmount(monthAmount(n));
+    setNote(monthsNote(unpaid.slice(0, n)));
+  };
   const suggested = useMemo(() => {
     const m = d.money;
     return { rent_in: Math.max(0, m.due), deposit_in: Math.max(0, d.rental.depositRequired - m.depositHeld), deposit_out: Math.max(0, m.depositHeld), rent_out: Math.max(0, -m.due) }[kind];
@@ -48,10 +57,17 @@ export function PaymentDialog({ d, open, onOpenChange, preset = 'rent_in' }: Dia
     if (open) {
       setKind(preset);
       setAt(Date.now());
-      setNote('');
     }
   }, [open, preset]);
-  useEffect(() => setAmount(suggested || null), [suggested]);
+  useEffect(() => {
+    if (!open) return;
+    if (byMonth) pickMonths(1);
+    else {
+      setAmount(suggested || null);
+      setNote('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, byMonth, suggested]);
   const save = useAction(() => api.post(`/api/rentals/${d.rental.id}/payments`, { ...PRESETS[kind], method, amount, at, note: note || null }), {
     ...inv(d.rental.id),
     success: 'Đã ghi nhận',
@@ -68,8 +84,18 @@ export function PaymentDialog({ d, open, onOpenChange, preset = 'rent_in' }: Dia
             </option>
           ))}
         </Select>
+        {byMonth && (
+          <Field label="Thu mấy tháng" hint={`Tháng ${unpaid[0].n} là tháng đầu chưa trả đủ · còn ${unpaid.length} tháng`}>
+            <Segmented
+              className="flex w-full"
+              value={String(monthChoices.find((n) => amount === monthAmount(n)) ?? '')}
+              onChange={(v) => pickMonths(Number(v))}
+              options={monthChoices.map((n) => ({ value: String(n), label: n === unpaid.length && n > 1 ? 'Tất cả' : String(n) }))}
+            />
+          </Field>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Số tiền" hint={suggested ? `Gợi ý: ${fmtVnd(suggested)}` : undefined}>
+          <Field label="Số tiền" hint={byMonth ? `Còn phải trả cả lượt: ${fmtVnd(Math.max(0, d.money.due))}` : suggested ? `Gợi ý: ${fmtVnd(suggested)}` : undefined}>
             <MoneyInput value={amount} onChange={setAmount} autoFocus />
           </Field>
           <Field label="Hình thức">
