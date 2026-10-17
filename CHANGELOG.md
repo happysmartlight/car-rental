@@ -3,6 +3,12 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.4.2] - 2026-10-17
+
+### Sửa lỗi
+- iPhone: thanh nút dưới màn hình không còn bị nổi lên giữa màn hình sau khi gửi ảnh qua Zalo/Messenger hoặc gõ chữ (trước đây phải tắt app mở lại).
+- Đổi tùy chọn ảnh gửi khách nhiều lần không còn báo "Không tạo được ảnh".
+
 ## [0.4.1] - 2026-10-14
 
 ### Mới

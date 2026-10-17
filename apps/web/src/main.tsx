@@ -7,6 +7,7 @@ import { App } from './App';
 import { ConfirmProvider } from './components/ui/dialog';
 import { ApiError } from './lib/api';
 import { registerServiceWorker } from './lib/pwa';
+import { installViewportFix } from './lib/viewport';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -20,6 +21,7 @@ const queryClient = new QueryClient({
 });
 
 registerServiceWorker();
+installViewportFix();
 
 /** Toast đổi theo theme đang áp (class "dark" trên <html>), kể cả khi người dùng tự chọn sáng/tối. */
 function ThemedToaster() {

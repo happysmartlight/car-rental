@@ -7,6 +7,7 @@ import { fmtNumber } from '@shared/text';
 import { daysUntil, fmtDate, fmtDateKey } from '@shared/time';
 import { fileUrl } from './api';
 import type { BusinessSettings, RulesSettings, Vehicle } from './types';
+import { healViewportSoon } from './viewport';
 
 export interface ShareOptions {
   plate: boolean;
@@ -280,12 +281,29 @@ export function drawFooter(pen: Pen, biz: BusinessSettings, stamp = `Báo giá n
   pen.y = top + height;
 }
 
+/** iOS giới hạn tổng bộ nhớ canvas và chỉ trả lại khi dọn rác — thu về 0 để nhả ngay (đổi tùy chọn nhiều lần vẫn vẽ được). */
+function release(canvas: HTMLCanvasElement) {
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
 export async function finish(canvas: HTMLCanvasElement, height: number): Promise<Blob> {
   const out = document.createElement('canvas');
   out.width = W;
   out.height = Math.ceil(height);
   out.getContext('2d')!.drawImage(canvas, 0, 0);
-  return new Promise((resolve, reject) => out.toBlob((b) => (b ? resolve(b) : reject(new Error('Không tạo được ảnh'))), 'image/jpeg', 0.92));
+  release(canvas);
+  return new Promise((resolve, reject) =>
+    out.toBlob(
+      (b) => {
+        release(out);
+        if (b) resolve(b);
+        else reject(new Error('Không tạo được ảnh'));
+      },
+      'image/jpeg',
+      0.92,
+    ),
+  );
 }
 
 export function newCanvas(height: number) {
@@ -506,6 +524,7 @@ export function downloadBlob(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+  healViewportSoon();
 }
 
 /** Mở bảng chia sẻ của điện thoại (Zalo, Messenger…); máy không hỗ trợ thì tải ảnh về. */
@@ -517,6 +536,8 @@ export async function shareImage(blob: Blob, filename: string): Promise<'shared'
       return 'shared';
     } catch (err) {
       if ((err as Error).name === 'AbortError') return 'cancelled';
+    } finally {
+      healViewportSoon();
     }
   }
   downloadBlob(blob, filename);
@@ -530,6 +551,8 @@ export async function shareText(text: string): Promise<'shared' | 'copied' | 'ca
       return 'shared';
     } catch (err) {
       if ((err as Error).name === 'AbortError') return 'cancelled';
+    } finally {
+      healViewportSoon();
     }
   }
   await navigator.clipboard.writeText(text);
