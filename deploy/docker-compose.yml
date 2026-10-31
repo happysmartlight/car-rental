@@ -30,6 +30,9 @@ services:
       GOTENBERG_URL: http://gotenberg:3000
       GITHUB_REPO: happysmartlight/car-rental
       PUBLIC_URL: ${PUBLIC_URL:-}
+      # Khóa chung để Family Organizer (cùng máy) xem + bấm cập nhật app này.
+      # setup.sh của liu-homelab tự đặt; bỏ trống = tắt.
+      HUB_TOKEN: ${HUB_TOKEN:-}
     volumes:
       - ./data:/data
     depends_on:

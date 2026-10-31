@@ -18,7 +18,7 @@ import {
   restoreUploaded,
   runOffsiteBackup,
 } from '../lib/backup.js';
-import { badRequest, parse, requireRole } from '../lib/http.js';
+import { badRequest, parse, requireAdminOrHub, requireRole } from '../lib/http.js';
 import { getLocalConfig, updateLocalConfig } from '../lib/localConfig.js';
 import { sendTelegram } from '../lib/telegram.js';
 import { checkReleases, compareVersions, pendingRequest, readUpdaterLog, readUpdaterState, updateAvailable } from '../lib/updater.js';
@@ -216,8 +216,9 @@ export async function systemRoutes(app: FastifyInstance) {
 
   // ── Cập nhật ─────────────────────────────────────────────────────────────
 
+  // Ba route cập nhật dưới đây Family Organizer cũng gọi được bằng HUB_TOKEN (lib/hub.ts).
   app.get('/api/system/update', async (req) => {
-    requireRole(req, 'admin');
+    requireAdminOrHub(req);
     const lc = getLocalConfig().update;
     const releases = lc.releases ?? [];
     return {
@@ -237,7 +238,7 @@ export async function systemRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/system/update/check', async (req) => {
-    requireRole(req, 'admin');
+    requireAdminOrHub(req);
     try {
       await checkReleases();
     } catch (err) {
@@ -258,10 +259,10 @@ export async function systemRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/system/update/apply', async (req) => {
-    requireRole(req, 'admin');
+    requireAdminOrHub(req);
     const body = parse(z.object({ version: z.string(), restoreBackup: z.string().nullable().optional() }), req.body);
     const r = await startUpdate(body.version, { restoreBackup: body.restoreBackup ?? null, reason: compareVersions(body.version, config.version) < 0 ? 'rollback' : 'manual' });
-    audit(req, 'update.apply', 'system', body.version, { from: config.version, ...r, restoreBackup: body.restoreBackup ?? null });
+    audit(req, 'update.apply', 'system', body.version, { from: config.version, ...r, restoreBackup: body.restoreBackup ?? null, ...(req.hub ? { by: 'family-organizer' } : {}) });
     return r;
   });
 

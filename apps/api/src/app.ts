@@ -8,6 +8,7 @@ import { ZodError } from 'zod';
 import { config } from './config.js';
 import { closeDb, openDb } from './db/index.js';
 import { loadSession } from './lib/auth.js';
+import { isHubRequest } from './lib/hub.js';
 import { HttpError, sendError } from './lib/http.js';
 import { accessoryRoutes } from './routes/accessories.js';
 import { authRoutes } from './routes/auth.js';
@@ -46,8 +47,9 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
     req.user = loadSession(req);
+    if (!req.user && isHubRequest(req)) req.hub = true;
     const pathOnly = req.url.split('?')[0];
-    if (!req.user && !PUBLIC.has(pathOnly)) {
+    if (!req.user && !req.hub && !PUBLIC.has(pathOnly)) {
       return reply.status(401).send({ error: 'Chưa đăng nhập', code: 'unauthenticated' });
     }
   });

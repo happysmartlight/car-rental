@@ -35,6 +35,8 @@ export const config = {
   commit: process.env.GIT_SHA ?? '',
   buildTime: process.env.BUILD_TIME ?? '',
   publicUrl: process.env.PUBLIC_URL ?? '',
+  /** Khóa chung để Family Organizer (cùng máy chủ) điều khiển cập nhật — xem lib/hub.ts. Rỗng = tắt. */
+  hubToken: (process.env.HUB_TOKEN ?? '').trim(),
 };
 
 for (const dir of [config.dataDir, config.uploadsDir, config.backupsDir, config.updateDir, config.configDir, config.tmpDir]) {

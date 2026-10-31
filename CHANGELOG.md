@@ -3,6 +3,11 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.4.5] - 2026-10-31
+
+### Mới
+- **Cập nhật được từ Family Organizer**: trên máy chủ nhà, Family Organizer (Quản lý Server → Ứng dụng trong nhà) xem được phiên bản Car Rental, báo khi có bản mới, và bấm cập nhật hoặc khởi động lại ngay tại đó. App vẫn tự sao lưu dữ liệu trước khi cập nhật và tự quay về bản cũ nếu bản mới lỗi, y như khi cập nhật trong Car Rental.
+
 ## [0.4.4] - 2026-10-17
 
 ### Mới

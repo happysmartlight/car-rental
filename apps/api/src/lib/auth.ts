@@ -22,6 +22,8 @@ export interface SessionUser {
 declare module 'fastify' {
   interface FastifyRequest {
     user?: SessionUser;
+    /** Family Organizer gọi bằng HUB_TOKEN (chỉ các route cập nhật, xem lib/hub.ts). */
+    hub?: boolean;
   }
 }
 

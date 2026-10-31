@@ -11,6 +11,8 @@ import { fmtDateTime, vnDateKey, vnLocalInputToMs } from './shared/time.js';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'car-rental-test-'));
 process.env.DATA_DIR = dir;
 process.env.GOTENBERG_URL = '';
+const HUB = 'h'.repeat(64);
+process.env.HUB_TOKEN = HUB;
 const { buildApp } = await import('./app.js');
 
 type App = Awaited<ReturnType<typeof buildApp>>;
@@ -274,6 +276,24 @@ Trạng thái: Chưa xử phạt`;
     expect(cal.json.items.filter((i: any) => i.type === 'rental')).toHaveLength(1);
     const s = await call('GET', '/api/search?q=hd-2026');
     expect(s.json.rentals).toHaveLength(1);
+  });
+});
+
+describe('Family Organizer điều khiển cập nhật (HUB_TOKEN)', () => {
+  const hub = (method: string, url: string, token = HUB) =>
+    app.inject({ method: method as 'GET', url, headers: { authorization: `Bearer ${token}` } });
+
+  it('khóa đúng chỉ mở các route cập nhật, không mở dữ liệu', async () => {
+    const r = await hub('GET', '/api/system/update');
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json().current.version).toBeTruthy();
+    expect((await hub('GET', '/api/system/update?x=1')).statusCode).toBe(200);
+    expect((await hub('GET', '/api/system/update', 'x'.repeat(64))).statusCode).toBe(401);
+    expect((await hub('GET', '/api/system/update', HUB.slice(1))).statusCode).toBe(401);
+    expect((await hub('GET', '/api/customers')).statusCode).toBe(401);
+    expect((await hub('GET', '/api/system/backups')).statusCode).toBe(401);
+    expect((await hub('PUT', '/api/system/update/config')).statusCode).toBe(401);
+    expect((await hub('POST', '/api/system/restart')).statusCode).toBe(401);
   });
 });
 

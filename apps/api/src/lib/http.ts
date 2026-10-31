@@ -38,6 +38,12 @@ export function requireRole(req: FastifyRequest, role: Role): void {
   if (role === 'admin' && req.user.role !== 'admin') throw forbidden();
 }
 
+/** Admin đăng nhập, hoặc Family Organizer gọi bằng HUB_TOKEN (chỉ các route trong lib/hub.ts). */
+export function requireAdminOrHub(req: FastifyRequest): void {
+  if (req.hub) return;
+  requireRole(req, 'admin');
+}
+
 export function userId(req: FastifyRequest): number {
   if (!req.user) throw new HttpError(401, 'Chưa đăng nhập', 'unauthenticated');
   return req.user.id;
