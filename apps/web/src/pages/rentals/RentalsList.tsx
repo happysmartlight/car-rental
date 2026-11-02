@@ -6,11 +6,12 @@ import { Page } from '@/components/layout/AppShell';
 import { RentalStatusBadge } from '@/components/common';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Input } from '@/components/ui/form';
-import { Card, Empty, Skeleton } from '@/components/ui/misc';
+import { Badge, Card, Empty, Skeleton } from '@/components/ui/misc';
 import { api, qs } from '@/lib/api';
 import { useDebounced, useNow } from '@/lib/hooks';
 import type { RentalListItem } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { RENTAL_CHANNEL_LABEL } from '@shared/constants';
 import { fmtVnd } from '@shared/text';
 import { fmtDateTime } from '@shared/time';
 
@@ -50,7 +51,7 @@ export default function RentalsList() {
       <div className="mb-4 space-y-3">
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Mã HĐ, tên khách, biển số, SĐT…" className="pl-9" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Mã HĐ, mã chuyến Mioto, tên khách, biển số, SĐT…" className="pl-9" />
         </div>
         {!dq && (
           <div className="scrollbar-thin -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
@@ -89,6 +90,7 @@ export default function RentalsList() {
                         <span className="text-muted">·</span>
                         <span className="truncate font-medium">{r.customer.fullName}</span>
                         <RentalStatusBadge status={r.status} overdue={overdue} />
+                        {r.channel !== 'direct' && <Badge tone="violet">{RENTAL_CHANNEL_LABEL[r.channel]}</Badge>}
                       </div>
                       <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-muted">
                         <span className="tabular">{r.code}</span>

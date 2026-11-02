@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "templates": "tsx scripts/build-default-templates.ts",
+    "templates": "tsx scripts/build-default-templates.ts && tsx scripts/build-mioto-templates.ts",
     "seed:demo": "tsx scripts/seed-demo.ts"
   },
   "dependencies": {

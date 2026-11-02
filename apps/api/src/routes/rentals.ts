@@ -24,7 +24,9 @@ import {
   occupiedRange,
   pickup,
   pickupHandover,
+  negotiatedPricing,
   quoteFor,
+  recordChannelPayout,
   releaseHold,
   rentalDetail,
   rentalMoney,
@@ -33,7 +35,7 @@ import {
   settle,
   updateRental,
 } from '../services/rentals.js';
-import { CHARGE_KINDS, COLLATERAL_KINDS, TEMPLATE_KINDS, type RentalStatus } from '../shared/constants.js';
+import { CHARGE_KINDS, COLLATERAL_KINDS, RENTAL_CHANNEL_LABEL, RENTAL_CHANNELS, RENTAL_SOURCES, TEMPLATE_KINDS, type RentalStatus } from '../shared/constants.js';
 import { rentalFineHold, summarizeMoney } from '../shared/money.js';
 import { overKmCharge, overtimeCharge } from '../shared/pricing.js';
 import { plateKey, unaccent } from '../shared/text.js';
@@ -73,6 +75,14 @@ const zAccessories = z
   .max(100);
 
 const zFineHoldDays = z.coerce.number().int().min(0).max(365);
+const zFeePct = z.coerce.number().int().min(0).max(100);
+/** Giá thỏa thuận riêng cho lượt (khách trả giá); bỏ trống = theo bảng giá xe. */
+const zNegotiated = {
+  priceDay: zMoney.nullable().optional(),
+  priceWeekendDay: zMoney.nullable().optional(),
+  priceMonth: zMoney.nullable().optional(),
+};
+const zMoneyPos = zMoney.refine((n) => n > 0, 'số tiền phải lớn hơn 0');
 
 const zHandover = z.object({
   at: zMs,
@@ -122,6 +132,7 @@ export async function rentalRoutes(app: FastifyInstance) {
         or(
           sql`unaccent(${schema.customers.fullName}) LIKE ${term}`,
           sql`lower(${schema.rentals.code}) LIKE ${term}`,
+          sql`lower(${schema.rentals.channelRef}) LIKE ${term}`,
           key.length >= 3 ? sql`${schema.vehicles.plateKey} LIKE ${'%' + key + '%'}` : undefined,
           sql`${schema.customers.phone} LIKE ${term}`,
         ),
@@ -172,6 +183,7 @@ export async function rentalRoutes(app: FastifyInstance) {
         scheduledStart: zMs,
         scheduledEnd: zMs,
         excludeRentalId: z.number().int().optional(),
+        ...zNegotiated,
       }),
       req.body,
     );
@@ -182,13 +194,21 @@ export async function rentalRoutes(app: FastifyInstance) {
       const r = getRental(body.excludeRentalId);
       if (r.vehicleId === vehicle.id) pricing = { ...vehicle, ...rentalPricing(r) };
     }
-    const quote = quoteFor(pricing, body.scheduledStart, body.scheduledEnd);
+    const quote = quoteFor(negotiatedPricing(pricing, body), body.scheduledStart, body.scheduledEnd);
     const conflicts = findConflicts(vehicle.id, body.scheduledStart, body.scheduledEnd, body.excludeRentalId);
     const people = [body.customerId, ...body.driverIds].filter((x): x is number => !!x);
     const warnings = people.flatMap((id, i) => driverWarnings(getCustomer(id), body.scheduledStart, i === 0 ? 'Khách' : 'Lái phụ'));
     if (!vehicle.active) warnings.unshift({ code: 'vehicle_inactive', severity: 'danger', message: 'Xe đang ngưng hoạt động' });
     warnings.push(...maintenanceWarnings(vehicle));
-    return { quote, conflicts, warnings, depositSuggested: vehicle.depositAmount };
+    // Khách đã từng thuê (không tính lượt hủy) → gợi ý nguồn "Khách quen".
+    const customerRentals = body.customerId
+      ? (db
+          .select({ n: count() })
+          .from(schema.rentals)
+          .where(and(eq(schema.rentals.customerId, body.customerId), sql`${schema.rentals.status} != 'cancelled'`, body.excludeRentalId ? sql`${schema.rentals.id} != ${body.excludeRentalId}` : undefined))
+          .get()?.n ?? 0)
+      : 0;
+    return { quote, conflicts, warnings, depositSuggested: vehicle.depositAmount, customerRentals };
   });
 
   /** Xe trống + giá từng xe cho một khoảng thời gian — báo giá nhanh khi khách hỏi "ngày này còn xe nào?". */
@@ -234,15 +254,26 @@ export async function rentalRoutes(app: FastifyInstance) {
         collaterals: z.array(zCollateral).default([]),
         allowConflict: z.boolean().default(false),
         allowBlacklisted: z.boolean().default(false),
+        channel: z.enum(RENTAL_CHANNELS).default('direct'),
+        channelRef: zOptText,
+        channelPrice: zMoney.nullable().optional(),
+        channelDayPrice: zMoney.nullable().optional(),
+        channelPrepaid: zMoney.default(0),
+        channelFeePct: zFeePct.nullable().optional(),
+        source: z.enum(RENTAL_SOURCES).nullable().optional(),
+        ...zNegotiated,
       }),
       req.body,
     );
     if (body.allowBlacklisted) requireRole(req, 'admin');
+    // Phí sàn do quản trị đặt; nhân viên tạo lượt thì theo % trong cài đặt.
+    if (req.user!.role !== 'admin') body.channelFeePct = null;
     const r = createRental(body, userId(req));
-    audit(req, 'rental.create', 'rental', r.id, { code: r.code });
+    audit(req, 'rental.create', 'rental', r.id, { code: r.code, channel: r.channel });
     const c = getCustomer(r.customerId);
     const v = getVehicle(r.vehicleId);
-    notify(`🆕 <b>Đặt xe ${escapeHtml(r.code)}</b>\n${escapeHtml(v.plate)} · ${escapeHtml(c.fullName)}\n${fmtDateTime(r.scheduledStart)} → ${fmtDateTime(r.scheduledEnd)}\nBởi ${escapeHtml(req.user!.displayName)}`);
+    const via = r.channel === 'direct' ? '' : ` · qua ${RENTAL_CHANNEL_LABEL[r.channel]}${r.channelRef ? ` (${escapeHtml(r.channelRef)})` : ''}`;
+    notify(`🆕 <b>Đặt xe ${escapeHtml(r.code)}</b>${via}\n${escapeHtml(v.plate)} · ${escapeHtml(c.fullName)}\n${fmtDateTime(r.scheduledStart)} → ${fmtDateTime(r.scheduledEnd)}\nBởi ${escapeHtml(req.user!.displayName)}`);
     return r;
   });
 
@@ -269,9 +300,17 @@ export async function rentalRoutes(app: FastifyInstance) {
         notes: zOptText,
         pickupOdo: z.number().int().min(0).optional(),
         allowConflict: z.boolean().optional(),
+        channel: z.enum(RENTAL_CHANNELS).optional(),
+        channelRef: zOptText,
+        channelPrice: zMoneyPos.optional(),
+        channelDayPrice: zMoney.nullable().optional(),
+        channelFeePct: zFeePct.optional(),
+        source: z.enum(RENTAL_SOURCES).nullable().optional(),
+        ...zNegotiated,
       }),
       req.body,
     );
+    if (body.channelFeePct !== undefined) requireRole(req, 'admin');
     const before = { ...getRental(id), pickupOdo: body.pickupOdo !== undefined ? pickupHandover(id)?.odo : undefined };
     const r = updateRental(id, body, userId(req));
     audit(req, 'rental.update', 'rental', id, {
@@ -399,7 +438,7 @@ export async function rentalRoutes(app: FastifyInstance) {
       z.object({
         direction: z.enum(['in', 'out', 'offset']),
         purpose: z.enum(['rent', 'deposit']),
-        method: z.enum(['cash', 'transfer', 'offset']),
+        method: z.enum(['cash', 'transfer', 'offset', 'mioto']),
         amount: zMoney.refine((n) => n > 0, 'số tiền phải lớn hơn 0'),
         at: zMs.optional(),
         note: zOptText,
@@ -408,6 +447,10 @@ export async function rentalRoutes(app: FastifyInstance) {
     );
     const r = getRental(id);
     if (r.status === 'cancelled' && body.direction === 'in') throw badRequest('Lượt thuê đã hủy');
+    if (body.method === 'mioto' && r.channelPayout != null) throw badRequest('Đã ghi nhận tiền app chuyển về — hoàn tác ở mục Mioto trước khi sửa tiền trả qua app');
+    if (body.method === 'mioto' && (r.channel === 'direct' || body.purpose !== 'rent' || body.direction === 'offset')) {
+      throw badRequest('Chỉ ghi "Qua app Mioto" cho tiền thuê của lượt đặt qua Mioto');
+    }
     const p = addPayment(id, body, userId(req));
     const money = rentalMoney(id);
     if (money.depositHeld < 0) {
@@ -494,14 +537,24 @@ export async function rentalRoutes(app: FastifyInstance) {
     return c;
   });
 
+  /** App (Mioto) đã chuyển tiền về — chỉ quản trị. amount = null: hoàn tác. */
+  app.post('/api/rentals/:id/channel-payout', async (req) => {
+    requireRole(req, 'admin');
+    const id = idParam(req);
+    const body = parse(z.object({ amount: zMoney.nullable(), at: zMs.optional() }), req.body);
+    const r = recordChannelPayout(id, body.amount == null ? null : { amount: body.amount, at: body.at ?? Date.now() }, userId(req));
+    audit(req, 'rental.channel_payout', 'rental', id, { amount: body.amount, fee: r.channelFee });
+    return r;
+  });
+
   // ── Văn bản ──────────────────────────────────────────────────────────────
 
   app.post('/api/rentals/:id/documents', async (req) => {
     requireRole(req, 'staff');
     const id = idParam(req);
     const body = parse(z.object({ templateId: z.number().int().optional(), kind: z.enum(TEMPLATE_KINDS).optional() }), req.body);
-    getRental(id);
-    const tpl = body.templateId ? getTemplate(body.templateId) : defaultTemplate(body.kind ?? 'contract');
+    const rental = getRental(id);
+    const tpl = body.templateId ? getTemplate(body.templateId) : defaultTemplate(body.kind ?? 'contract', rental.channel);
     if (!tpl) throw badRequest('Chưa có mẫu văn bản loại này. Thêm mẫu trong Cài đặt → Mẫu hợp đồng.');
     if (tpl.kind === 'extension' && !db.select().from(schema.rentalExtensions).where(eq(schema.rentalExtensions.rentalId, id)).get()) {
       throw badRequest('Lượt thuê chưa gia hạn lần nào — gia hạn ở "Gia hạn / sửa" trước khi in phụ lục');

@@ -5,7 +5,7 @@
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { DEFAULT_PICKUP_TIME } from '../shared/booking.js';
-import { DEFAULT_CHECKLIST } from '../shared/constants.js';
+import { DEFAULT_CHECKLIST, DEFAULT_MIOTO_FEE_PCT } from '../shared/constants.js';
 import type { CancelPolicy } from '../shared/money.js';
 import { DEFAULT_PRICING_RULES, type PricingRules } from '../shared/pricing.js';
 
@@ -19,6 +19,9 @@ export interface BusinessSettings {
   phone: string;
   email: string;
   address: string;
+  /** Địa chỉ thường trú / tạm trú của người đại diện — hợp đồng Mioto ghi Bên A là cá nhân. */
+  permanentAddress: string;
+  currentAddress: string;
   taxCode: string;
   bankBin: string;
   bankName: string;
@@ -40,6 +43,8 @@ export interface RulesSettings extends PricingRules, CancelPolicy {
   minDriverAge: number;
   checklist: string[];
   deliveryFeeDefault: number;
+  /** Phí sàn Mioto mặc định (%) cho lượt mới — chỉ quản trị thấy. */
+  miotoFeePct: number;
 }
 
 export const DEFAULT_BUSINESS: BusinessSettings = {
@@ -52,6 +57,8 @@ export const DEFAULT_BUSINESS: BusinessSettings = {
   phone: '',
   email: '',
   address: '',
+  permanentAddress: '',
+  currentAddress: '',
   taxCode: '',
   bankBin: '',
   bankName: '',
@@ -70,6 +77,7 @@ export const DEFAULT_RULES: RulesSettings = {
   minDriverAge: 21,
   checklist: DEFAULT_CHECKLIST,
   deliveryFeeDefault: 0,
+  miotoFeePct: DEFAULT_MIOTO_FEE_PCT,
   cancelNoticeHours: 72,
   cancelForfeitPct: 100,
 };

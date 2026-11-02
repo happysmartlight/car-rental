@@ -131,7 +131,14 @@ export async function dashboardRoutes(app: FastifyInstance) {
       .from(schema.rentals)
       .innerJoin(schema.customers, eq(schema.customers.id, schema.rentals.customerId))
       .innerJoin(schema.vehicles, eq(schema.vehicles.id, schema.rentals.vehicleId))
-      .where(or(sql`lower(${schema.rentals.code}) LIKE ${term}`, sql`replace(lower(${schema.rentals.code}), '-', '') LIKE ${'%' + term.replace(/[-%]/g, '') + '%'}`))
+      .where(
+        or(
+          sql`lower(${schema.rentals.code}) LIKE ${term}`,
+          sql`replace(lower(${schema.rentals.code}), '-', '') LIKE ${'%' + term.replace(/[-%]/g, '') + '%'}`,
+          // Mã chuyến Mioto
+          sql`lower(${schema.rentals.channelRef}) LIKE ${term}`,
+        ),
+      )
       .orderBy(sql`${schema.rentals.scheduledStart} DESC`)
       .limit(6)
       .all();

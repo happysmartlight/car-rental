@@ -43,6 +43,10 @@ setSetting('business', {
   position: 'Chủ hộ kinh doanh',
   phone: '0901 234 567',
   address: '123 Nguyễn Văn Linh, Phường Tân Phong, TP. Hồ Chí Minh',
+  idNumber: '079094001234',
+  idIssueDate: '2021-08-12',
+  idIssuePlace: 'Cục Cảnh sát QLHC về TTXH',
+  permanentAddress: '45 Trần Hưng Đạo, Phường Cầu Ông Lãnh, TP. Hồ Chí Minh',
   signCity: 'TP. Hồ Chí Minh',
   shareNote: 'Giao xe tận nơi nội thành TP.HCM\nNhận đặt xe 24/7 qua Zalo',
   bankBin: '970436',
@@ -57,7 +61,7 @@ const cars = [
   { plate: '51H-678.90', make: 'Mitsubishi', model: 'Xpander AT', year: 2022, color: 'Bạc', seats: 7, priceDay: 1000000, priceWeekendDay: 1200000, priceMonth: 20000000, odo: 48000, insuranceTndsExpiry: '2026-10-12' },
   { plate: '51L-246.80', make: 'Kia', model: 'Seltos Premium', year: 2024, color: 'Đỏ', seats: 5, priceDay: 1100000, priceWeekendDay: 1300000, odo: 15420 },
   { plate: '51G-135.79', make: 'Hyundai', model: 'Accent AT', year: 2021, color: 'Đen', seats: 5, priceDay: 750000, priceWeekendDay: 850000, priceMonth: 14000000, odo: 66800, nextServiceOdo: 67500 },
-  { plate: '51K-999.88', make: 'VinFast', model: 'VF 6 Plus', year: 2025, color: 'Xanh', seats: 5, priceDay: 1200000, priceWeekendDay: 1400000, priceMonth: 22000000, kmLimitMonth: 4000, odo: 8900, fuel: 'electric' as const, freeCharges: 1, chargeFee: 30000 },
+  { plate: '51K-999.88', make: 'VinFast', model: 'VF 6 Plus', year: 2025, color: 'Xanh', seats: 5, priceDay: 1200000, priceWeekendDay: 1400000, priceMonth: 22000000, kmLimitMonth: 4000, odo: 8900, fuel: 'electric' as const, freeCharges: 1, chargeFee: 40000 },
 ];
 const vehicleIds: number[] = [];
 for (const c of cars) {
@@ -74,6 +78,9 @@ for (const c of cars) {
       overHourFee: Math.round(c.priceDay / 8 / 1000) * 1000,
       depositAmount: 5000000,
       roadFeeExpiry: '2027-06-30',
+      regNumber: `0${String(c.odo).slice(0, 5)}`,
+      regDate: `${c.year}-03-15`,
+      regPlace: 'Phòng CSGT TP. Hồ Chí Minh',
       createdAt: now,
       updatedAt: now,
     })
@@ -128,6 +135,10 @@ for (const [fullName, idNumber, phone, dob, gender] of people) {
   customerIds.push(c.id);
 }
 
+// Nguồn khách cho lượt trực tiếp (xoay vòng, không đụng tới chuỗi ngẫu nhiên bên dưới).
+let nth = 0;
+const SOURCES = ['returning', 'zalo', 'facebook', 'referral', 'returning', 'google'] as const;
+const nextSource = () => SOURCES[nth++ % SOURCES.length];
 const base = { pickupMethod: 'at_shop' as const, pickupLocation: null, returnLocation: null, deliveryFee: 0, discount: 0, discountNote: null, driverIds: [], notes: null, collaterals: [], allowConflict: true, allowBlacklisted: true };
 const ho = (t: number, odo: number, vehicleId = 0) => ({ at: t, odo, fuelLevel: 100, checklist: {}, photos: [], damages: [], accessories: vehicleId ? handoverAccessoryTemplate(vehicleId) : [], notes: null, signatureFileId: null });
 
@@ -148,7 +159,7 @@ cars.forEach((car, ci) => {
     const days = between(1, 3);
     const end = start + days * DAY_MS;
     if (end > histEnd) break;
-    const r = createRental({ ...base, customerId: regulars[between(0, regulars.length - 1)], vehicleId: vid, scheduledStart: start, scheduledEnd: end, depositRequired: 5000000, payments: [{ purpose: 'deposit', method: 'transfer', amount: 5000000 }] }, admin.id);
+    const r = createRental({ ...base, customerId: regulars[between(0, regulars.length - 1)], vehicleId: vid, scheduledStart: start, scheduledEnd: end, depositRequired: 5000000, payments: [{ purpose: 'deposit', method: 'transfer', amount: 5000000 }], source: nextSource() }, admin.id);
     const total = rentalMoney(r.id).totalCharges;
     pickup(r.id, { ...ho(start + 0.2 * HOUR_MS, odo, vid), payments: [{ purpose: 'rent', method: rnd() < 0.6 ? 'transfer' : 'cash', amount: total }], collaterals: [] }, admin.id);
     odo = Math.min(odo + between(120, 300) * days, car.odo - 100);
@@ -184,6 +195,13 @@ createRental({ ...base, customerId: customerIds[4], vehicleId: vehicleIds[0], sc
 createRental({ ...base, customerId: customerIds[6], vehicleId: vehicleIds[4], scheduledStart: at(4, 7), scheduledEnd: at(7, 19), depositRequired: 5000000, payments: [] }, admin.id);
 const rc = createRental({ ...base, customerId: customerIds[7], vehicleId: vehicleIds[4], scheduledStart: at(-5, 8), scheduledEnd: at(-4, 8), depositRequired: 0, payments: [] }, admin.id);
 cancelRental(rc.id, { reason: 'Khách đổi lịch', keep: 0, refund: null }, admin.id);
+
+// Qua Mioto: chuyến đã xong chờ Mioto chuyển tiền + chuyến sắp giao (khách trả trước 40% qua app)
+const m1 = createRental({ ...base, customerId: customerIds[5], vehicleId: vehicleIds[2], scheduledStart: at(-12, 9), scheduledEnd: at(-10, 9), depositRequired: 5000000, payments: [], channel: 'mioto', channelRef: 'MI7Q4Z', channelPrice: 2600000, channelPrepaid: 1040000 }, admin.id);
+pickup(m1.id, { ...ho(at(-12, 9.2), 15450, vehicleIds[2]), payments: [{ purpose: 'rent', method: 'transfer', amount: 1560000 }, { purpose: 'deposit', method: 'cash', amount: 5000000 }], collaterals: [] }, admin.id);
+returnVehicle(m1.id, { ...ho(at(-10, 8.8), 15850, vehicleIds[2]), charges: [] }, admin.id);
+settle(m1.id, { collect: null, refundRent: null, offset: 0, refundDeposit: { amount: 3000000, method: 'cash' }, fineHoldDays: 15, returnCollaterals: true, note: null }, admin.id);
+createRental({ ...base, customerId: customerIds[0], vehicleId: vehicleIds[3], scheduledStart: at(5, 9), scheduledEnd: at(8, 9), depositRequired: 5000000, payments: [], channel: 'mioto', channelRef: 'MI9X2K', channelPrice: 2400000, channelPrepaid: 960000 }, admin.id);
 
 // Xe vào gara
 db.insert(schema.vehicleBlocks).values({ vehicleId: vehicleIds[4], kind: 'maintenance', startAt: at(-1, 9), endAt: at(1, 17), location: 'VinFast Thảo Điền', notes: 'Bảo dưỡng 10.000 km', createdBy: admin.id, createdAt: now }).run();

@@ -10,6 +10,7 @@ import { closeDb, openDb } from './db/index.js';
 import { loadSession } from './lib/auth.js';
 import { isHubRequest } from './lib/hub.js';
 import { HttpError, sendError } from './lib/http.js';
+import { stripAdminOnly } from './lib/redact.js';
 import { accessoryRoutes } from './routes/accessories.js';
 import { authRoutes } from './routes/auth.js';
 import { cashflowRoutes } from './routes/cashflow.js';
@@ -53,6 +54,9 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
       return reply.status(401).send({ error: 'Chưa đăng nhập', code: 'unauthenticated' });
     }
   });
+
+  // Phí sàn (Mioto) chỉ quản trị thấy — lọc khỏi mọi phản hồi cho nhân viên.
+  app.addHook('preSerialization', async (req, _reply, payload) => (req.user && req.user.role !== 'admin' ? stripAdminOnly(payload) : payload));
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) return sendError(reply, err);

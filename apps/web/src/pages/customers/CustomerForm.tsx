@@ -337,6 +337,9 @@ export function CustomerForm({
           <Field label="Ngày cấp">
             <DateInput value={f.licenseIssueDate} onChange={(v) => set('licenseIssueDate', v)} />
           </Field>
+          <Field label="Nơi cấp" hint="In vào hợp đồng Mioto">
+            <Input {...text('licenseIssuePlace')} placeholder="Sở GTVT …" />
+          </Field>
           <Field label="Có giá trị đến">
             {noExpiry ? <Input value="Không thời hạn" disabled /> : <DateInput value={f.licenseExpiry} onChange={(v) => set('licenseExpiry', v)} />}
             <Checkbox className="mt-2" checked={noExpiry} onChange={setNoExpiry} label="Không thời hạn" />

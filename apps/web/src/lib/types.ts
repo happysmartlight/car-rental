@@ -23,10 +23,10 @@ import type {
   VehicleBlock,
 } from '@api/db/schema';
 import type { CashCategory, Period } from '@shared/cashflow';
-import type { MonthPeriod, MoneySummary, PaymentDirection } from '@shared/money';
+import type { ChannelMoney, MonthPeriod, MoneySummary, PaymentDirection } from '@shared/money';
 import type { Quote } from '@shared/pricing';
 import type { MaintenancePreset, MaintenanceStatus } from '@shared/maintenance';
-import type { AccessoryCategory, PaymentMethod, RentalStatus, Role } from '@shared/constants';
+import type { AccessoryCategory, PaymentMethod, RentalChannel, RentalSource, RentalStatus, Role } from '@shared/constants';
 
 export type { AccessoryCatalogItem, CashEntry, RecurringCost, HandoverAccessory, VehicleAccessory, Charge, Collateral, ContractTemplate, Customer, DocumentRow, Handover, Payment, Rental, RentalExtension, RentalSegment, TrafficFine, Vehicle, VehicleBlock, MoneySummary, Quote };
 
@@ -116,6 +116,8 @@ export interface RentalDetail {
   money: MoneySummary;
   /** Thuê tháng: lịch từng tháng (đã trả bao nhiêu); null = không phải thuê tháng. */
   monthly: MonthPeriod[] | null;
+  /** Lượt qua Mioto: tiền trả trước qua app, phí sàn, app còn phải chuyển về. Chỉ quản trị nhận được. */
+  channelMoney?: ChannelMoney | null;
 }
 
 export type MaintenanceItemView = MaintenanceItem & { status: MaintenanceStatus };
@@ -161,6 +163,8 @@ export interface Precheck {
   conflicts: Conflict[];
   warnings: Warning[];
   depositSuggested: number;
+  /** Số lượt (không hủy) khách này đã có — gợi ý nguồn "Khách quen". */
+  customerRentals: number;
 }
 
 export interface Alert {
@@ -241,6 +245,9 @@ export interface BusinessSettings {
   phone: string;
   email: string;
   address: string;
+  /** Thường trú / tạm trú của người đại diện — hợp đồng Mioto. */
+  permanentAddress: string;
+  currentAddress: string;
   taxCode: string;
   bankBin: string;
   bankName: string;
@@ -262,6 +269,8 @@ export interface RulesSettings {
   minDriverAge: number;
   checklist: string[];
   deliveryFeeDefault: number;
+  /** Phí sàn Mioto mặc định — máy chủ chỉ gửi cho quản trị. */
+  miotoFeePct?: number;
   cancelNoticeHours: number;
   cancelForfeitPct: number;
 }
@@ -381,6 +390,14 @@ export interface CashflowReport {
   ledger: LedgerRow[];
   allocation: { sharedExpense: number; fleet: number };
   vehicleOptions: { id: number; plate: string; make: string; model: string; archived: boolean }[];
+  /** So sánh kênh cho các lượt nhận xe trong kỳ. */
+  channels: {
+    rows: { channel: RentalChannel; rentals: number; days: number; revenue: number; fee: number; net: number }[];
+    sources: { source: RentalSource | null; rentals: number; revenue: number }[];
+    returning: number;
+  };
+  /** Lượt qua Mioto chưa nhận tiền app chuyển về. */
+  channelOwed: (ChannelMoney & { id: number; code: string; vehicleId: number; channel: RentalChannel; channelRef: string | null; status: RentalStatus; start: number; end: number; plate: string; customerName: string })[];
 }
 
 export type RecurringRow = RecurringCost & { plate: string | null };

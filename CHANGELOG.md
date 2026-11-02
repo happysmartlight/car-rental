@@ -3,6 +3,20 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.5.0] - 2026-11-02
+
+### Mới
+- **Cho thuê qua Mioto**: lúc đặt xe chọn *Khách trực tiếp* hoặc *Đặt qua Mioto*. Lượt Mioto in đúng **hợp đồng và biên bản bàn giao của Mioto**, điền sẵn chủ xe, khách, xe; mã chuyến Mioto làm số hợp đồng; giá theo app, ghi tiền khách trả trước qua app (40% / 100%).
+- **Phí sàn Mioto** (mặc định 15%, chỉ quản lý thấy, không in): tự trừ vào Thu chi; thẻ **Mioto chưa chuyển tiền** để đánh dấu đã nhận một hay nhiều chuyến.
+- **Thu chi → Theo kênh đặt xe**: so sánh Mioto với khách trực tiếp (thực nhận/ngày xe), khách biết tới qua đâu, bao nhiêu lượt là khách quay lại.
+- **Sửa giá thuê/ngày khi đặt xe và khi gia hạn** (khách trả giá) — chỉ áp cho lượt đó.
+- **Danh bạ khách** khi đặt xe: bấm ▾ cạnh ô tìm khách, lướt A–Z hoặc theo lần thuê gần đây.
+- **Xe điện**: thuê bao nhiêu ngày được sạc miễn phí bấy nhiêu lượt, quá thì phụ thu 40.000đ/lượt; thêm **tiền điện** 800đ/1% pin thiếu khi trả hoặc 400đ/km (mỗi xe chọn sẵn, đổi được lúc nhận xe).
+- Ô mới cho hợp đồng Mioto: giấy đăng ký xe (Sửa xe), nơi cấp GPLX (Khách), thường trú/tạm trú người đại diện (Cài đặt → Cửa hàng).
+
+### Lưu ý
+- Xe điện đang có: vào **Sửa xe** kiểm tra phụ thu mỗi lượt sạc (bản cũ mặc định 30.000đ). Lượt đặt trước bản này vẫn tính sạc theo cách cũ.
+
 ## [0.4.5] - 2026-10-31
 
 ### Mới

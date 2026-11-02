@@ -13,6 +13,7 @@ import { useAuth, useMediaQuery, useSettings } from '@/lib/hooks';
 import type { BusinessSettings, RulesSettings } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
 import { DEFAULT_PICKUP_TIME } from '@shared/booking';
+import { DEFAULT_MIOTO_FEE_PCT } from '@shared/constants';
 import { cancelPolicyText } from '@shared/money';
 import { WEEKDAY_LONG } from '@shared/time';
 import { SettingsAccessories } from './SettingsAccessories';
@@ -157,6 +158,12 @@ function BusinessSection() {
           </Field>
           <Field label="Địa chỉ" className="sm:col-span-2">
             <Input {...text('address')} />
+          </Field>
+          <Field label="Thường trú người đại diện" hint="Hợp đồng Mioto ghi Bên A là cá nhân">
+            <Input {...text('permanentAddress')} />
+          </Field>
+          <Field label="Tạm trú người đại diện" hint="Để trống = địa chỉ cửa hàng">
+            <Input {...text('currentAddress')} />
           </Field>
           <Field label="Điện thoại">
             <Input {...text('phone')} type="tel" />
@@ -330,6 +337,15 @@ function RulesSection() {
           </Field>
           <Field label="Thời gian giữ">
             <NumberInput value={f.fineHoldDays} onChange={(v) => setF({ ...f, fineHoldDays: v ?? 0 })} suffix="ngày" />
+          </Field>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Cho thuê qua Mioto" description="Phí sàn chỉ quản lý thấy, không in vào hợp đồng. App ghi phí vào Thu chi để tính lãi thật; khi Mioto chuyển tiền về thì phí theo số thật." />
+        <CardBody className="grid gap-4 sm:grid-cols-2">
+          <Field label="Phí sàn mặc định" hint="Áp cho lượt đặt mới; sửa được từng lượt">
+            <NumberInput value={f.miotoFeePct ?? DEFAULT_MIOTO_FEE_PCT} onChange={(v) => setF({ ...f, miotoFeePct: Math.min(100, v ?? 0) })} suffix="%" />
           </Field>
         </CardBody>
       </Card>

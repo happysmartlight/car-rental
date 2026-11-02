@@ -7,6 +7,8 @@ import {
   DEFAULT_PRICING_RULES,
   chargeDays,
   chargingCharge,
+  energyCharge,
+  type ChargingPolicy,
   chargingText,
   freeChargesFor,
   overKmCharge,
@@ -328,11 +330,14 @@ describe('tính giá', () => {
 });
 
 describe('sạc pin xe điện', () => {
-  const policy = { baseFree: 1, fee: 30000 };
-  it('thuê đến 2 ngày được lượt cơ bản, từ ngày thứ 3 mỗi ngày thêm 1 lượt', () => {
-    expect([1, 2, 3, 4, 5, 7].map((d) => freeChargesFor(policy, d))).toEqual([1, 1, 2, 3, 4, 6]);
-    expect(freeChargesFor({ baseFree: 2, fee: 0 }, 4)).toBe(4);
-    expect(freeChargesFor({ baseFree: 0, fee: 30000 }, 5)).toBe(0);
+  const policy = (o: Partial<ChargingPolicy> = {}): ChargingPolicy => ({ baseFree: 1, perDay: true, fee: 40000, pctFee: 800, kmFee: 400, method: 'pct', ...o });
+  /** Lượt đặt trước khi đổi quy tắc (bảng giá không có chargePerDay). */
+  const old = policy({ perDay: false, fee: 30000, pctFee: 0, kmFee: 0, method: null });
+  it('thuê bao nhiêu ngày được sạc miễn phí bấy nhiêu lượt; lượt cũ giữ quy tắc cũ', () => {
+    expect([1, 2, 3, 5].map((d) => freeChargesFor(policy(), d))).toEqual([1, 2, 3, 5]);
+    expect(freeChargesFor(policy({ baseFree: 2 }), 3)).toBe(6);
+    expect(freeChargesFor(policy({ baseFree: 0 }), 5)).toBe(0);
+    expect([1, 2, 3, 4, 5, 7].map((d) => freeChargesFor(old, d))).toEqual([1, 1, 2, 3, 4, 6]);
   });
   it('số ngày thuê: khối 24 giờ, phần lẻ quá ân hạn tính thêm 1 ngày', () => {
     const s = at('2026-10-05T08:00');
@@ -342,29 +347,38 @@ describe('sạc pin xe điện', () => {
     expect(chargeDays(s, at('2026-10-07T11:00'), 60)).toBe(3);
   });
   it('chỉ tính lượt vượt số lượt miễn phí của chuyến', () => {
-    expect(chargingCharge(1, policy, 2)).toBeNull();
-    expect(chargingCharge(2, policy, 2)).toMatchObject({ kind: 'fuel', amount: 30000, description: 'Sạc pin 2 lượt (chuyến 2 ngày miễn phí 1): 1 × 30.000' });
-    expect(chargingCharge(4, policy, 5)).toBeNull();
-    expect(chargingCharge(6, policy, 5)?.amount).toBe(60000);
-    expect(chargingCharge(1, { baseFree: 0, fee: 30000 }, 5)?.amount).toBe(30000);
-    expect(chargingCharge(9, { baseFree: 3, fee: 0 }, 2)).toBeNull();
+    expect(chargingCharge(2, policy(), 2)).toBeNull();
+    expect(chargingCharge(4, policy(), 3)).toMatchObject({ kind: 'fuel', amount: 40000, description: 'Sạc pin 4 lượt (chuyến 3 ngày miễn phí 3): 1 × 40.000' });
+    expect(chargingCharge(2, old, 2)?.amount).toBe(30000);
+    expect(chargingCharge(1, policy({ baseFree: 0 }), 5)?.amount).toBe(40000);
+    expect(chargingCharge(9, policy({ fee: 0 }), 2)).toBeNull();
     expect(chargingCharge(9, null, 2)).toBeNull();
   });
-  it('câu chữ cho bảng giá / hợp đồng', () => {
-    expect(chargingText(policy)).toBe('thuê đến 2 ngày miễn phí 1 lượt sạc, từ ngày thứ 3 mỗi ngày thêm 1 lượt (3 ngày: 2 lượt, 4 ngày: 3 lượt…); sạc vượt tính 30.000đ/lượt cắm-rút sạc');
-    expect(chargingText({ baseFree: 0, fee: 30000 })).toBe('30.000đ/lượt cắm-rút sạc');
-    expect(tripChargingText(policy, 5)).toBe('chuyến 5 ngày miễn phí 4 lượt sạc, từ lượt thứ 5 tính 30.000đ/lượt cắm-rút sạc');
-    expect(tripChargingText({ baseFree: 0, fee: 30000 }, 5)).toBe('30.000đ/lượt cắm-rút sạc');
+  it('tiền điện: theo % pin thiếu khi trả, hoặc theo km đi', () => {
+    const t = { pickupPct: 80, returnPct: 45, km: 210 };
+    expect(energyCharge(policy(), 'pct', t)).toEqual({ kind: 'fuel', description: 'Tiền điện: pin 80% → 45%, thiếu 35% × 800', amount: 28000 });
+    expect(energyCharge(policy(), 'km', t)).toEqual({ kind: 'fuel', description: 'Tiền điện: 210 km × 400', amount: 84000 });
+    expect(energyCharge(policy(), 'pct', { ...t, returnPct: 90 })).toBeNull();
+    expect(energyCharge(policy(), null, t)).toBeNull();
+    expect(energyCharge(old, 'pct', t)).toBeNull();
   });
-  it('chỉ xe điện; lượt thuê dùng giá đã chốt, lượt cũ lấy theo xe', () => {
+  it('câu chữ cho bảng giá / hợp đồng', () => {
+    expect(chargingText(policy())).toBe('mỗi ngày thuê được sạc miễn phí 1 lượt, quá số lượt phụ thu 40.000đ/lượt cắm sạc; tiền điện 800đ cho mỗi 1% pin thấp hơn lúc nhận xe');
+    expect(chargingText(policy({ baseFree: 0, method: 'km' }))).toBe('40.000đ/lượt cắm sạc; tiền điện 400đ/km di chuyển (theo ODO)');
+    expect(tripChargingText(policy(), 3)).toBe('chuyến 3 ngày được sạc miễn phí 3 lượt, từ lượt thứ 4 phụ thu 40.000đ/lượt cắm sạc; tiền điện 800đ cho mỗi 1% pin thấp hơn lúc nhận xe');
+    expect(chargingText(old)).toBe('thuê đến 2 ngày miễn phí 1 lượt sạc, từ ngày thứ 3 mỗi ngày thêm 1 lượt (3 ngày: 2 lượt, 4 ngày: 3 lượt…); sạc vượt tính 30.000đ/lượt cắm sạc');
+    expect(tripChargingText(old, 5)).toBe('chuyến 5 ngày được sạc miễn phí 4 lượt, từ lượt thứ 5 phụ thu 30.000đ/lượt cắm sạc');
+  });
+  it('chỉ xe điện; tiền điện chưa chỉnh thì theo mặc định; lượt thuê dùng giá đã chốt, lượt cũ lấy theo xe', () => {
     expect(vehicleChargingPolicy({ fuel: 'gasoline', freeCharges: 2, chargeFee: 30000 })).toBeNull();
-    expect(vehicleChargingPolicy({ fuel: 'electric', freeCharges: null, chargeFee: null })).toBeNull();
-    expect(vehicleChargingPolicy({ fuel: 'electric', freeCharges: 0, chargeFee: 0 })).toBeNull();
-    const ev = { fuel: 'electric' as const, freeCharges: 2, chargeFee: 40000 };
+    expect(vehicleChargingPolicy({ fuel: 'electric', freeCharges: 1, chargeFee: 40000 })).toEqual(policy());
+    expect(vehicleChargingPolicy({ fuel: 'electric', freeCharges: 0, chargeFee: 0, energyFeePct: 0, energyFeeKm: 0 })).toBeNull();
+    const ev = { fuel: 'electric' as const, freeCharges: 2, chargeFee: 40000, energyMethod: 'km' as const };
     const base = { priceDay: 1, priceHour: 0, priceWeekendDay: null, kmLimitDay: 0, overKmFee: 0, overHourFee: 0 };
-    expect(rentalChargingPolicy({ ...base, freeCharges: 1, chargeFee: 30000 }, ev)).toEqual(policy);
+    expect(rentalChargingPolicy({ ...base, freeCharges: 1, chargeFee: 30000 }, ev)).toEqual(old);
     expect(rentalChargingPolicy({ ...base, freeCharges: null, chargeFee: null }, ev)).toBeNull();
-    expect(rentalChargingPolicy(base, ev)).toEqual({ baseFree: 2, fee: 40000 });
+    expect(rentalChargingPolicy(base, ev)).toEqual(policy({ baseFree: 2, method: 'km' }));
+    expect(rentalChargingPolicy({ ...base, freeCharges: 1, chargeFee: 40000, chargePerDay: true, energyFeePct: 800, energyFeeKm: 400, energyMethod: 'pct' }, ev)).toEqual(policy());
   });
 });
 
@@ -648,7 +662,7 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
     expect(text).toContain('• Hiện trạng có sẵn: Cản trước: trầy 5cm');
     expect(text).toContain('• Còn phải trả: 2.000.000đ');
     expect(text).toContain('trả trễ tính 150.000đ/giờ');
-    expect(text).toContain('chuyến 3 ngày miễn phí 2 lượt sạc');
+    expect(text).toContain('chuyến 3 ngày được sạc miễn phí 2 lượt');
     expect(text).toContain('💳 Chuyển khoản 2.000.000đ (còn phải trả): Vietcombank 0123456789 — NGUYEN VAN B, nội dung: HD-2026-0001');
     expect(doc.photos).toEqual(['f1']);
   });

@@ -13,10 +13,23 @@ import { Checkbox, DateTimeInput, Field, Input, MoneyInput, NumberInput, Segment
 import { Badge, Notice } from '@/components/ui/misc';
 import { api } from '@/lib/api';
 import { shareText } from '@/lib/shareCard';
-import { useAction, useSettings } from '@/lib/hooks';
+import { useAction, useAuth, useSettings } from '@/lib/hooks';
 import type { Customer, Precheck, RentalDetail, RentalFineCheck, VehicleWithStatus } from '@/lib/types';
+import type { VehiclePricing } from '@shared/pricing';
 import { cn, errorMessage } from '@/lib/utils';
-import { CHARGE_KINDS, CHARGE_KIND_LABEL, COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, FINE_DONE_STATUSES, type ChargeKind, type CollateralKind } from '@shared/constants';
+import {
+  CHARGE_KINDS,
+  CHARGE_KIND_LABEL,
+  COLLATERAL_KINDS,
+  COLLATERAL_KIND_LABEL,
+  FINE_DONE_STATUSES,
+  RENTAL_SOURCES,
+  RENTAL_SOURCE_LABEL,
+  type ChargeKind,
+  type CollateralKind,
+  type RentalChannel,
+  type RentalSource,
+} from '@shared/constants';
 import { cancelForfeit, cancelMessage, cancelPolicyText, monthsNote, planCancellation, planSettlement, rentalFineHold } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime, fmtDuration, fmtTime } from '@shared/time';
@@ -37,9 +50,15 @@ const PRESETS: Record<PayPreset, { label: string; direction: 'in' | 'out'; purpo
 export function PaymentDialog({ d, open, onOpenChange, preset = 'rent_in' }: DialogProps & { preset?: PayPreset }) {
   const [kind, setKind] = useState<PayPreset>(preset);
   const [amount, setAmount] = useState<number | null>(null);
-  const [method, setMethod] = useState<'cash' | 'transfer'>('transfer');
+  const [method, setMethod] = useState<'cash' | 'transfer' | 'mioto'>('transfer');
   const [at, setAt] = useState<number | null>(Date.now());
   const [note, setNote] = useState('');
+  // Lượt qua Mioto: tiền thuê khách trả thêm qua app (gia hạn trên app…) ghi "Qua app Mioto".
+  const canApp = d.rental.channel !== 'direct' && (kind === 'rent_in' || kind === 'rent_out') && d.rental.channelPayout == null;
+  const methods = [...(canApp ? [{ value: 'mioto' as const, label: 'Qua app' }] : []), { value: 'transfer' as const, label: 'Chuyển khoản' }, { value: 'cash' as const, label: 'Tiền mặt' }];
+  useEffect(() => {
+    if (!canApp && method === 'mioto') setMethod('transfer');
+  }, [canApp, method]);
   // Thuê tháng: thu theo số tháng, tính từ tháng đầu tiên chưa trả đủ.
   const unpaid = useMemo(() => (d.monthly ?? []).filter((p) => p.paid < p.amount), [d]);
   const byMonth = kind === 'rent_in' && unpaid.length > 0;
@@ -99,7 +118,7 @@ export function PaymentDialog({ d, open, onOpenChange, preset = 'rent_in' }: Dia
             <MoneyInput value={amount} onChange={setAmount} autoFocus />
           </Field>
           <Field label="Hình thức">
-            <Segmented value={method} onChange={setMethod} className="flex w-full" options={[{ value: 'transfer', label: 'Chuyển khoản' }, { value: 'cash', label: 'Tiền mặt' }]} />
+            <Segmented value={method} onChange={setMethod} className="flex w-full" options={methods} />
           </Field>
           <Field label="Thời điểm">
             <DateTimeInput value={at} onChange={setAt} />
@@ -109,6 +128,58 @@ export function PaymentDialog({ d, open, onOpenChange, preset = 'rent_in' }: Dia
           </Field>
         </div>
         {p.direction === 'in' && method === 'transfer' && !!amount && <VietQr amount={amount} note={d.rental.code} />}
+      </div>
+    </Dialog>
+  );
+}
+
+// ── Mioto chuyển tiền về (chỉ quản trị) ──────────────────────────────────────
+
+export function ChannelPayoutDialog({ d, open, onOpenChange }: DialogProps) {
+  const cm = d.channelMoney;
+  const [amount, setAmount] = useState<number | null>(null);
+  const [at, setAt] = useState<number | null>(Date.now());
+  const estimate = cm ? Math.max(0, cm.prepaid - cm.fee) : 0;
+  useEffect(() => {
+    if (!open) return;
+    setAmount(estimate);
+    setAt(Date.now());
+  }, [open, estimate]);
+  const save = useAction(() => api.post(`/api/rentals/${d.rental.id}/channel-payout`, { amount, at }), {
+    invalidate: [...inv(d.rental.id).invalidate, ['cashflow']],
+    success: 'Đã ghi nhận tiền Mioto chuyển về',
+    onSuccess: () => onOpenChange(false),
+  });
+  if (!cm) return null;
+  const fee = cm.prepaid - (amount ?? 0);
+  const price = d.rental.channelPrice ?? 0;
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Mioto đã chuyển tiền"
+      description="Nhập đúng số tiền Mioto chuyển cho chuyến này (xem sao kê / lịch sử giao dịch trên app)."
+      footer={
+        <Button onClick={() => save.mutate()} loading={save.isPending} disabled={amount == null || fee < 0}>
+          Lưu
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Mioto chuyển về" hint={`Ước tính theo ${d.rental.channelFeePct ?? '—'}%: ${fmtVnd(estimate)}`} error={fee < 0 ? `Không được lớn hơn tiền khách trả qua app (${fmtVnd(cm.prepaid)})` : null}>
+            <MoneyInput value={amount} onChange={setAmount} autoFocus />
+          </Field>
+          <Field label="Ngày nhận">
+            <DateTimeInput value={at} onChange={setAt} />
+          </Field>
+        </div>
+        {fee >= 0 && (
+          <Notice tone="blue">
+            Khách trả qua app {fmtVnd(cm.prepaid)} − Mioto chuyển về {fmtVnd(amount ?? 0)} = phí sàn thực tế <b>{fmtVnd(fee)}</b>
+            {price > 0 && ` (${((fee / price) * 100).toFixed(1).replace('.', ',')}% tiền thuê trên app)`}. Thu chi ghi phí theo số này.
+          </Notice>
+        )}
       </div>
     </Dialog>
   );
@@ -434,6 +505,20 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
   const [pickupLocation, setPickupLocation] = useState(r.pickupLocation ?? '');
   const [returnLocation, setReturnLocation] = useState(r.returnLocation ?? '');
   const [notes, setNotes] = useState(r.notes ?? '');
+  const { isAdmin } = useAuth();
+  const [channel, setChannel] = useState<RentalChannel>(r.channel);
+  const [channelRef, setChannelRef] = useState(r.channelRef ?? '');
+  const [appPrice, setAppPrice] = useState<number | null>(r.channelPrice);
+  const [appDayPrice, setAppDayPrice] = useState<number | null>(r.channelDayPrice);
+  const [feePct, setFeePct] = useState<number | null>(r.channelFeePct ?? null);
+  const [source, setSource] = useState<RentalSource | null>(r.source);
+  // Giá thuê/ngày đã chốt của lượt (lượt trực tiếp) — khách trả giá thêm khi gia hạn thì sửa ở đây.
+  const viaApp = channel !== 'direct';
+  const deal = JSON.parse(r.pricing) as VehiclePricing;
+  const [priceDay, setPriceDay] = useState<number | null>(deal.priceDay);
+  const [priceWeekend, setPriceWeekend] = useState<number | null>(deal.priceWeekendDay);
+  const priceChanged = !viaApp && ((priceDay ?? deal.priceDay) !== deal.priceDay || (priceWeekend ?? deal.priceWeekendDay) !== deal.priceWeekendDay);
+  const priceBody = priceChanged ? { priceDay, priceWeekendDay: priceWeekend } : {};
   // Xe đang trong tay khách: cho sửa ODO lúc giao khi nhân viên nhập nhầm.
   const pickupHo = r.status === 'active' ? d.handovers.find((h) => h.kind === 'pickup') : undefined;
   const [pickupOdo, setPickupOdo] = useState<number | null>(pickupHo?.odo ?? null);
@@ -451,6 +536,14 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
     setPickupLocation(r.pickupLocation ?? '');
     setReturnLocation(r.returnLocation ?? '');
     setNotes(r.notes ?? '');
+    setChannel(r.channel);
+    setChannelRef(r.channelRef ?? '');
+    setAppPrice(r.channelPrice);
+    setAppDayPrice(r.channelDayPrice);
+    setFeePct(r.channelFeePct ?? null);
+    setSource(r.source);
+    setPriceDay(deal.priceDay);
+    setPriceWeekend(deal.priceWeekendDay);
     setPickupOdo(pickupHo?.odo ?? null);
     resetAcc();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -459,10 +552,10 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
   const holdError = hasDeposit && (hold ?? 0) > (deposit ?? 0) ? 'Không được lớn hơn tiền cọc' : null;
   const { data: vehicles } = useQuery({ queryKey: ['vehicles'], queryFn: () => api.get<VehicleWithStatus[]>('/api/vehicles'), enabled: open && booked });
   const odoChanged = !!pickupHo && pickupOdo != null && pickupOdo !== pickupHo.odo;
-  const valid = start != null && end != null && end > start && (!pickupHo || pickupOdo != null);
+  const valid = start != null && end != null && end > start && (!pickupHo || pickupOdo != null) && (!viaApp || (appPrice ?? 0) > 0);
   const { data: pre } = useQuery({
-    queryKey: ['precheck', 'edit', r.id, vehicleId, start, end],
-    queryFn: () => api.post<Precheck>('/api/rentals/precheck', { vehicleId, customerId: r.customerId, scheduledStart: start, scheduledEnd: end, excludeRentalId: r.id }),
+    queryKey: ['precheck', 'edit', r.id, vehicleId, start, end, priceDay, priceWeekend],
+    queryFn: () => api.post<Precheck>('/api/rentals/precheck', { vehicleId, customerId: r.customerId, scheduledStart: start, scheduledEnd: end, excludeRentalId: r.id, ...priceBody }),
     enabled: open && valid && ['booked', 'active'].includes(r.status),
   });
   const save = useAction(
@@ -478,6 +571,10 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
         returnLocation: returnLocation || null,
         notes: notes || null,
         ...(odoChanged ? { pickupOdo } : {}),
+        ...(booked ? { channel } : {}),
+        ...(viaApp
+          ? { channelRef: channelRef.trim() || null, channelPrice: appPrice, channelDayPrice: appDayPrice, ...(isAdmin && feePct != null && feePct !== r.channelFeePct ? { channelFeePct: feePct } : {}) }
+          : { source, ...priceBody }),
         allowConflict,
       }),
     {
@@ -533,12 +630,74 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
             ))}
           </div>
         )}
-        {pre && (end !== r.scheduledEnd || start !== r.scheduledStart || vehicleId !== r.vehicleId) && (
-          <Notice tone="blue">
-            Tiền thuê tính lại: {fmtVnd(oldRental)} → <b>{fmtVnd(pre.quote.total)}</b> ({pre.quote.lines.map((l) => l.description).join(', ')})
-            {pre.quote.mode === 'month' && ' — tính theo tháng'}
-          </Notice>
+        {booked && (
+          <Segmented
+            className="flex w-full"
+            value={channel}
+            onChange={setChannel}
+            options={[
+              { value: 'direct', label: 'Khách trực tiếp' },
+              { value: 'mioto', label: 'Đặt qua Mioto' },
+            ]}
+          />
         )}
+        {viaApp ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Tiền thuê trên app Mioto" required hint={r.status === 'active' ? 'Gia hạn trên app: nhập tổng tiền mới' : 'Giá trị hợp đồng'}>
+              <MoneyInput value={appPrice} onChange={setAppPrice} />
+            </Field>
+            <Field label="Đơn giá/ngày trên app" hint="Để trống = chia đều theo số ngày">
+              <MoneyInput value={appDayPrice} onChange={setAppDayPrice} />
+            </Field>
+            <Field label="Mã chuyến Mioto">
+              <Input value={channelRef} onChange={(e) => setChannelRef(e.target.value.toUpperCase())} autoCapitalize="characters" />
+            </Field>
+            {isAdmin && (
+              <Field label="Phí Mioto (%)" hint={r.channelPayout != null ? 'Đã nhận tiền Mioto chuyển về — phí theo số thật' : 'Chỉ quản lý thấy, không in'}>
+                <NumberInput value={feePct ?? settings?.rules.miotoFeePct ?? null} onChange={setFeePct} suffix="%" disabled={r.channelPayout != null} />
+              </Field>
+            )}
+          </div>
+        ) : (
+          <>
+            {['booked', 'active'].includes(r.status) && vehicleId === r.vehicleId && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={deal.priceWeekendDay && deal.priceWeekendDay !== deal.priceDay ? 'Giá ngày thường' : 'Giá thuê/ngày'} hint="Giá đã chốt của lượt này — sửa nếu khách trả giá">
+                  <MoneyInput value={priceDay} onChange={setPriceDay} />
+                </Field>
+                {!!deal.priceWeekendDay && deal.priceWeekendDay !== deal.priceDay && (
+                  <Field label="Giá ngày cuối tuần">
+                    <MoneyInput value={priceWeekend} onChange={setPriceWeekend} />
+                  </Field>
+                )}
+              </div>
+            )}
+            <Field label="Khách biết tới qua">
+              <div className="flex flex-wrap gap-1.5">
+                {RENTAL_SOURCES.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setSource(source === s ? null : s)}
+                    className={cn('rounded-full border px-3 py-1 text-xs font-medium', source === s ? 'border-brand bg-brand-soft text-brand' : 'border-border text-muted hover:bg-surface-2')}
+                  >
+                    {RENTAL_SOURCE_LABEL[s]}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </>
+        )}
+        {viaApp
+          ? end !== r.scheduledEnd &&
+            appPrice === r.channelPrice && <Notice tone="amber">Đổi giờ trả trên app Mioto thì nhập tổng tiền thuê mới trên app — tiền thuê lượt Mioto không tính theo bảng giá xe.</Notice>
+          : pre &&
+            (end !== r.scheduledEnd || start !== r.scheduledStart || vehicleId !== r.vehicleId || priceChanged) && (
+              <Notice tone="blue">
+                Tiền thuê tính lại: {fmtVnd(oldRental)} → <b>{fmtVnd(pre.quote.total)}</b> ({pre.quote.lines.map((l) => l.description).join(', ')})
+                {pre.quote.mode === 'month' && ' — tính theo tháng'}
+              </Notice>
+            )}
         {pre?.conflicts.map((c) => (
           <Notice key={c.id} tone="red">
             Trùng lịch: {c.label}

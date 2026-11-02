@@ -1,6 +1,6 @@
 # Việc còn treo
 
-Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 2026-10-14.
+Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 2026-11-02.
 
 ## Câu hỏi chưa trả lời (từ PLAN mục 10)
 
@@ -39,7 +39,10 @@ Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 
 - [x] Thu lại tiền phạt nguội sau khi đã đóng lượt: gửi khách + ghi tiền vào sổ lượt thuê (v0.4.1).
 - [x] Lưu nháp biên bản giao/nhận xe và form Đặt xe mới trên máy (v0.4.1).
 - [x] Gửi khách phiếu xác nhận đặt xe ngay sau khi tạo lượt (v0.4.1).
-- [ ] Nguồn khách (Zalo, Facebook, Mioto, giới thiệu, khách quen) + báo cáo khách quay lại; nút "Đặt lại như lần trước" và công nợ trên trang khách.
+- [x] Kênh đặt xe Trực tiếp / Mioto: mẫu hợp đồng + biên bản bàn giao của Mioto, phí sàn (chỉ quản lý thấy) ghi vào Thu chi, theo dõi tiền Mioto chuyển về; nguồn khách cho lượt trực tiếp; báo cáo theo kênh + khách quay lại trong Thu chi; giá thuê/ngày thỏa thuận riêng từng lượt; danh bạ khách khi đặt xe.
+- [ ] Kiểm tra bản PDF mẫu Mioto in qua Gotenberg (LibreOffice) trên Pi — biên bản Mioto trang 3 vừa khít, LibreOffice dàn trang lệch một dòng là sang trang 4 (đã thử bằng Word: đủ 3 trang).
+- [ ] Nhắc khóa lịch xe trên app Mioto khi có lượt trực tiếp (tránh hai khách trùng xe) — Mioto không có API, chỉ nhắc được.
+- [ ] Nút "Đặt lại như lần trước" và công nợ trên trang khách.
 - [ ] Quyết toán khi khách chưa trả đủ: ghi nợ ngay trong hộp Quyết toán (hiện hộp luôn ghi khách trả đủ; tạm thời để lượt ở "Chờ quyết toán" — Việc cần làm sẽ nhắc).
 - [ ] Lưu nháp form Thêm khách (quét CCCD, chụp giấy tờ) — hiện chỉ biên bản giao/nhận và Đặt xe mới có nháp.
 - [ ] Ảnh riêng cho từng phụ kiện (đã có cột `photo_file_id`, chưa có giao diện).

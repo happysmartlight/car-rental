@@ -71,6 +71,20 @@
       "when": 1792235585741,
       "tag": "0009_files_offsite",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793632566696,
+      "tag": "0010_mioto_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793636572518,
+      "tag": "0011_ev_energy_fee",
+      "breakpoints": true
     }
   ]
 }

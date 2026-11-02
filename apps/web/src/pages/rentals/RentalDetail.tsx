@@ -41,16 +41,25 @@ import { api, fileUrl, qs } from '@/lib/api';
 import { useAction, useAuth, useNow, useSettings } from '@/lib/hooks';
 import type { Handover, RentalDetail as Detail } from '@/lib/types';
 import { cn, errorMessage, telLink, zaloLink } from '@/lib/utils';
-import { CHARGE_KIND_LABEL, COLLATERAL_KIND_LABEL, PAYMENT_METHOD_LABEL, PHOTO_SLOTS, TEMPLATE_KIND_LABEL, type TemplateKind } from '@shared/constants';
-import { rentalFineHold } from '@shared/money';
+import {
+  CHARGE_KIND_LABEL,
+  COLLATERAL_KIND_LABEL,
+  PAYMENT_METHOD_LABEL,
+  PHOTO_SLOTS,
+  RENTAL_CHANNEL_LABEL,
+  RENTAL_SOURCE_LABEL,
+  TEMPLATE_KIND_LABEL,
+  type TemplateKind,
+} from '@shared/constants';
+import { channelMoney, rentalFineHold } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { DAY_MS, fmtDate, fmtDateRange, fmtDateTime, fmtDuration } from '@shared/time';
 import type { MonthPeriod } from '@shared/money';
-import { CancelDialog, ChargeDialog, CollateralDialog, DriverDialog, EditRentalDialog, PaymentDialog, ReleaseHoldDialog, ScanDialog, SettleDialog } from './RentalDialogs';
+import { CancelDialog, ChannelPayoutDialog, ChargeDialog, CollateralDialog, DriverDialog, EditRentalDialog, PaymentDialog, ReleaseHoldDialog, ScanDialog, SettleDialog } from './RentalDialogs';
 import { RentalShareDialog, rentalShareStagesOf } from './RentalShare';
 import type { RentalShareStage } from '@shared/rentalShare';
 
-type DialogName = 'pay' | 'charge' | 'settle' | 'hold' | 'edit' | 'cancel' | 'collateral' | 'driver' | 'scan' | 'qr' | 'audit' | 'share' | 'fineShare' | 'fineRecover' | null;
+type DialogName = 'pay' | 'charge' | 'settle' | 'hold' | 'edit' | 'cancel' | 'collateral' | 'driver' | 'scan' | 'qr' | 'audit' | 'share' | 'fineShare' | 'fineRecover' | 'payout' | null;
 
 /** Thuê tháng: đã trả đến tháng mấy, tháng kế tiếp tới hạn chưa, lịch từng tháng. */
 function MonthlyPlan({ periods, now, started }: { periods: MonthPeriod[]; now: number; started: boolean }) {
@@ -201,6 +210,7 @@ export default function RentalDetail() {
   const delDriver = useAction((cid: number) => api.del(`/api/rentals/${id}/drivers/${cid}`), { ...inv });
   const toggleCollateral = useAction(({ cid, returned }: { cid: number; returned: boolean }) => api.patch(`/api/collaterals/${cid}`, { returned }), inv);
   const retryPdf = useAction((docId: number) => api.post(`/api/documents/${docId}/pdf`), { ...inv, success: 'Đã tạo PDF' });
+  const undoPayout = useAction(() => api.post(`/api/rentals/${id}/channel-payout`, { amount: null }), { invalidate: [...inv.invalidate, ['cashflow']], success: 'Đã hoàn tác' });
 
   if (isLoading || !d) return <PageLoader />;
   const r = d.rental;
@@ -218,6 +228,9 @@ export default function RentalDetail() {
   const nextMonth = d.monthly?.find((p) => p.paid < p.amount);
   const canCollect = ['booked', 'active', 'returned'].includes(r.status);
   const lastExt = d.extensions.at(-1);
+  const viaApp = r.channel !== 'direct';
+  const appPrepaid = channelMoney(r, d.payments)?.prepaid ?? 0;
+  const cm = d.channelMoney;
   const openShare = (stage?: RentalShareStage) => {
     setShareStage(stage);
     setDialog('share');
@@ -278,7 +291,7 @@ export default function RentalDetail() {
           {r.code} <RentalStatusBadge status={r.status} overdue={overdue} />
         </span>
       }
-      subtitle={`${d.vehicle.plate} · ${d.customer.fullName}`}
+      subtitle={`${d.vehicle.plate} · ${d.customer.fullName}${viaApp ? ` · qua ${RENTAL_CHANNEL_LABEL[r.channel]}` : ''}`}
       back="/rentals"
       actions={
         <>
@@ -427,6 +440,11 @@ export default function RentalDetail() {
               {r.actualStart && <InfoRow label="Giao thực tế">{fmtDateTime(r.actualStart)}</InfoRow>}
               {r.actualEnd && <InfoRow label="Nhận lại thực tế">{fmtDateTime(r.actualEnd)}</InfoRow>}
               <InfoRow label="Thời gian">{fmtDuration(r.scheduledEnd - r.scheduledStart)}</InfoRow>
+              <InfoRow label="Đặt qua">
+                {viaApp
+                  ? `${RENTAL_CHANNEL_LABEL[r.channel]}${r.channelRef ? ` · mã chuyến ${r.channelRef}` : ''}`
+                  : `Trực tiếp${r.source ? ` · ${RENTAL_SOURCE_LABEL[r.source]}` : ''}`}
+              </InfoRow>
               <InfoRow label="Giới hạn km">{r.kmLimit ? `${fmtNumber(r.kmLimit)} km` : 'Không giới hạn'}</InfoRow>
               <InfoRow label="Giao nhận">{r.pickupMethod === 'delivery' ? `Giao tận nơi: ${r.pickupLocation ?? ''}` : 'Khách tới lấy'}</InfoRow>
               {accNotIncluded.length > 0 && <InfoRow label="Không kèm">{accNotIncluded.join(', ')}</InfoRow>}
@@ -467,6 +485,46 @@ export default function RentalDetail() {
                   </div>
                 )}
               </div>
+              {viaApp && (
+                <div className="mt-3 space-y-1 rounded-2xl border border-border p-3 text-sm">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted">Khách trả qua app {RENTAL_CHANNEL_LABEL[r.channel]}</span>
+                    <span className="tabular">{fmtVnd(appPrepaid)}</span>
+                  </div>
+                  {isAdmin && cm && (
+                    <>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-muted">Phí sàn {r.channelPayout != null ? '(thực tế)' : `${r.channelFeePct ?? 0}% (ước tính)`}</span>
+                        <span className="tabular">−{fmtVnd(cm.fee)}</span>
+                      </div>
+                      {r.channelPayout != null ? (
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-emerald-600 dark:text-emerald-400">
+                            Đã nhận {fmtVnd(r.channelPayout)}
+                            {r.channelPaidAt && ` · ${fmtDate(r.channelPaidAt)}`}
+                          </span>
+                          <button
+                            onClick={async () => (await confirm({ title: 'Hoàn tác tiền Mioto chuyển về?', description: 'Phí sàn quay về ước tính theo %.', confirmText: 'Hoàn tác' })) && undoPayout.mutate()}
+                            className="text-xs text-muted underline"
+                          >
+                            Hoàn tác
+                          </button>
+                        </div>
+                      ) : cm.owed > 0 ? (
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span>
+                            Mioto còn chuyển về <b className="tabular">{fmtVnd(cm.owed)}</b>
+                          </span>
+                          <Button size="sm" variant="secondary" onClick={() => setDialog('payout')}>
+                            Đã nhận tiền
+                          </Button>
+                        </div>
+                      ) : null}
+                      <p className="text-xs text-subtle">Chỉ quản lý thấy · không in vào hợp đồng</p>
+                    </>
+                  )}
+                </div>
+              )}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {(m.due > 0 || (nextMonth && canCollect)) && (
                   <Button size="sm" variant="secondary" onClick={() => openPay('rent_in')}>
@@ -576,7 +634,7 @@ export default function RentalDetail() {
         </div>
 
         <Card>
-          <CardHeader icon={FileText} title="Hợp đồng & biên bản" />
+          <CardHeader icon={FileText} title="Hợp đồng & biên bản" description={viaApp ? 'Đặt qua Mioto: in theo mẫu hợp đồng và biên bản bàn giao của Mioto' : undefined} />
           <CardBody className="space-y-3">
             <div className="flex flex-wrap gap-2">
               {(['contract', 'pickup', 'return', 'extension'] as TemplateKind[])
@@ -711,6 +769,7 @@ export default function RentalDetail() {
       </div>
 
       <PaymentDialog d={d} open={dialog === 'pay'} onOpenChange={(o) => setDialog(o ? 'pay' : null)} preset={payPreset} />
+      {isAdmin && cm && <ChannelPayoutDialog d={d} open={dialog === 'payout'} onOpenChange={(o) => setDialog(o ? 'payout' : null)} />}
       <ChargeDialog d={d} open={dialog === 'charge'} onOpenChange={(o) => setDialog(o ? 'charge' : null)} />
       <SettleDialog
         d={d}

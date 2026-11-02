@@ -22,7 +22,7 @@ import type { HandoverAccessory, RentalDetail, VehicleAccessoriesData } from '@/
 import { cn, errorMessage } from '@/lib/utils';
 import { mergeAccessoryPlan } from '@shared/accessories';
 import { CHARGE_KINDS, CHARGE_KIND_LABEL, DAMAGE_ZONES, PHOTO_SLOTS, type ChargeKind } from '@shared/constants';
-import { chargeDays, chargingCharge, rentalChargingPolicy, tripChargingText, type VehiclePricing } from '@shared/pricing';
+import { chargeDays, chargingCharge, energyCharge, freeChargesFor, rentalChargingPolicy, type EnergyMethod, type VehiclePricing } from '@shared/pricing';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { fmtDateTime, fmtDuration, fmtTime } from '@shared/time';
 import { useQueryClient } from '@tanstack/react-query';
@@ -37,7 +37,7 @@ interface ChargeRow {
   kind: ChargeKind;
   description: string;
   amount: number | null;
-  /** Dòng tự sinh: phụ kiện thiếu ("acc:<tên>", tự gỡ khi tick lại) hoặc sạc pin ("charging"). */
+  /** Dòng tự sinh: phụ kiện thiếu ("acc:<tên>", tự gỡ khi tick lại), sạc pin ("charging") hoặc tiền điện ("energy"). */
   auto?: string;
 }
 interface Suggestion {
@@ -45,6 +45,8 @@ interface Suggestion {
   description: string;
   amount: number;
 }
+/** Tiền điện xe điện: theo % pin thiếu, theo km, hoặc không thu lượt này. */
+type EnergyMode = EnergyMethod | 'none';
 type Collect = { amount: number | null; method: 'cash' | 'transfer' };
 
 /** Những gì đang nhập dở — ảnh đã tải lên máy chủ nên chỉ cần nhớ mã ảnh. */
@@ -62,6 +64,8 @@ interface HandoverDraft {
   charges: ChargeRow[];
   acc: HandoverAccessory[];
   chargeSessions: number | null;
+  /** Cách tính tiền điện đã chọn (null = theo xe). */
+  energyMode?: EnergyMode | null;
   collect: Collect;
   collectDeposit: Collect;
 }
@@ -138,6 +142,7 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
   const [acc, setAcc] = useState<HandoverAccessory[]>([]);
   const [accReady, setAccReady] = useState(false);
   const [chargeSessions, setChargeSessions] = useState<number | null>(null);
+  const [energyMode, setEnergyMode] = useState<EnergyMode | null>(null);
   const [collect, setCollect] = useState<Collect>({ amount: null, method: 'transfer' });
   const [collectDeposit, setCollectDeposit] = useState<Collect>({ amount: null, method: 'transfer' });
   const [saving, setSaving] = useState(false);
@@ -203,6 +208,7 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
       setAcc(x.acc);
       setAccReady(true);
       setChargeSessions(x.chargeSessions);
+      setEnergyMode(x.energyMode ?? null);
       setCollect(x.collect);
       setCollectDeposit(x.collectDeposit);
       setRestoredAt(saved.savedAt);
@@ -250,6 +256,19 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
     const line = chargingCharge(chargeSessions ?? 0, charging.policy, charging.days);
     setCharges((rows) => [...rows.filter((r) => r.auto !== 'charging'), ...(line ? [{ ...line, auto: 'charging' }] : [])]);
   }, [chargeSessions, charging]);
+  // Tiền điện: mặc định theo cách của xe (đã chốt lúc đặt), nhân viên đổi được.
+  const carMethod = charging?.policy.method;
+  const carMethodFee = carMethod === 'pct' ? charging?.policy.pctFee : carMethod === 'km' ? charging?.policy.kmFee : 0;
+  // Cách của xe mà giá đặt 0 thì coi như mặc định không thu.
+  const energyMethod = energyMode === 'none' ? null : (energyMode ?? (carMethodFee ? carMethod! : null));
+  const energyLine = useMemo(
+    () => (charging && pickupHo ? energyCharge(charging.policy, energyMethod, { pickupPct: pickupHo.fuelLevel, returnPct: fuel, km: Math.max(0, (odo ?? pickupHo.odo) - pickupHo.odo) }) : null),
+    [charging, pickupHo, energyMethod, fuel, odo],
+  );
+  useEffect(() => {
+    if (!charging) return;
+    setCharges((rows) => [...rows.filter((r) => r.auto !== 'energy'), ...(energyLine ? [{ ...energyLine, auto: 'energy' }] : [])]);
+  }, [energyLine, charging]);
 
   const wrongStatus = !d || (isPickup ? d.rental.status !== 'booked' : d.rental.status !== 'active');
   // Bắt GPS ngay khi mở trang để lúc chụp ảnh đã có tọa độ.
@@ -263,7 +282,7 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
     },
     [d, isPickup, geoNow],
   );
-  const draft: HandoverDraft = { at, odo, fuel, photos, extraPhotos, damages, checklist, notes, signature: signatureUrl, charges, acc, chargeSessions, collect, collectDeposit };
+  const draft: HandoverDraft = { at, odo, fuel, photos, extraPhotos, damages, checklist, notes, signature: signatureUrl, charges, acc, chargeSessions, energyMode, collect, collectDeposit };
   useDraftAutosave(draftKey, draft, initialized && touched && !wrongStatus && !saving && !done.current);
   const touch = () => !touched && setTouched(true);
   const startOver = async () => {
@@ -509,12 +528,40 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
               <p className="mt-2 text-xs text-muted">Để trống nếu chưa thu. Có thể ghi nhận sau ở trang lượt thuê. Tài sản thế chấp thêm ở trang lượt thuê.</p>
             </Step>
           ) : (
-            <Step n={5} title="Phụ phí" description={`Tự gợi ý trễ giờ, vượt km${charging ? ', sạc pin' : ''} — sửa được. Thêm xăng, vệ sinh, hư hỏng nếu có.`}>
+            <Step n={5} title="Phụ phí" description={`Tự gợi ý trễ giờ, vượt km${charging ? ', sạc pin, tiền điện' : ''} — sửa được. Thêm xăng, vệ sinh, hư hỏng nếu có.`}>
               {charging && (
-                <div className="mb-4 sm:max-w-sm">
-                  <Field label="Số lượt sạc pin trong chuyến" hint={`${tripChargingText(charging.policy, charging.days).replace(/^./, (c) => c.toUpperCase())} (xem lịch sử sạc trên app của xe)`}>
+                <div className="mb-4 grid gap-4 sm:grid-cols-2">
+                  <Field
+                    label="Số lần cắm sạc trong chuyến"
+                    hint={`Chuyến ${charging.days} ngày được sạc miễn phí ${freeChargesFor(charging.policy, charging.days)} lượt${charging.policy.fee ? `, quá thì ${fmtVnd(charging.policy.fee)}/lượt` : ''} (xem lịch sử sạc trên app của xe)`}
+                  >
                     <NumberInput value={chargeSessions} onChange={setChargeSessions} suffix="lượt" />
                   </Field>
+                  {(charging.policy.pctFee > 0 || charging.policy.kmFee > 0) && (
+                    <Field
+                      label="Tiền điện"
+                      hint={
+                        energyLine
+                          ? `${energyLine.description} = ${fmtVnd(energyLine.amount)}`
+                          : energyMethod === 'pct'
+                            ? `Pin trả ${fuel}% không thấp hơn lúc giao${pickupHo ? ` (${pickupHo.fuelLevel}%)` : ''} — không thu`
+                            : energyMethod === 'km'
+                              ? 'Nhập ODO để tính theo km'
+                              : 'Lượt này không thu tiền điện'
+                      }
+                    >
+                      <Segmented
+                        className="flex w-full"
+                        value={energyMethod ?? 'none'}
+                        onChange={setEnergyMode}
+                        options={[
+                          ...(charging.policy.pctFee ? [{ value: 'pct' as const, label: `% pin · ${fmtNumber(charging.policy.pctFee)}đ` }] : []),
+                          ...(charging.policy.kmFee ? [{ value: 'km' as const, label: `Km · ${fmtNumber(charging.policy.kmFee)}đ` }] : []),
+                          { value: 'none' as const, label: 'Không thu' },
+                        ]}
+                      />
+                    </Field>
+                  )}
                 </div>
               )}
               <div className="space-y-2">

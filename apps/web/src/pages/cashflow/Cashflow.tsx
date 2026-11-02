@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { toast } from 'sonner';
 import { CashEntryDialog, type CashDialogState } from '@/components/CashEntryDialog';
 import { RentalStatusBadge } from '@/components/common';
 import { Page } from '@/components/layout/AppShell';
@@ -28,7 +29,7 @@ import { Badge, Card, CardBody, CardHeader, Empty, ErrorBox, Notice, PageLoader,
 import { api, qs } from '@/lib/api';
 import { useAuth, useNow } from '@/lib/hooks';
 import type { CashflowReport, LedgerRow, RecurringRow, VehicleCashRow } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, errorMessage } from '@/lib/utils';
 import {
   CASH_CATEGORIES,
   CASH_CATEGORY,
@@ -43,7 +44,7 @@ import {
   type CashCategory,
   type PeriodKind,
 } from '@shared/cashflow';
-import { PAYMENT_METHOD_LABEL } from '@shared/constants';
+import { PAYMENT_METHOD_LABEL, RENTAL_CHANNEL_LABEL, RENTAL_SOURCE_LABEL } from '@shared/constants';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { WEEKDAY_LONG, fmtDate, fmtDateTime, vnDateKey, vnParts } from '@shared/time';
 import { CashChart, CashLegend, CashTrendTable } from './CashChart';
@@ -182,6 +183,7 @@ export default function Cashflow() {
       ) : (
         <div className={cn('space-y-4 transition-opacity', isFetching && 'opacity-60')}>
           <Kpis r={data} />
+          {data.channelOwed.length > 0 && <ChannelOwedCard rows={data.channelOwed} />}
 
           {typeof data.filter === 'number' && data.allocation.sharedExpense > 0 && data.allocation.fleet > 0 && (
             <Notice tone="gray" icon={Landmark}>
@@ -238,6 +240,8 @@ export default function Cashflow() {
             {typeof data.filter === 'number' && <RentalsCard r={data} />}
             <CategoriesCard r={data} className={data.filter === 'shared' ? 'lg:col-span-5' : 'lg:col-span-2'} onPick={showCategory} />
           </div>
+
+          {data.channels.rows.length > 0 && <ChannelsCard r={data} />}
 
           <div ref={ledgerRef} className="scroll-mt-20">
             <LedgerCard r={data} cat={ledgerCat} onCat={setLedgerCat} onOpen={(l) => l.kind === 'entry' && setDialog({ mode: 'edit', entry: l.entry, recurringLabel: l.recurring?.description ?? null })} />
@@ -459,6 +463,129 @@ function RentalsCard({ r }: { r: CashflowReport }) {
   );
 }
 
+// ── Mioto: tiền chưa chuyển về, so sánh kênh ─────────────────────────────────
+
+/** Chuyến Mioto chưa nhận tiền app chuyển về. Chọn nhiều chuyến một lần khi Mioto chuyển gộp. */
+function ChannelOwedCard({ rows }: { rows: CashflowReport['channelOwed'] }) {
+  const qc = useQueryClient();
+  const [sel, setSel] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
+  const picked = rows.filter((x) => sel.includes(x.id));
+  const markReceived = async () => {
+    setBusy(true);
+    try {
+      for (const x of picked) await api.post(`/api/rentals/${x.id}/channel-payout`, { amount: x.owed, at: Date.now() });
+      toast.success(`Đã ghi nhận ${picked.length} chuyến Mioto`);
+      setSel([]);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(false);
+      void qc.invalidateQueries({ queryKey: ['cashflow'] });
+      void qc.invalidateQueries({ queryKey: ['rental'] });
+    }
+  };
+  return (
+    <Card>
+      <CardHeader
+        title="Mioto chưa chuyển tiền"
+        description={`${rows.length} chuyến · ước tính ${fmtVnd(rows.reduce((s, x) => s + x.owed, 0))} (khách trả qua app − phí sàn)`}
+        action={
+          <Button variant="ghost" size="sm" onClick={() => setSel(sel.length === rows.length ? [] : rows.map((x) => x.id))}>
+            {sel.length === rows.length ? 'Bỏ chọn' : 'Chọn hết'}
+          </Button>
+        }
+      />
+      <ul className="divide-y divide-border">
+        {rows.map((x) => (
+          <li key={x.id} className="flex items-center gap-3 px-4 py-2.5 md:px-5">
+            <Checkbox
+              className="min-w-0 flex-1"
+              checked={sel.includes(x.id)}
+              onChange={(v) => setSel(v ? [...sel, x.id] : sel.filter((id) => id !== x.id))}
+              label={
+                <span className="block min-w-0">
+                  <span className="block truncate font-medium">
+                    {x.channelRef || x.code} · {x.customerName}
+                  </span>
+                  <span className="block truncate text-sm text-muted">
+                    {x.plate} · {fmtDate(x.start)} → {fmtDate(x.end)}
+                    {x.status === 'booked' ? ' · chưa giao xe' : x.status === 'active' ? ' · đang thuê' : x.status === 'cancelled' ? ' · đã hủy' : ''}
+                  </span>
+                </span>
+              }
+            />
+            <span className="tabular shrink-0 text-sm font-semibold">{fmtVnd(x.owed)}</span>
+            <Link to={`/rentals/${x.id}`} className="shrink-0 text-sm text-brand">
+              Mở
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <CardBody className="flex flex-wrap items-center justify-between gap-2 border-t border-border">
+        <span className="text-xs text-muted">Mioto chuyển khác ước tính? Mở chuyến → “Đã nhận tiền” để nhập số thật, phí sàn tự tính lại.</span>
+        {picked.length > 0 && (
+          <Button size="sm" onClick={markReceived} loading={busy}>
+            Đã nhận {picked.length} chuyến · {fmtVnd(picked.reduce((s, x) => s + x.owed, 0))}
+          </Button>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+/** Lượt nhận xe trong kỳ theo kênh: Mioto trừ phí sàn so với khách trực tiếp; khách trực tiếp tới từ đâu. */
+function ChannelsCard({ r }: { r: CashflowReport }) {
+  const { rows, sources, returning } = r.channels;
+  const count = rows.reduce((s, x) => s + x.rentals, 0);
+  const direct = rows.find((x) => x.channel === 'direct');
+  return (
+    <Card>
+      <CardHeader title="Theo kênh đặt xe" description={`Lượt nhận xe trong kỳ · tính theo tiền phải thu của lượt${returning ? ` · ${returning}/${count} lượt là khách quay lại` : ''}`} />
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[34rem] text-sm whitespace-nowrap">
+          <thead>
+            <tr className="border-b border-border text-left text-xs text-muted">
+              <th className="px-4 py-2 font-medium md:px-5">Kênh</th>
+              <th className="px-2 py-2 text-right font-medium">Lượt</th>
+              <th className="px-2 py-2 text-right font-medium">Ngày xe</th>
+              <th className="px-2 py-2 text-right font-medium">Doanh thu</th>
+              <th className="px-2 py-2 text-right font-medium">Phí sàn</th>
+              <th className="px-2 py-2 text-right font-medium">Thực nhận</th>
+              <th className="px-4 py-2 text-right font-medium md:px-5">Thực nhận/ngày</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((x) => (
+              <tr key={x.channel}>
+                <td className="px-4 py-2.5 font-medium md:px-5">{RENTAL_CHANNEL_LABEL[x.channel]}</td>
+                <td className="tabular px-2 py-2.5 text-right">{x.rentals}</td>
+                <td className="tabular px-2 py-2.5 text-right">{fmtNumber(x.days)}</td>
+                <td className="tabular px-2 py-2.5 text-right">{fmtNumber(x.revenue)}</td>
+                <td className="tabular px-2 py-2.5 text-right text-muted">{x.fee ? `−${fmtNumber(x.fee)}` : '—'}</td>
+                <td className="tabular px-2 py-2.5 text-right font-semibold">{fmtNumber(x.net)}</td>
+                <td className="tabular px-4 py-2.5 text-right md:px-5">{x.days > 0 ? fmtNumber(Math.round(x.net / x.days / 1000) * 1000) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {direct && sources.length > 0 && (
+        <CardBody className="border-t border-border">
+          <p className="mb-2 text-sm font-medium">Khách trực tiếp biết tới qua</p>
+          <div className="flex flex-wrap gap-1.5">
+            {sources.map((s) => (
+              <Badge key={s.source ?? 'none'} tone={s.source ? 'blue' : 'gray'}>
+                {s.source ? RENTAL_SOURCE_LABEL[s.source] : 'Chưa ghi'} · {s.rentals} lượt · {fmtVnd(s.revenue)}
+              </Badge>
+            ))}
+          </div>
+        </CardBody>
+      )}
+    </Card>
+  );
+}
+
 // ── Theo hạng mục ────────────────────────────────────────────────────────────
 
 function CategoriesCard({ r, className, onPick }: { r: CashflowReport; className?: string; onPick: (c: 'rent' | CashCategory) => void }) {
@@ -651,6 +778,26 @@ function LedgerItem({ l, onOpen }: { l: LedgerRow; onOpen: (l: LedgerRow) => voi
   const e = l.entry;
   const c = CASH_CATEGORY[e.category];
   const voided = !!e.voidedAt;
+  const body = (
+    <>
+      {icon}
+      <span className="min-w-0 flex-1">
+        <span className={cn('line-clamp-2 font-medium', voided && 'line-through')}>{e.description || c?.label}</span>
+        <span className="line-clamp-2 text-sm text-muted">{voided ? `Đã hủy · ${e.voidReason}` : [l.plate, c?.label, 'app tự ghi theo lượt thuê'].filter(Boolean).join(' · ')}</span>
+      </span>
+      {amount(voided)}
+    </>
+  );
+  // Phí sàn Mioto: app tự ghi theo lượt thuê → mở lượt thuê, không sửa ở đây.
+  if (e.rentalId != null) {
+    return (
+      <li>
+        <Link to={`/rentals/${e.rentalId}`} className={cn(cls, voided && 'opacity-70')}>
+          {body}
+        </Link>
+      </li>
+    );
+  }
   return (
     <li>
       <button onClick={() => onOpen(l)} className={cn(cls, voided && 'opacity-70')}>

@@ -38,12 +38,34 @@ export const CHARGE_KIND_LABEL: Record<ChargeKind, string> = {
   cancel_fee: 'Phí hủy (mất cọc)',
 };
 
-export const PAYMENT_METHODS = ['cash', 'transfer', 'offset'] as const;
+/** mioto = khách trả trước qua app Mioto (app giữ, trừ phí rồi chuyển về sau). */
+export const PAYMENT_METHODS = ['cash', 'transfer', 'offset', 'mioto'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Tiền mặt',
   transfer: 'Chuyển khoản',
   offset: 'Cấn trừ cọc',
+  mioto: 'Qua app Mioto',
+};
+
+/** Kênh đặt xe — mỗi kênh có mẫu hợp đồng/biên bản riêng. */
+export const RENTAL_CHANNELS = ['direct', 'mioto'] as const;
+export type RentalChannel = (typeof RENTAL_CHANNELS)[number];
+export const RENTAL_CHANNEL_LABEL: Record<RentalChannel, string> = { direct: 'Trực tiếp', mioto: 'Mioto' };
+/** Phí sàn mặc định (%) khi chưa chỉnh trong Cài đặt. */
+export const DEFAULT_MIOTO_FEE_PCT = 15;
+
+/** Lượt trực tiếp: khách biết tới cửa hàng qua đâu. */
+export const RENTAL_SOURCES = ['returning', 'referral', 'zalo', 'facebook', 'tiktok', 'google', 'other'] as const;
+export type RentalSource = (typeof RENTAL_SOURCES)[number];
+export const RENTAL_SOURCE_LABEL: Record<RentalSource, string> = {
+  returning: 'Khách quen',
+  referral: 'Người quen giới thiệu',
+  zalo: 'Zalo',
+  facebook: 'Facebook',
+  tiktok: 'TikTok',
+  google: 'Google, bản đồ',
+  other: 'Khác',
 };
 
 export const FUEL_TYPES = ['gasoline', 'diesel', 'electric', 'hybrid'] as const;

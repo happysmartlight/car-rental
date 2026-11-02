@@ -38,6 +38,9 @@ const zVehicle = z.object({
   kmLimitMonth: z.coerce.number().int().min(0).nullable().optional(),
   freeCharges: z.coerce.number().int().min(0).max(99).nullable().optional(),
   chargeFee: zMoney.nullable().optional(),
+  energyFeePct: zMoney.nullable().optional(),
+  energyFeeKm: zMoney.nullable().optional(),
+  energyMethod: z.enum(['pct', 'km']).nullable().optional(),
   inspectionExpiry: zDateKey,
   insuranceTndsExpiry: zDateKey,
   insuranceBodyExpiry: zDateKey,
@@ -46,6 +49,10 @@ const zVehicle = z.object({
   nextServiceDate: zDateKey,
   photoFileId: zFileId,
   registrationFileId: zFileId,
+  regNumber: zOptText,
+  regDate: zDateKey,
+  regPlace: zOptText,
+  regOwner: zOptText,
   notes: zOptText,
 });
 

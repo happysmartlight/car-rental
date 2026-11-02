@@ -77,7 +77,7 @@ describe('luồng một lượt thuê', () => {
     const r = await call('PUT', '/api/settings/business', { name: 'Xe Tự Lái An Phát', representative: 'Nguyễn Văn Chủ', address: '1 Lê Lợi, Q1', signCity: 'TP. Hồ Chí Minh', bankBin: '970436', bankAccount: '0123456789', bankAccountName: 'NGUYEN VAN CHU' });
     expect(r.status).toBe(200);
     const t = await call('GET', '/api/templates');
-    expect(t.json.map((x: any) => x.kind).sort()).toEqual(['contract', 'extension', 'pickup', 'return']);
+    expect(t.json.filter((x: any) => !x.channel).map((x: any) => x.kind).sort()).toEqual(['contract', 'extension', 'pickup', 'return']);
   });
 
   it('thêm xe, chặn trùng biển số', async () => {
@@ -415,25 +415,32 @@ describe('phụ kiện trên xe', () => {
     await call('POST', `/api/rentals/${long.json.id}/cancel`, { reason: 'Dọn dữ liệu test' });
   });
 
-  it('xe điện: lượt sạc miễn phí theo số ngày thuê + phí mỗi lượt chốt vào lượt thuê, hợp đồng ghi rõ', async () => {
+  it('xe điện: mỗi ngày thuê 1 lượt sạc miễn phí, phụ thu mỗi lượt vượt + tiền điện chốt vào lượt thuê, hợp đồng ghi rõ', async () => {
     const { db, schema } = await import('./db/index.js');
     const { eq } = await import('drizzle-orm');
-    expect((await call('PATCH', `/api/vehicles/${ev}`, { freeCharges: 1, chargeFee: 30000 })).json).toMatchObject({ freeCharges: 1, chargeFee: 30000 });
+    expect((await call('PATCH', `/api/vehicles/${ev}`, { freeCharges: 1, chargeFee: 40000 })).json).toMatchObject({ freeCharges: 1, chargeFee: 40000 });
     const custId = (await call('POST', '/api/customers', { fullName: 'Phạm Xe Điện', idNumber: '079099000003' })).json.id;
     const r = (await call('POST', '/api/rentals', { vehicleId: ev, customerId: custId, scheduledStart: at('2027-05-01T08:00'), scheduledEnd: at('2027-05-06T08:00') })).json;
-    expect(JSON.parse(r.pricing)).toMatchObject({ freeCharges: 1, chargeFee: 30000 });
+    // Tiền điện chưa chỉnh ở xe → theo mặc định 800đ/1% pin (cách mặc định), 400đ/km.
+    expect(JSON.parse(r.pricing)).toMatchObject({ freeCharges: 1, chargeFee: 40000, chargePerDay: true, energyFeePct: 800, energyFeeKm: 400, energyMethod: 'pct' });
     const contractXml = async (id: number) => {
       const doc = await call('POST', `/api/rentals/${id}/documents`, { kind: 'contract' });
       const file = await app.inject({ method: 'GET', url: `/api/files/${doc.json.document.docxFileId}`, headers: { cookie: adminCookie } });
       return new PizZip(file.rawPayload).file('word/document.xml')!.asText();
     };
     // Đổi giá sau khi đặt không ảnh hưởng lượt đã đặt.
-    await call('PATCH', `/api/vehicles/${ev}`, { chargeFee: 40000 });
-    expect(await contractXml(r.id)).toContain('chuyến 5 ngày miễn phí 4 lượt sạc, từ lượt thứ 5 tính 30.000 đồng/lượt cắm-rút sạc');
-    // Lượt đặt trước khi có tính năng (bảng giá chưa có trường sạc) → lấy theo xe hiện tại.
-    const { freeCharges: _f, chargeFee: _c, ...old } = JSON.parse(r.pricing);
-    db.update(schema.rentals).set({ pricing: JSON.stringify(old) }).where(eq(schema.rentals.id, r.id)).run();
-    expect(await contractXml(r.id)).toContain('từ lượt thứ 5 tính 40.000 đồng/lượt');
+    await call('PATCH', `/api/vehicles/${ev}`, { chargeFee: 50000, energyMethod: 'km' });
+    expect(await contractXml(r.id)).toContain('chuyến 5 ngày được sạc miễn phí 5 lượt, từ lượt thứ 6 phụ thu 40.000 đồng/lượt cắm sạc; tiền điện 800 đồng cho mỗi 1% pin thấp hơn lúc nhận xe');
+    // Lượt đặt trước khi đổi quy tắc (bảng giá chưa có chargePerDay) → giữ cách tính cũ, không tiền điện.
+    const { chargePerDay: _p, energyFeePct: _e1, energyFeeKm: _e2, energyMethod: _e3, ...before } = JSON.parse(r.pricing);
+    db.update(schema.rentals).set({ pricing: JSON.stringify(before) }).where(eq(schema.rentals.id, r.id)).run();
+    const oldXml = await contractXml(r.id);
+    expect(oldXml).toContain('chuyến 5 ngày được sạc miễn phí 4 lượt, từ lượt thứ 5 phụ thu 40.000 đồng/lượt cắm sạc');
+    expect(oldXml).not.toContain('tiền điện');
+    // Lượt đặt trước khi có tính năng sạc (bảng giá chưa có trường sạc) → lấy theo xe hiện tại.
+    const { freeCharges: _f, chargeFee: _c, ...older } = before;
+    db.update(schema.rentals).set({ pricing: JSON.stringify(older) }).where(eq(schema.rentals.id, r.id)).run();
+    expect(await contractXml(r.id)).toContain('từ lượt thứ 6 phụ thu 50.000 đồng/lượt cắm sạc; tiền điện 400 đồng/km di chuyển (theo ODO)');
   });
 
   it('mẫu dựng sẵn cũ tự lên bản mới; mẫu người dùng đã thay thì giữ nguyên', async () => {
@@ -449,7 +456,7 @@ describe('phụ kiện trên xe', () => {
     expect(c2.version).toBe(contract.version + 1);
     const p2 = db.select().from(schema.contractTemplates).where(eq(schema.contractTemplates.id, pickupT.id)).get()!;
     expect(p2.version).toBe(pickupT.version);
-    expect(db.select().from(schema.contractTemplates).all()).toHaveLength(4);
+    expect(db.select().from(schema.contractTemplates).all()).toHaveLength(7);
   });
 });
 
@@ -1237,5 +1244,264 @@ describe('sao lưu ảnh lên Telegram: không sót file', () => {
         c.backup.passphrase = '';
       });
     }
+  });
+});
+
+describe('lượt thuê qua Mioto', () => {
+  let vid = 0;
+  let cust = 0;
+  let id = 0;
+  const detail = async (rid = id, cookie = adminCookie) => (await call('GET', `/api/rentals/${rid}`, undefined, cookie)).json;
+  const month = vnDateKey(Date.now()).slice(0, 7);
+  const feeEntries = async () =>
+    (await call('GET', `/api/cashflow?p=${month}&v=${vid}`)).json.ledger
+      .filter((l: any) => l.kind === 'entry' && l.entry.rentalId != null && !l.entry.voidedAt)
+      .map((l: any) => l.amount)
+      .sort((a: number, b: number) => b - a);
+  const docXml = async (kind: string, rid = id) => {
+    const r = await call('POST', `/api/rentals/${rid}/documents`, { kind });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    const file = await app.inject({ method: 'GET', url: `/api/files/${r.json.document.docxFileId}`, headers: { cookie: adminCookie } });
+    // Xem bản in thật: MIOTO_DUMP=<thư mục> npx vitest run -w apps/api
+    if (process.env.MIOTO_DUMP) fs.writeFileSync(path.join(process.env.MIOTO_DUMP, `${kind}-${rid}.docx`), file.rawPayload);
+    return { doc: r.json.document, xml: new PizZip(file.rawPayload).file('word/document.xml')!.asText() };
+  };
+  /** Chữ trong ô vuông vẽ sẵn của biên bản Mioto, theo thứ tự trong văn bản (mỗi ô 2 bản: Word mới + Word cũ). */
+  const boxes = (xml: string) => [...xml.matchAll(/<w:txbxContent>[\s\S]*?<w:t xml:space="preserve">([^<]*)<\/w:t>/g)].map((m) => m[1]).filter((_, i) => i % 2 === 0);
+
+  it('mẫu Mioto dựng sẵn có đủ: hợp đồng + biên bản (giao, nhận)', async () => {
+    const t = (await call('GET', '/api/templates')).json.filter((x: any) => x.channel === 'mioto');
+    expect(t.map((x: any) => [x.kind, x.isDefault]).sort()).toEqual([
+      ['contract', true],
+      ['pickup', true],
+      ['return', true],
+    ]);
+  });
+
+  it('chuẩn bị: Bên A là cá nhân, xe có giấy đăng ký, khách có nơi cấp GPLX; phí mặc định 15%', async () => {
+    const biz = (await call('GET', '/api/settings')).json.business;
+    expect((await call('PUT', '/api/settings/business', { ...biz, permanentAddress: '5 Trần Hưng Đạo, Q5', currentAddress: '' })).status).toBe(200);
+    expect((await call('GET', '/api/settings')).json.rules.miotoFeePct).toBe(15);
+    expect((await call('GET', '/api/settings', undefined, staffCookie)).json.rules.miotoFeePct).toBeUndefined();
+    const v = await call('POST', '/api/vehicles', {
+      plate: '51F-468.02',
+      make: 'Mitsubishi',
+      model: 'Xpander',
+      year: 2023,
+      color: 'Trắng',
+      seats: 7,
+      priceDay: 900000,
+      kmLimitDay: 300,
+      overKmFee: 3000,
+      odo: 20000,
+      regNumber: '0123456',
+      regDate: '2023-05-10',
+      regPlace: 'Phòng CSGT TP.HCM',
+      regOwner: 'Nguyễn Văn Chủ',
+    });
+    expect(v.status, JSON.stringify(v.json)).toBe(200);
+    vid = v.json.id;
+    cust = (
+      await call('POST', '/api/customers', {
+        fullName: 'Lê Mi Ô Tô',
+        idNumber: '079095004321',
+        idIssueDate: '2021-04-01',
+        idIssuePlace: 'Cục Cảnh sát QLHC về TTXH',
+        phone: '0911222333',
+        licenseNumber: '790987654321',
+        licenseClass: 'B',
+        licenseIssueDate: '2019-06-01',
+        licenseIssuePlace: 'Sở GTVT TP.HCM',
+        permanentAddress: '9 Hai Bà Trưng, Q1',
+      })
+    ).json.id;
+  });
+
+  it('đặt qua Mioto: tiền thuê đúng giá app, tiền trả trước qua app, phí 15% ghi vào Thu chi', async () => {
+    const times = { scheduledStart: at('2026-12-04T09:00'), scheduledEnd: at('2026-12-07T09:00') };
+    const noPrice = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, ...times, channel: 'mioto' });
+    expect(noPrice.status).toBe(400);
+    const r = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, ...times, channel: 'mioto', channelRef: 'MI8K2X', channelPrice: 2_550_000, channelPrepaid: 1_020_000, depositRequired: 5_000_000, source: 'zalo' });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    id = r.json.id;
+    expect(r.json).toMatchObject({ channel: 'mioto', channelRef: 'MI8K2X', channelFeePct: 15, channelFee: 382_500, source: null });
+    const d = await detail();
+    expect(d.charges.map((c: any) => [c.kind, c.amount])).toEqual([['rental', 2_550_000]]);
+    expect(d.money).toMatchObject({ totalCharges: 2_550_000, rentPaid: 1_020_000, due: 1_530_000 });
+    expect(d.payments.map((p: any) => [p.method, p.amount])).toEqual([['mioto', 1_020_000]]);
+    expect(d.channelMoney).toEqual({ prepaid: 1_020_000, fee: 382_500, payout: null, owed: 637_500 });
+    expect(await feeEntries()).toEqual([382_500]);
+    // Phí sàn do app tự ghi: không ghi tay, không sửa/hủy ở Thu chi.
+    const entry = (await call('GET', `/api/cashflow?p=${month}&v=${vid}`)).json.ledger.find((l: any) => l.entry?.rentalId === id).entry;
+    // Hạng mục có sẵn (bản cũ đọc được khi quay về), nội dung ghi rõ phí sàn.
+    expect(entry).toMatchObject({ category: 'marketing', description: expect.stringContaining('Phí sàn Mioto'), vendor: 'Mioto' });
+    expect((await call('PUT', `/api/cash-entries/${entry.id}`, { category: 'marketing', amount: 1000, at: Date.now() })).status).toBe(400);
+    expect((await call('POST', `/api/cash-entries/${entry.id}/void`, { reason: 'thử' })).status).toBe(400);
+    // Còn phiếu trả qua app thì không đổi sang khách trực tiếp được (sổ tiền sẽ sai).
+    expect((await call('PATCH', `/api/rentals/${id}`, { channel: 'direct' })).status).toBe(400);
+    // Tìm theo mã chuyến Mioto.
+    expect((await call('GET', '/api/rentals?q=mi8k2x')).json.items.map((x: any) => x.id)).toEqual([id]);
+  });
+
+  it('nhân viên không thấy phí sàn ở bất kỳ đâu, không sửa được phí', async () => {
+    const d = await detail(id, staffCookie);
+    expect(d.rental.channel).toBe('mioto');
+    expect(d.rental).not.toHaveProperty('channelFee');
+    expect(d.rental).not.toHaveProperty('channelFeePct');
+    expect(d).not.toHaveProperty('channelMoney');
+    const list = await call('GET', '/api/rentals?q=mi8k2x', undefined, staffCookie);
+    expect(JSON.stringify(list.json)).not.toContain('382500');
+    const c = await call('GET', `/api/customers/${cust}`, undefined, staffCookie);
+    expect(JSON.stringify(c.json)).not.toMatch(/channelFee|382500/);
+    expect((await call('POST', `/api/rentals/${id}/channel-payout`, { amount: 600000 }, staffCookie)).status).toBe(403);
+    expect((await call('PATCH', `/api/rentals/${id}`, { channelFeePct: 0 }, staffCookie)).status).toBe(403);
+  });
+
+  it('hợp đồng Mioto: điền chủ xe + khách + xe, giá app, ô trả trước 40% — không in phí sàn', async () => {
+    const { doc, xml } = await docXml('contract');
+    expect(doc.templateName).toBe('Hợp đồng Mioto');
+    for (const s of [
+      'MI8K2X/HĐCTXTL',
+      'Nguyễn Văn Chủ',
+      '5 Trần Hưng Đạo, Q5',
+      'Lê Mi Ô Tô',
+      '079095004321',
+      'Cục Cảnh sát QLHC về TTXH',
+      '790987654321',
+      'Sở GTVT TP.HCM',
+      '51F-468.02',
+      'Mitsubishi Xpander',
+      '0123456',
+      '10/05/2023',
+      'Phòng CSGT TP.HCM',
+      '04/12/2026',
+      '07/12/2026',
+      '2.550.000',
+      '850.000',
+    ]) {
+      expect(xml, s).toContain(s);
+    }
+    expect(xml.match(/☒/g)).toHaveLength(1);
+    expect(xml.indexOf('☒')).toBeLessThan(xml.indexOf('thanh toán trướ'));
+    expect(xml).not.toContain('Trường hợp Bên thuê xe là tổ chức');
+    expect(xml).not.toMatch(/\{[a-z_.0-9]+\}/);
+    for (const secret of ['382.500', '637.500']) {
+      expect(xml).not.toContain(secret);
+      expect(JSON.stringify(doc.data)).not.toContain(secret);
+      expect(JSON.stringify(doc.data)).not.toContain(secret.replace('.', ''));
+    }
+  });
+
+  it('giao xe → biên bản Mioto: phần giao điền đủ, phần hoàn trả để trống', async () => {
+    const p = await call('POST', `/api/rentals/${id}/pickup`, {
+      at: at('2026-12-04T09:15'),
+      odo: 20100,
+      fuelLevel: 75,
+      damages: [],
+      payments: [
+        { purpose: 'rent', method: 'transfer', amount: 1_530_000 },
+        { purpose: 'deposit', method: 'cash', amount: 5_000_000 },
+      ],
+      collaterals: [{ kind: 'motorbike', description: 'Honda Vision 59X1-123.45' }],
+    });
+    expect(p.status, JSON.stringify(p.json)).toBe(200);
+    const { doc, xml } = await docXml('pickup');
+    expect(doc.templateName).toBe('Biên bản bàn giao Mioto (giao xe)');
+    for (const s of ['MI8K2X', 'ngày 04 tháng 12 năm 2026', '09 giờ 15', 'Honda Vision 59X1-123.45', '5.000.000 đồng', 'Xpander', '(mức)']) expect(xml, s).toContain(s);
+    // Ô vuông theo thứ tự: Bình thường, ODO, xăng, Miễn thế chấp, Có thế chấp, Giống ban đầu, Trả đủ.
+    expect(boxes(xml)).toEqual(['X', '20.100', '75%', ' ', 'X', ' ', ' ']);
+    expect(xml).not.toMatch(/\{[a-z_.0-9]+\}/);
+  });
+
+  it('gia hạn trên app: nhập tổng tiền mới → tiền thuê + phí sàn tính lại, có lịch sử gia hạn', async () => {
+    const r = await call('PATCH', `/api/rentals/${id}`, { scheduledEnd: at('2026-12-08T09:00'), channelPrice: 3_400_000 });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(r.json).toMatchObject({ channelPrice: 3_400_000, channelFee: 510_000 });
+    const d = await detail();
+    expect(d.charges.map((c: any) => [c.kind, c.amount])).toEqual([['rental', 3_400_000]]);
+    expect(d.extensions.map((e: any) => [e.oldTotal, e.newTotal])).toEqual([[2_550_000, 3_400_000]]);
+    expect(await feeEntries()).toEqual([510_000]);
+  });
+
+  it('nhận xe + quyết toán → biên bản Mioto điền cả phần hoàn trả', async () => {
+    const ret = await call('POST', `/api/rentals/${id}/return`, { at: at('2026-12-08T08:30'), odo: 21000, fuelLevel: 50, damages: [{ zone: 'Cản trước', note: 'trầy 5cm', isNew: true }] });
+    expect(ret.status, JSON.stringify(ret.json)).toBe(200);
+    expect((await detail()).money.due).toBe(850_000);
+    const s = await call('POST', `/api/rentals/${id}/settle`, { offset: 850_000, refundDeposit: { amount: 2_150_000, method: 'cash' }, fineHoldDays: 15 });
+    expect(s.status, JSON.stringify(s.json)).toBe(200);
+    const { doc, xml } = await docXml('return');
+    expect(doc.templateName).toBe('Biên bản bàn giao Mioto (nhận xe)');
+    for (const s2 of ['08 giờ 30', '08/12/2026', '21.000', 'Cản trước: trầy 5cm', 'Tiền cọc 2.000.000 đ, giữ đến 23/12/2026']) {
+      expect(xml, s2).toContain(s2);
+    }
+    // Quyết toán đã trả xe máy cho khách, chỉ còn giữ cọc chờ phạt nguội.
+    expect(xml).not.toContain('Xe máy + cà vẹt:');
+    // Có hư hỏng mới → không đánh "Giống ban đầu"; còn giữ cọc → không đánh "Trả đủ".
+    expect(boxes(xml).slice(-2)).toEqual([' ', ' ']);
+  });
+
+  it('Mioto chuyển tiền về: phí sàn thành số thật; hoàn tác thì quay về 15%', async () => {
+    const owed = (await call('GET', `/api/cashflow?p=${month}`)).json.channelOwed;
+    expect(owed.map((x: any) => [x.id, x.owed])).toEqual([[id, 510_000]]);
+    expect((await call('POST', `/api/rentals/${id}/channel-payout`, { amount: 2_000_000 })).status).toBe(400);
+    const r = await call('POST', `/api/rentals/${id}/channel-payout`, { amount: 500_000, at: at('2026-12-10T10:00') });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(r.json).toMatchObject({ channelPayout: 500_000, channelFee: 520_000 });
+    expect((await detail()).channelMoney).toEqual({ prepaid: 1_020_000, fee: 520_000, payout: 500_000, owed: 0 });
+    expect(await feeEntries()).toEqual([520_000]);
+    expect((await call('GET', `/api/cashflow?p=${month}`)).json.channelOwed).toEqual([]);
+    expect((await call('POST', `/api/rentals/${id}/channel-payout`, { amount: null })).json).toMatchObject({ channelPayout: null, channelFee: 510_000 });
+    expect((await call('POST', `/api/rentals/${id}/channel-payout`, { amount: 500_000, at: at('2026-12-10T10:00') })).status).toBe(200);
+  });
+
+  it('báo cáo theo kênh: Mioto trừ phí sàn, lượt trực tiếp chia theo nguồn khách', async () => {
+    const direct = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, scheduledStart: at('2026-12-21T09:00'), scheduledEnd: at('2026-12-23T09:00'), source: 'returning' });
+    expect(direct.status, JSON.stringify(direct.json)).toBe(200);
+    expect(direct.json).toMatchObject({ channel: 'direct', source: 'returning', channelFee: null });
+    const pre = await call('POST', '/api/rentals/precheck', { vehicleId: vid, customerId: cust, scheduledStart: at('2027-01-05T09:00'), scheduledEnd: at('2027-01-06T09:00') });
+    expect(pre.json.customerRentals).toBe(2);
+    const rep = (await call('GET', `/api/cashflow?p=2026-12&v=${vid}`)).json.channels;
+    expect(rep.rows.map((r: any) => [r.channel, r.rentals, r.revenue, r.fee, r.net])).toEqual([
+      ['mioto', 1, 3_400_000, 520_000, 2_880_000],
+      ['direct', 1, 1_800_000, 0, 1_800_000],
+    ]);
+    expect(rep.sources).toEqual([{ source: 'returning', rentals: 1, revenue: 1_800_000 }]);
+    expect(rep.returning).toBe(1);
+  });
+
+  it('hủy lượt Mioto: app hoàn tiền trả trước cho khách, phí sàn bỏ', async () => {
+    const r = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, scheduledStart: at('2027-02-01T09:00'), scheduledEnd: at('2027-02-02T09:00'), channel: 'mioto', channelPrice: 900_000, channelPrepaid: 360_000 });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    const rid = r.json.id;
+    expect(await feeEntries()).toEqual([520_000, 135_000]);
+    const c = await call('POST', `/api/rentals/${rid}/cancel`, { reason: 'Khách hủy trên app', keep: 0, refund: null });
+    expect(c.status, JSON.stringify(c.json)).toBe(200);
+    const d = await detail(rid);
+    expect(d.payments.filter((p: any) => !p.voidedAt).map((p: any) => [p.direction, p.method, p.amount])).toEqual([
+      ['in', 'mioto', 360_000],
+      ['out', 'mioto', 360_000],
+    ]);
+    expect(d.channelMoney).toMatchObject({ prepaid: 0, fee: 0, owed: 0 });
+    expect(await feeEntries()).toEqual([520_000]);
+  });
+  it('giá thỏa thuận theo ngày (khách trả giá): báo giá, đặt xe, gia hạn vẫn giữ giá, sửa giá được', async () => {
+    const times = { scheduledStart: at('2027-03-01T09:00'), scheduledEnd: at('2027-03-03T09:00') };
+    const pre = await call('POST', '/api/rentals/precheck', { vehicleId: vid, customerId: cust, ...times, priceDay: 750_000 });
+    expect(pre.json.quote.total).toBe(1_500_000);
+    const r = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, ...times, priceDay: 750_000 });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    const rid = r.json.id;
+    expect(JSON.parse(r.json.pricing).priceDay).toBe(750_000);
+    expect((await detail(rid)).money.totalCharges).toBe(1_500_000);
+    expect((await call('PATCH', `/api/rentals/${rid}`, { scheduledEnd: at('2027-03-04T09:00') })).status).toBe(200);
+    expect((await detail(rid)).money.totalCharges).toBe(2_250_000);
+    expect((await call('PATCH', `/api/rentals/${rid}`, { priceDay: 700_000 })).status).toBe(200);
+    expect((await detail(rid)).money.totalCharges).toBe(2_100_000);
+    // Xe vẫn giữ bảng giá gốc cho lượt khác.
+    expect((await call('POST', '/api/rentals/precheck', { vehicleId: vid, ...times })).json.quote.total).toBe(1_800_000);
+    // Xe để giá cuối tuần bằng giá ngày (không có giá cuối tuần riêng): sửa giá ngày thì T7, CN theo luôn.
+    await call('PATCH', `/api/vehicles/${vid}`, { priceWeekendDay: 900_000 });
+    const weekend = { scheduledStart: at('2027-03-06T09:00'), scheduledEnd: at('2027-03-08T09:00') };
+    expect((await call('POST', '/api/rentals/precheck', { vehicleId: vid, ...weekend, priceDay: 750_000 })).json.quote.total).toBe(1_500_000);
   });
 });

@@ -17,6 +17,8 @@ import type {
   FineStatus,
   FuelType,
   PaymentMethod,
+  RentalChannel,
+  RentalSource,
   RentalStatus,
   RentalType,
   Role,
@@ -26,6 +28,7 @@ import type {
 import type { IdCardType } from '../shared/cccd.js';
 import type { CashCategory, CashDirection, CashMethod } from '../shared/cashflow.js';
 import type { PaymentDirection, PaymentPurpose } from '../shared/money.js';
+import type { EnergyMethod } from '../shared/pricing.js';
 
 const createdAt = () => integer('created_at').notNull();
 const updatedAt = () => integer('updated_at').notNull();
@@ -124,10 +127,14 @@ export const vehicles = sqliteTable('vehicles', {
   priceMonth: integer('price_month'),
   /** Giới hạn km mỗi tháng (null = 30 × km/ngày). */
   kmLimitMonth: integer('km_limit_month'),
-  /** Xe điện: số lượt sạc miễn phí cho chuyến đến 2 ngày, từ ngày thứ 3 mỗi ngày thêm 1 lượt (null = 0). */
+  /** Xe điện: số lượt sạc miễn phí mỗi ngày thuê (null = 0). Lượt đặt trước khi đổi quy tắc giữ cách tính cũ (xem shared/pricing.ts). */
   freeCharges: integer('free_charges'),
   /** Xe điện: phí mỗi lượt cắm-rút sạc vượt số lần miễn phí (null/0 = không thu). */
   chargeFee: integer('charge_fee'),
+  /** Xe điện: tiền điện — đ mỗi 1% pin thiếu khi trả / mỗi km đi, cách tính mặc định (null = theo mặc định, 0 = không thu). */
+  energyFeePct: integer('energy_fee_pct'),
+  energyFeeKm: integer('energy_fee_km'),
+  energyMethod: text('energy_method').$type<EnergyMethod>(),
   inspectionExpiry: text('inspection_expiry'),
   insuranceTndsExpiry: text('insurance_tnds_expiry'),
   insuranceBodyExpiry: text('insurance_body_expiry'),
@@ -136,6 +143,11 @@ export const vehicles = sqliteTable('vehicles', {
   nextServiceDate: text('next_service_date'),
   photoFileId: text('photo_file_id'),
   registrationFileId: text('registration_file_id'),
+  /** Giấy đăng ký xe (cà vẹt): số, ngày cấp "YYYY-MM-DD", nơi cấp, tên chủ xe ghi trên giấy — in hợp đồng Mioto. */
+  regNumber: text('reg_number'),
+  regDate: text('reg_date'),
+  regPlace: text('reg_place'),
+  regOwner: text('reg_owner'),
   notes: text('notes'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -225,6 +237,7 @@ export const customers = sqliteTable(
     licenseClass: text('license_class'),
     licenseExpiry: text('license_expiry'),
     licenseIssueDate: text('license_issue_date'),
+    licenseIssuePlace: text('license_issue_place'),
     emergencyName: text('emergency_name'),
     emergencyPhone: text('emergency_phone'),
     emergencyRelation: text('emergency_relation'),
@@ -276,6 +289,22 @@ export const rentals = sqliteTable(
     fineCheckedAt: integer('fine_checked_at'),
     /** Số vi phạm chưa xử phạt tìm thấy trong lúc khách giữ xe ở lần tra đó. */
     fineCheckFound: integer('fine_check_found'),
+    /** Kênh đặt xe: trực tiếp hay qua app (Mioto) — quyết định mẫu hợp đồng/biên bản. */
+    channel: text('channel').$type<RentalChannel>().notNull().default('direct'),
+    /** Mã chuyến trên app (in làm số hợp đồng Mioto). */
+    channelRef: text('channel_ref'),
+    /** Tiền thuê đúng như trên app = giá trị hợp đồng (thay cho bảng giá xe). */
+    channelPrice: integer('channel_price'),
+    /** Đơn giá/ngày hiện trên app (null = tự chia đều theo số ngày). */
+    channelDayPrice: integer('channel_day_price'),
+    /** Phí sàn — CHỈ quản trị thấy, không bao giờ in. Có tiền app chuyển về thì phí = trả trước qua app − tiền chuyển về. */
+    channelFeePct: integer('channel_fee_pct'),
+    channelFee: integer('channel_fee'),
+    /** App đã chuyển tiền về (tiền khách trả trước qua app sau khi trừ phí). */
+    channelPayout: integer('channel_payout'),
+    channelPaidAt: integer('channel_paid_at'),
+    /** Lượt trực tiếp: khách biết tới qua đâu. */
+    source: text('source').$type<RentalSource>(),
     createdBy: integer('created_by'),
     handledBy: integer('handled_by'),
     createdAt: createdAt(),
@@ -444,6 +473,8 @@ export const contractTemplates = sqliteTable('contract_templates', {
   isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
   active: integer('active', { mode: 'boolean' }).notNull().default(true),
   builtin: text('builtin'),
+  /** Mẫu dùng cho lượt qua kênh nào (null = lượt trực tiếp). */
+  channel: text('channel').$type<RentalChannel>(),
   notes: text('notes'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -522,6 +553,8 @@ export const cashEntries = sqliteTable(
     /** Khoản tự ghi từ khoản định kỳ nào, cho kỳ nào ("YYYY-MM"). */
     recurringId: integer('recurring_id'),
     period: text('period'),
+    /** Khoản app tự ghi theo lượt thuê (phí sàn Mioto) — sửa ở lượt thuê, không sửa tay ở Thu chi. */
+    rentalId: integer('rental_id'),
     createdBy: integer('created_by'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

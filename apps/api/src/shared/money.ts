@@ -86,6 +86,47 @@ export function planSettlement(s: MoneySummary, fineHoldAmount: number): Settlem
   };
 }
 
+// ── Lượt qua app (Mioto) ─────────────────────────────────────────────────────
+//
+// Khách trả trước một phần qua app (phiếu method = 'mioto'), app trừ phí sàn rồi
+// chuyển phần còn lại về. Phí sàn chỉ quản trị thấy, không in vào hợp đồng.
+
+export interface ChannelRentalLike {
+  channel: string;
+  status: string;
+  channelFee: number | null;
+  channelPayout: number | null;
+}
+
+export interface ChannelMoney {
+  /** Khách đã trả trước qua app (trừ phần app hoàn lại khách). */
+  prepaid: number;
+  /** Phí sàn: ước tính theo % cho tới khi app chuyển tiền về, sau đó là số thật. */
+  fee: number;
+  /** App đã chuyển về (null = chưa). */
+  payout: number | null;
+  /** App còn phải chuyển về. */
+  owed: number;
+}
+
+export const channelFeeFor = (price: number, pct: number) => Math.round((Math.max(0, price) * Math.max(0, pct)) / 100);
+
+/** Phí sàn đang tính: đã có tiền app chuyển về thì lấy số thật; lượt hủy chưa đối soát thì 0. */
+export function effectiveChannelFee(r: ChannelRentalLike): number {
+  if (r.channel === 'direct') return 0;
+  if (r.channelPayout != null) return r.channelFee ?? 0;
+  return r.status === 'cancelled' ? 0 : (r.channelFee ?? 0);
+}
+
+export function channelMoney(r: ChannelRentalLike, payments: (MoneyPayment & { method: string })[]): ChannelMoney | null {
+  if (r.channel === 'direct') return null;
+  const prepaid = payments
+    .filter((p) => !p.voidedAt && p.method === 'mioto' && p.direction !== 'offset')
+    .reduce((s, p) => s + (p.direction === 'in' ? p.amount : -p.amount), 0);
+  const fee = effectiveChannelFee(r);
+  return { prepaid, fee, payout: r.channelPayout, owed: r.channelPayout == null ? Math.max(0, prepaid - fee) : 0 };
+}
+
 // ── Khách hủy đặt xe ─────────────────────────────────────────────────────────
 
 export interface CancelPolicy {

@@ -10,16 +10,16 @@ import { api, fileUrl } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
 import type { ContractTemplate } from '@/lib/types';
 import { errorMessage } from '@/lib/utils';
-import { TEMPLATE_KINDS, TEMPLATE_KIND_LABEL, type TemplateKind } from '@shared/constants';
+import { RENTAL_CHANNELS, RENTAL_CHANNEL_LABEL, TEMPLATE_KINDS, TEMPLATE_KIND_LABEL, type RentalChannel, type TemplateKind } from '@shared/constants';
 import { fmtDate } from '@shared/time';
 
-const BUILTIN_FILES = ['hop-dong-thue-xe.docx', 'bien-ban-giao-xe.docx', 'bien-ban-nhan-xe.docx'];
+const BUILTIN_FILES = ['hop-dong-thue-xe.docx', 'bien-ban-giao-xe.docx', 'bien-ban-nhan-xe.docx', 'mioto-hop-dong.docx', 'mioto-bien-ban.docx'];
 
 export function SettingsTemplates() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ['templates'], queryFn: () => api.get<ContractTemplate[]>('/api/templates') });
   const { data: fields } = useQuery({ queryKey: ['template-fields'], queryFn: () => api.get<{ group: string; fields: { key: string; label: string }[] }[]>('/api/templates/fields') });
-  const [upload, setUpload] = useState<{ templateId?: number; name: string; kind: TemplateKind } | null>(null);
+  const [upload, setUpload] = useState<{ templateId?: number; name: string; kind: TemplateKind; channel: RentalChannel } | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -33,6 +33,7 @@ export function SettingsTemplates() {
       if (upload.templateId) form.append('templateId', String(upload.templateId));
       form.append('name', upload.name);
       form.append('kind', upload.kind);
+      form.append('channel', upload.channel);
       form.append('file', file);
       await api.form('/api/templates', form);
       toast.success(upload.templateId ? 'Đã lên phiên bản mới của mẫu' : 'Đã thêm mẫu');
@@ -53,7 +54,7 @@ export function SettingsTemplates() {
         Mẫu là file Word (.docx). Tải mẫu về, sửa nội dung bằng Word, giữ nguyên các biến trong ngoặc nhọn như <code className="font-mono">{'{khach.ho_ten}'}</code>, rồi tải lên lại. Hợp đồng đã in trước đó không bị thay đổi.
       </Notice>
       <Card>
-        <CardHeader title="Mẫu đang có" action={<Button size="sm" onClick={() => setUpload({ name: '', kind: 'contract' })}><Upload /> Thêm mẫu</Button>} />
+        <CardHeader title="Mẫu đang có" action={<Button size="sm" onClick={() => setUpload({ name: '', kind: 'contract', channel: 'direct' })}><Upload /> Thêm mẫu</Button>} />
         <ul className="divide-y divide-border">
           {data.map((t) => (
             <li key={t.id} className="flex flex-wrap items-center gap-3 px-4 py-3 md:px-5">
@@ -62,6 +63,7 @@ export function SettingsTemplates() {
               <div className="min-w-0 flex-[1_1_14rem]">
                 <p className="flex flex-wrap items-center gap-2 font-medium">
                   {t.name}
+                  {t.channel && <Badge tone="violet">{RENTAL_CHANNEL_LABEL[t.channel]}</Badge>}
                   {t.isDefault && <Badge tone="blue">Mặc định</Badge>}
                   {!t.active && <Badge>Tắt</Badge>}
                 </p>
@@ -74,7 +76,7 @@ export function SettingsTemplates() {
                 <a href={fileUrl(t.fileId, { download: true })} className="inline-flex h-8 items-center gap-1 rounded-lg bg-surface-2 px-2.5 text-xs font-medium hover:bg-surface-3">
                   <Download className="size-3.5" /> Tải về
                 </a>
-                <Button size="sm" variant="secondary" onClick={() => setUpload({ templateId: t.id, name: t.name, kind: t.kind })}>
+                <Button size="sm" variant="secondary" onClick={() => setUpload({ templateId: t.id, name: t.name, kind: t.kind, channel: t.channel ?? 'direct' })}>
                   <Upload /> Thay file
                 </Button>
                 {!t.isDefault && (
@@ -145,6 +147,15 @@ export function SettingsTemplates() {
                     {TEMPLATE_KINDS.map((k) => (
                       <option key={k} value={k}>
                         {TEMPLATE_KIND_LABEL[k]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Dùng cho lượt" hint="Mỗi loại văn bản có mẫu mặc định riêng cho từng kênh">
+                  <Select value={upload.channel} onChange={(e) => setUpload({ ...upload, channel: e.target.value as RentalChannel })}>
+                    {RENTAL_CHANNELS.map((c) => (
+                      <option key={c} value={c}>
+                        {c === 'direct' ? 'Khách trực tiếp' : `Đặt qua ${RENTAL_CHANNEL_LABEL[c]}`}
                       </option>
                     ))}
                   </Select>

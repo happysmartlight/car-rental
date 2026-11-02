@@ -13,13 +13,26 @@ import { DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select
 import { Card, CardBody, CardHeader, Notice, Spinner } from '@/components/ui/misc';
 import { ApiError, api, fileUrl, qs } from '@/lib/api';
 import { clearDraft, loadDraft, useDraftAutosave, type Draft } from '@/lib/draft';
-import { useAuth, useSettings } from '@/lib/hooks';
+import { useAuth, useDebounced, useSettings } from '@/lib/hooks';
 import type { CalendarData, Customer, HandoverAccessory, Precheck, Rental, VehicleWithStatus } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
-import { cancelPolicyText, defaultFineHold } from '@shared/money';
-import { COLLATERAL_KINDS, COLLATERAL_KIND_LABEL, type CollateralKind } from '@shared/constants';
+import { cancelPolicyText, channelFeeFor, defaultFineHold } from '@shared/money';
+import { chargeDays } from '@shared/pricing';
+import {
+  COLLATERAL_KINDS,
+  COLLATERAL_KIND_LABEL,
+  DEFAULT_MIOTO_FEE_PCT,
+  RENTAL_SOURCES,
+  RENTAL_SOURCE_LABEL,
+  type CollateralKind,
+  type RentalChannel,
+  type RentalSource,
+} from '@shared/constants';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { DAY_MS, HOUR_MS, addMonthsVn, fmtDateTime, fmtDuration } from '@shared/time';
+
+/** Khách trả trước qua app: 40% / 100% tiền thuê trên app, hoặc số nhập tay. */
+type PrepaidMode = '40' | '100' | 'other';
 
 interface PayRow {
   purpose: 'rent' | 'deposit';
@@ -54,6 +67,18 @@ interface RentalDraft {
   collaterals: CollRow[];
   notes: string;
   accessories: HandoverAccessory[] | null;
+  channel?: RentalChannel;
+  channelRef?: string;
+  appPrice?: number | null;
+  priceDay?: number | null;
+  priceWeekend?: number | null;
+  priceMonth?: number | null;
+  appDayPrice?: number | null;
+  prepaidMode?: PrepaidMode;
+  prepaidCustom?: number | null;
+  feePct?: number | null;
+  source?: RentalSource | null;
+  sourceTouched?: boolean;
 }
 
 const DRAFT_KEY = 'rental-new';
@@ -118,6 +143,21 @@ export default function RentalNew() {
   const [payments, setPayments] = useState<PayRow[]>([]);
   const [collaterals, setCollaterals] = useState<CollRow[]>([]);
   const [notes, setNotes] = useState('');
+  // Kênh đặt xe: qua Mioto thì giá theo app, hợp đồng/biên bản theo mẫu Mioto.
+  const [channel, setChannel] = useState<RentalChannel>('direct');
+  const [channelRef, setChannelRef] = useState('');
+  const [appPrice, setAppPrice] = useState<number | null>(null);
+  const [appDayPrice, setAppDayPrice] = useState<number | null>(null);
+  const [prepaidMode, setPrepaidMode] = useState<PrepaidMode>('40');
+  const [prepaidCustom, setPrepaidCustom] = useState<number | null>(null);
+  /** null = theo cài đặt. Chỉ quản trị thấy/sửa. */
+  const [feePct, setFeePct] = useState<number | null>(null);
+  const [source, setSource] = useState<RentalSource | null>(null);
+  const [sourceTouched, setSourceTouched] = useState(false);
+  /** Giá thỏa thuận riêng cho lượt này (khách trả giá); null = theo bảng giá xe. */
+  const [priceDay, setPriceDay] = useState<number | null>(null);
+  const [priceWeekend, setPriceWeekend] = useState<number | null>(null);
+  const [priceMonth, setPriceMonth] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   // Nháp đơn đang nhập dở lần trước: hỏi nhập tiếp hay bỏ, chưa quyết thì không ghi đè.
   const [pending, setPending] = useState<Draft<RentalDraft> | null>(() => {
@@ -173,15 +213,53 @@ export default function RentalNew() {
   );
 
   const driverIds = drivers.map((d) => d.id);
+  // Gõ giá thỏa thuận: chờ gõ xong mới báo giá lại.
+  const qDay = useDebounced(priceDay, 300);
+  const qWeekend = useDebounced(priceWeekend, 300);
+  const qMonth = useDebounced(priceMonth, 300);
   const { data: pre, isFetching: checking, error: preError } = useQuery({
-    queryKey: ['precheck', vehicleId, customer?.id, driverIds.join(','), start, end],
-    queryFn: () => api.post<Precheck>('/api/rentals/precheck', { vehicleId, customerId: customer?.id ?? null, driverIds, scheduledStart: start, scheduledEnd: end }),
+    queryKey: ['precheck', vehicleId, customer?.id, driverIds.join(','), start, end, qDay, qWeekend, qMonth],
+    queryFn: () =>
+      api.post<Precheck>('/api/rentals/precheck', {
+        vehicleId,
+        customerId: customer?.id ?? null,
+        driverIds,
+        scheduledStart: start,
+        scheduledEnd: end,
+        priceDay: qDay,
+        priceWeekendDay: qWeekend,
+        priceMonth: qMonth,
+      }),
     enabled: !!vehicleId && validTime,
     placeholderData: (p) => p,
   });
+  // Đổi xe: giá thỏa thuận của xe cũ bỏ đi.
+  const pickVehicle = (id: number) => {
+    if (id === vehicleId) return;
+    setVehicleId(id);
+    setPriceDay(null);
+    setPriceWeekend(null);
+    setPriceMonth(null);
+  };
+  const hasWeekendPrice = !!vehicle?.priceWeekendDay && vehicle.priceWeekendDay !== vehicle.priceDay;
 
-  const fee = pickupMethod === 'delivery' ? (deliveryFee ?? settings?.rules.deliveryFeeDefault ?? 0) : 0;
-  const total = (pre?.quote.total ?? 0) + fee - (discount ?? 0);
+  // Khách quen (đã từng thuê) → gợi ý sẵn nguồn, cho tới khi người dùng tự chọn.
+  const customerRentals = pre?.customerRentals;
+  useEffect(() => {
+    if (!sourceTouched && customerRentals != null) setSource(customerRentals > 0 ? 'returning' : null);
+  }, [customerRentals, sourceTouched]);
+
+  const viaApp = channel !== 'direct';
+  const appDays = validTime && settings ? Math.max(1, chargeDays(start!, end!, settings.rules.graceMinutes)) : 1;
+  // Lượt Mioto: đơn giá/ngày (mặc định giá xe) × số ngày = tiền thuê trên app; app có giá cuối tuần/khuyến mãi thì sửa tay tổng.
+  const appDay = appDayPrice ?? vehicle?.priceDay ?? 0;
+  const appTotal = appPrice ?? appDay * appDays;
+  const prepaid = !viaApp ? 0 : prepaidMode === 'other' ? (prepaidCustom ?? 0) : Math.round((appTotal * Number(prepaidMode)) / 100);
+  const feeRate = feePct ?? settings?.rules.miotoFeePct ?? DEFAULT_MIOTO_FEE_PCT;
+  const appFee = channelFeeFor(appTotal, feeRate);
+  // Lượt qua app: phí giao xe (nếu có) đã nằm trong tiền thuê trên app, không giảm giá riêng.
+  const fee = pickupMethod === 'delivery' && !viaApp ? (deliveryFee ?? settings?.rules.deliveryFeeDefault ?? 0) : 0;
+  const total = viaApp ? appTotal : (pre?.quote.total ?? 0) + fee - (discount ?? 0);
   const paidRent = payments.filter((p) => p.purpose === 'rent').reduce((s, p) => s + (p.amount ?? 0), 0);
   const paidDeposit = payments.filter((p) => p.purpose === 'deposit').reduce((s, p) => s + (p.amount ?? 0), 0);
   const dangerWarnings = (pre?.warnings ?? []).filter((w) => w.severity === 'danger');
@@ -207,6 +285,18 @@ export default function RentalNew() {
     collaterals,
     notes,
     accessories: acc.edited,
+    channel,
+    channelRef,
+    appPrice,
+    priceDay,
+    priceWeekend,
+    priceMonth,
+    appDayPrice,
+    prepaidMode,
+    prepaidCustom,
+    feePct,
+    source,
+    sourceTouched,
   };
   useDraftAutosave(DRAFT_KEY, draft, touched && !pending && !saving && !done.current && !!(customer || vehicleId));
   const touch = () => !touched && setTouched(true);
@@ -232,6 +322,18 @@ export default function RentalNew() {
     setPayments(x.payments);
     setCollaterals(x.collaterals);
     setNotes(x.notes);
+    setChannel(x.channel ?? 'direct');
+    setChannelRef(x.channelRef ?? '');
+    setAppPrice(x.appPrice ?? null);
+    setPriceDay(x.priceDay ?? null);
+    setPriceWeekend(x.priceWeekend ?? null);
+    setPriceMonth(x.priceMonth ?? null);
+    setAppDayPrice(x.appDayPrice ?? null);
+    setPrepaidMode(x.prepaidMode ?? '40');
+    setPrepaidCustom(x.prepaidCustom ?? null);
+    setFeePct(x.feePct ?? null);
+    setSource(x.source ?? null);
+    setSourceTouched(!!x.sourceTouched);
     if (x.accessories) setPendingAcc(x.accessories);
     const people = await Promise.all(
       [x.customerId, ...x.driverIds].map((cid) => (cid ? api.get<{ customer: Customer }>(`/api/customers/${cid}`).then((r) => r.customer, () => null) : Promise.resolve(null))),
@@ -254,6 +356,7 @@ export default function RentalNew() {
     if (!vehicleId) return toast.error('Chọn xe');
     if (!validTime) return toast.error('Kiểm tra lại giờ nhận / trả');
     if (holdError) return toast.error(`Tiền giữ chờ phạt nguội: ${holdError.toLowerCase()}`);
+    if (viaApp && !(appTotal > 0)) return toast.error('Nhập tiền thuê đúng như trên app Mioto');
     setSaving(true);
     try {
       const r = await api.post<Rental>('/api/rentals', {
@@ -261,11 +364,15 @@ export default function RentalNew() {
         vehicleId,
         scheduledStart: start,
         scheduledEnd: end,
+        channel,
+        ...(viaApp
+          ? { channelRef: channelRef.trim() || null, channelPrice: appTotal, channelDayPrice: appDay, channelPrepaid: prepaid, ...(isAdmin && feePct != null ? { channelFeePct: feePct } : {}) }
+          : { source, priceDay, priceWeekendDay: priceWeekend, priceMonth }),
         pickupMethod,
         pickupLocation: pickupLocation || null,
         returnLocation: returnLocation || null,
         deliveryFee: fee,
-        discount: discount ?? 0,
+        discount: viaApp ? 0 : (discount ?? 0),
         discountNote: discountNote || null,
         depositRequired: deposit ?? 0,
         fineHoldRequired: hold,
@@ -311,27 +418,56 @@ export default function RentalNew() {
                 {pre?.quote.kmLimit ? ` · giới hạn ${fmtNumber(pre.quote.kmLimit)} km` : ''}
               </p>
             </div>
-            <div className="space-y-1.5 border-t border-border pt-3 text-sm">
-              {pre?.quote.lines.map((l, i) => (
-                <div key={i} className="flex justify-between gap-3">
-                  <span className="text-muted">{l.description}</span>
-                  <span className="tabular shrink-0">{fmtNumber(l.amount)}</span>
-                </div>
-              ))}
-              {fee > 0 && (
+            {viaApp ? (
+              <div className="space-y-1.5 border-t border-border pt-3 text-sm">
                 <div className="flex justify-between gap-3">
-                  <span className="text-muted">Giao/nhận tận nơi</span>
-                  <span className="tabular">{fmtNumber(fee)}</span>
+                  <span className="text-muted">Tiền thuê trên app Mioto</span>
+                  <span className="tabular shrink-0">{appTotal ? fmtNumber(appTotal) : '—'}</span>
                 </div>
-              )}
-              {!!discount && (
-                <div className="flex justify-between gap-3 text-emerald-600">
-                  <span>{discountNote || 'Giảm giá'}</span>
-                  <span className="tabular">-{fmtNumber(discount)}</span>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted">Khách đã trả qua app</span>
+                  <span className="tabular shrink-0">{fmtNumber(prepaid)}</span>
                 </div>
-              )}
-            </div>
-            {pre?.quote.mode === 'month' && <Notice tone="violet">Tính theo tháng — rẻ hơn tính theo ngày ({fmtVnd(vehicle.priceMonth ?? 0)}/tháng).</Notice>}
+                <div className="flex justify-between gap-3 font-medium">
+                  <span>Thu khi giao xe</span>
+                  <span className="tabular shrink-0">{fmtNumber(Math.max(0, appTotal - prepaid))}</span>
+                </div>
+                {isAdmin && appTotal > 0 && (
+                  <div className="mt-2 space-y-1 rounded-xl bg-surface-2 px-3 py-2 text-xs">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted">Phí Mioto {feeRate}% (không in)</span>
+                      <span className="tabular">−{fmtNumber(appFee)}</span>
+                    </div>
+                    <div className="flex justify-between gap-3 font-medium">
+                      <span>Thực nhận</span>
+                      <span className="tabular">{fmtNumber(appTotal - appFee)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-1.5 border-t border-border pt-3 text-sm">
+                {pre?.quote.lines.map((l, i) => (
+                  <div key={i} className="flex justify-between gap-3">
+                    <span className="text-muted">{l.description}</span>
+                    <span className="tabular shrink-0">{fmtNumber(l.amount)}</span>
+                  </div>
+                ))}
+                {fee > 0 && (
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted">Giao/nhận tận nơi</span>
+                    <span className="tabular">{fmtNumber(fee)}</span>
+                  </div>
+                )}
+                {!!discount && (
+                  <div className="flex justify-between gap-3 text-emerald-600">
+                    <span>{discountNote || 'Giảm giá'}</span>
+                    <span className="tabular">-{fmtNumber(discount)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            {!viaApp && pre?.quote.mode === 'month' && <Notice tone="violet">Tính theo tháng — rẻ hơn tính theo ngày ({fmtVnd(vehicle.priceMonth ?? 0)}/tháng).</Notice>}
             {(excluded.length > 0 || added.length > 0) && (
               <div className="space-y-0.5 text-sm">
                 {excluded.length > 0 && <p className="text-amber-600">Không kèm: {excluded.map((a) => a.name).join(', ')}</p>}
@@ -418,6 +554,20 @@ export default function RentalNew() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]" onPointerDownCapture={touch} onChangeCapture={touch} onKeyDownCapture={touch}>
         <div className="space-y-4">
           <Section n={1} title="Khách thuê">
+            <Segmented
+              className="mb-3 flex w-full"
+              value={channel}
+              onChange={setChannel}
+              options={[
+                { value: 'direct', label: 'Khách trực tiếp' },
+                { value: 'mioto', label: 'Đặt qua Mioto' },
+              ]}
+            />
+            {viaApp && (
+              <Field label="Mã chuyến Mioto" hint="In làm số hợp đồng Mioto; tìm lượt thuê theo mã này" className="mb-3">
+                <Input value={channelRef} onChange={(e) => setChannelRef(e.target.value.toUpperCase())} placeholder="Mã trên app Mioto" autoCapitalize="characters" />
+              </Field>
+            )}
             <CustomerPicker value={customer} onChange={setCustomer} />
             {customer && (
               <div className="mt-3 space-y-2">
@@ -446,6 +596,26 @@ export default function RentalNew() {
                     <UserPlus /> Thêm người lái phụ
                   </Button>
                 )}
+              </div>
+            )}
+            {customer && !viaApp && (
+              <div className="mt-3">
+                <p className="mb-1.5 text-sm font-medium">Khách biết tới qua</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {RENTAL_SOURCES.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={chip(source === s)}
+                      onClick={() => {
+                        setSource(source === s ? null : s);
+                        setSourceTouched(true);
+                      }}
+                    >
+                      {RENTAL_SOURCE_LABEL[s]}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </Section>
@@ -492,7 +662,7 @@ export default function RentalNew() {
                   <button
                     key={v.id}
                     type="button"
-                    onClick={() => setVehicleId(v.id)}
+                    onClick={() => pickVehicle(v.id)}
                     className={cn('flex items-center gap-3 rounded-2xl border p-2.5 text-left transition-colors', selected ? 'border-brand bg-brand-soft ring-2 ring-brand/30' : 'border-border hover:bg-surface-2')}
                   >
                     {v.photoFileId ? (
@@ -540,21 +710,98 @@ export default function RentalNew() {
                 <Field label="Địa chỉ nhận lại" hint="Để trống = như nơi giao">
                   <Input value={returnLocation} onChange={(e) => setReturnLocation(e.target.value)} />
                 </Field>
-                <Field label="Phí giao/nhận">
-                  <MoneyInput value={deliveryFee ?? settings?.rules.deliveryFeeDefault ?? 0} onChange={setDeliveryFee} />
-                </Field>
+                {viaApp ? (
+                  <p className="self-end pb-2 text-sm text-muted">Phí giao xe (nếu có) đã tính trong tiền thuê trên app.</p>
+                ) : (
+                  <Field label="Phí giao/nhận">
+                    <MoneyInput value={deliveryFee ?? settings?.rules.deliveryFeeDefault ?? 0} onChange={setDeliveryFee} />
+                  </Field>
+                )}
               </div>
             )}
           </Section>
 
           <Section n={vehicle ? 5 : 4} title="Giá, cọc & thanh toán">
+            {!viaApp && vehicle && (
+              <div className="mb-5 grid gap-4 sm:grid-cols-2">
+                <Field
+                  label={hasWeekendPrice ? 'Giá ngày thường' : 'Giá thuê/ngày'}
+                  hint={priceDay != null && priceDay !== vehicle.priceDay ? `Giá xe ${fmtVnd(vehicle.priceDay)} — giá này chỉ áp cho lượt này` : 'Khách trả giá thì sửa ở đây — chỉ áp cho lượt này'}
+                >
+                  <MoneyInput value={priceDay ?? vehicle.priceDay} onChange={setPriceDay} />
+                </Field>
+                {hasWeekendPrice && (
+                  <Field label="Giá ngày cuối tuần" hint={priceWeekend != null && priceWeekend !== vehicle.priceWeekendDay ? `Giá xe ${fmtVnd(vehicle.priceWeekendDay ?? 0)}` : undefined}>
+                    <MoneyInput value={priceWeekend ?? vehicle.priceWeekendDay} onChange={setPriceWeekend} />
+                  </Field>
+                )}
+                {pre?.quote.mode === 'month' && !!vehicle.priceMonth && (
+                  <Field label="Giá thuê tháng" hint={priceMonth != null && priceMonth !== vehicle.priceMonth ? `Giá xe ${fmtVnd(vehicle.priceMonth)}` : 'Lượt này tính theo tháng'}>
+                    <MoneyInput value={priceMonth ?? vehicle.priceMonth} onChange={setPriceMonth} />
+                  </Field>
+                )}
+              </div>
+            )}
+            {viaApp && (
+              <div className="mb-5 grid gap-4 sm:grid-cols-2">
+                <Field label="Đơn giá/ngày trên app" hint={appDayPrice != null && vehicle && appDayPrice !== vehicle.priceDay ? `Giá xe ${fmtVnd(vehicle.priceDay)}` : 'Như trên app Mioto; khách trả giá thì sửa ở đây'}>
+                  <MoneyInput value={appDay || null} onChange={setAppDayPrice} />
+                </Field>
+                <Field
+                  label="Tiền thuê trên app Mioto"
+                  required
+                  hint={
+                    appPrice == null ? (
+                      `= ${fmtVnd(appDay)} × ${appDays} ngày · in vào hợp đồng là giá trị hợp đồng`
+                    ) : (
+                      <>
+                        Đã sửa theo app ·{' '}
+                        <button type="button" className="font-medium text-brand" onClick={() => setAppPrice(null)}>
+                          tính lại = đơn giá × {appDays} ngày
+                        </button>
+                      </>
+                    )
+                  }
+                >
+                  <MoneyInput value={appTotal || null} onChange={setAppPrice} />
+                </Field>
+                <Field label="Khách đã trả trước qua app" hint="Ghi thành phiếu thu “Qua app Mioto”; phần còn lại thu khi giao xe">
+                  <div className="flex items-center gap-3">
+                    <Segmented
+                      value={prepaidMode}
+                      onChange={setPrepaidMode}
+                      options={[
+                        { value: '40', label: '40%' },
+                        { value: '100', label: '100%' },
+                        { value: 'other', label: 'Số khác' },
+                      ]}
+                    />
+                    {prepaidMode !== 'other' && <span className="tabular text-sm font-medium">{fmtVnd(prepaid)}</span>}
+                  </div>
+                  {prepaidMode === 'other' && (
+                    <div className="mt-2">
+                      <MoneyInput value={prepaidCustom} onChange={setPrepaidCustom} />
+                    </div>
+                  )}
+                </Field>
+                {isAdmin && (
+                  <Field label="Phí Mioto — chỉ quản lý thấy, không in" hint={appTotal ? `≈ ${fmtVnd(appFee)} · Mioto chuyển về ≈ ${fmtVnd(Math.max(0, prepaid - appFee))}` : 'Ghi vào Thu chi để tính lãi thật'}>
+                    <NumberInput value={feeRate} onChange={setFeePct} suffix="%" />
+                  </Field>
+                )}
+              </div>
+            )}
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Giảm giá">
-                <MoneyInput value={discount} onChange={setDiscount} />
-              </Field>
-              <Field label="Lý do giảm">
-                <Input value={discountNote} onChange={(e) => setDiscountNote(e.target.value)} placeholder="Khách quen, thuê dài ngày…" />
-              </Field>
+              {!viaApp && (
+                <>
+                  <Field label="Giảm giá">
+                    <MoneyInput value={discount} onChange={setDiscount} />
+                  </Field>
+                  <Field label="Lý do giảm">
+                    <Input value={discountNote} onChange={(e) => setDiscountNote(e.target.value)} placeholder="Khách quen, thuê dài ngày…" />
+                  </Field>
+                </>
+              )}
               <Field label="Tiền cọc thỏa thuận" hint={vehicle ? `Mặc định của xe: ${fmtVnd(vehicle.depositAmount)}` : undefined}>
                 <MoneyInput
                   value={deposit}

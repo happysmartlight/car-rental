@@ -19,7 +19,7 @@ import type { CashflowReport, VehicleDetail as Detail } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { BLOCK_KINDS, BLOCK_KIND_LABEL, FUEL_LABEL, TRANSMISSION_LABEL, type BlockKind } from '@shared/constants';
 import { CASH_CATEGORY, currentPeriodKey } from '@shared/cashflow';
-import { CHARGE_BASE_DAYS, vehicleChargingPolicy } from '@shared/pricing';
+import { vehicleChargingPolicy } from '@shared/pricing';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { daysUntil, fmtDate, fmtDateKey, fmtDateTime } from '@shared/time';
 
@@ -143,6 +143,11 @@ export default function VehicleDetail() {
               <InfoRow label="Màu">{v.color}</InfoRow>
               <InfoRow label="Số khung">{v.vin}</InfoRow>
               <InfoRow label="Số máy">{v.engineNo}</InfoRow>
+              {v.regNumber && (
+                <InfoRow label="Đăng ký xe">
+                  {[v.regNumber, v.regDate && `cấp ${fmtDateKey(v.regDate)}`, v.regPlace, v.regOwner && `chủ xe ${v.regOwner}`].filter(Boolean).join(' · ')}
+                </InfoRow>
+              )}
               <InfoRow label="Chủ xe">{v.ownerType === 'own' ? 'Xe nhà' : `${v.ownerName ?? 'Ký gửi'} (${v.ownerSharePct ?? '?'}%)`}</InfoRow>
             </CardBody>
           </Card>
@@ -161,8 +166,14 @@ export default function VehicleDetail() {
               )}
               {charging && (
                 <>
-                  <InfoRow label="Sạc miễn phí">{charging.baseFree ? `${charging.baseFree} lượt (≤ ${CHARGE_BASE_DAYS} ngày), +1 lượt/ngày` : 'Không'}</InfoRow>
-                  {!!charging.fee && <InfoRow label="Sạc vượt">{fmtVnd(charging.fee)}/lượt</InfoRow>}
+                  <InfoRow label="Sạc miễn phí">{charging.baseFree ? `${charging.baseFree} lượt mỗi ngày thuê` : 'Không'}</InfoRow>
+                  {!!charging.fee && <InfoRow label="Sạc vượt">{fmtVnd(charging.fee)}/lượt cắm</InfoRow>}
+                  {(!!charging.pctFee || !!charging.kmFee) && (
+                    <InfoRow label="Tiền điện">
+                      {[charging.pctFee && `${fmtVnd(charging.pctFee)}/1% pin thiếu`, charging.kmFee && `${fmtVnd(charging.kmFee)}/km`].filter(Boolean).join(' hoặc ')}
+                      {charging.method && ` · mặc định ${charging.method === 'pct' ? 'theo % pin' : 'theo km'}`}
+                    </InfoRow>
+                  )}
                 </>
               )}
               <InfoRow label="Cọc mặc định">{fmtVnd(v.depositAmount)}</InfoRow>

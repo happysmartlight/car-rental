@@ -2,7 +2,7 @@
 // Vẽ bằng canvas ngay trên máy (khách không vào được app qua Tailscale nên không gửi link).
 
 import { FUEL_LABEL, TRANSMISSION_LABEL } from '@shared/constants';
-import { CHARGE_BASE_DAYS, chargingText, vehicleChargingPolicy } from '@shared/pricing';
+import { chargingText, vehicleChargingPolicy } from '@shared/pricing';
 import { fmtNumber } from '@shared/text';
 import { daysUntil, fmtDate, fmtDateKey } from '@shared/time';
 import { fileUrl } from './api';
@@ -43,6 +43,9 @@ export type ShareVehicle = Pick<
   | 'kmLimitMonth'
   | 'freeCharges'
   | 'chargeFee'
+  | 'energyFeePct'
+  | 'energyFeeKm'
+  | 'energyMethod'
 > & { highlights: string[] };
 
 // Bộ vẽ dùng chung với ảnh gửi khách của lượt thuê (rentalCard.ts).
@@ -369,11 +372,10 @@ export async function renderVehicleCard(v: ShareVehicle, biz: BusinessSettings, 
     if (v.overHourFee) rows.push(['Trả xe trễ', `${vnd(v.overHourFee)}/giờ`]);
   }
   const ch = opt.charging ? vehicleChargingPolicy(v) : null;
-  if (ch?.baseFree) {
-    rows.push([`Sạc pin miễn phí (thuê ≤ ${CHARGE_BASE_DAYS} ngày)`, `${ch.baseFree} lượt`]);
-    rows.push([`Từ ngày thứ ${CHARGE_BASE_DAYS + 1}, mỗi ngày thêm`, '1 lượt miễn phí']);
-  }
-  if (ch?.fee) rows.push([ch.baseFree ? 'Sạc vượt (mỗi lần cắm-rút)' : 'Sạc pin (mỗi lần cắm-rút)', `${vnd(ch.fee)}/lượt`]);
+  if (ch?.baseFree) rows.push(['Sạc pin miễn phí', `${ch.baseFree} lượt/ngày thuê`]);
+  if (ch?.fee) rows.push([ch.baseFree ? 'Sạc quá số lượt (mỗi lần cắm)' : 'Sạc pin (mỗi lần cắm)', `${vnd(ch.fee)}/lượt`]);
+  if (ch?.method === 'pct' && ch.pctFee) rows.push(['Tiền điện (pin thấp hơn lúc nhận)', `${vnd(ch.pctFee)}/1%`]);
+  if (ch?.method === 'km' && ch.kmFee) rows.push(['Tiền điện (theo km đi)', `${vnd(ch.kmFee)}/km`]);
   if (opt.deposit && v.depositAmount) rows.push(['Đặt cọc', vnd(v.depositAmount)]);
   if (rows.length) {
     pen.gap(20);

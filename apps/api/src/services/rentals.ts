@@ -7,13 +7,24 @@ import type { Customer, HandoverAccessory, HandoverDamage, HandoverPhoto, Rental
 import { badRequest, conflict, notFound } from '../lib/http.js';
 import { getSetting } from '../lib/settings.js';
 import { ageAt } from '../shared/cccd.js';
-import type { ChargeKind, CollateralKind, PaymentMethod, RentalStatus } from '../shared/constants.js';
-import { RENTAL_STATUS } from '../shared/constants.js';
-import { defaultFineHold, monthPeriods, planCancellation, summarizeMoney, type MonthPeriod, type MoneySummary, type PaymentPurpose } from '../shared/money.js';
-import { quoteRental, vehicleChargingPolicy, type Quote, type VehiclePricing } from '../shared/pricing.js';
+import type { ChargeKind, CollateralKind, PaymentMethod, RentalChannel, RentalSource, RentalStatus } from '../shared/constants.js';
+import { RENTAL_CHANNEL_LABEL, RENTAL_STATUS } from '../shared/constants.js';
+import {
+  channelFeeFor,
+  channelMoney,
+  defaultFineHold,
+  effectiveChannelFee,
+  monthPeriods,
+  planCancellation,
+  summarizeMoney,
+  type MonthPeriod,
+  type MoneySummary,
+  type PaymentPurpose,
+} from '../shared/money.js';
+import { quoteRental, vehicleChargingPolicy, type PriceLine, type Quote, type VehiclePricing } from '../shared/pricing.js';
 import { maintenanceWarnings } from './maintenance.js';
 import { fmtNumber } from '../shared/text.js';
-import { DAY_MS, fmtDateTime, vnDateKey, vnParts } from '../shared/time.js';
+import { DAY_MS, fmtDateTime, fmtDuration, vnDateKey, vnParts } from '../shared/time.js';
 
 export const OPEN_STATUSES: RentalStatus[] = ['booked', 'active'];
 
@@ -30,12 +41,37 @@ export function vehiclePricing(v: Vehicle): VehiclePricing {
     kmLimitMonth: v.kmLimitMonth,
     freeCharges: charging?.baseFree ?? null,
     chargeFee: charging?.fee ?? null,
+    // Đánh dấu quy tắc mới (mỗi ngày thuê N lượt sạc miễn phí) để lượt đặt trước đó giữ quy tắc cũ.
+    chargePerDay: true,
+    energyFeePct: charging?.pctFee ?? null,
+    energyFeeKm: charging?.kmFee ?? null,
+    energyMethod: charging?.method ?? null,
   };
 }
 
 export function rentalPricing(r: Rental): VehiclePricing {
   return JSON.parse(r.pricing) as VehiclePricing;
 }
+
+/** Giá thỏa thuận riêng cho một lượt (khách trả giá) — bỏ trống = theo bảng giá. */
+export interface NegotiatedPrice {
+  priceDay?: number | null;
+  priceWeekendDay?: number | null;
+  priceMonth?: number | null;
+}
+
+export function negotiatedPricing<T extends Pick<VehiclePricing, 'priceDay' | 'priceWeekendDay' | 'priceMonth'>>(base: T, o: NegotiatedPrice): T {
+  // Xe không có giá cuối tuần riêng (trống hoặc bằng giá ngày): sửa giá ngày thì cuối tuần theo luôn.
+  const sameWeekend = !base.priceWeekendDay || base.priceWeekendDay === base.priceDay;
+  return {
+    ...base,
+    ...(o.priceDay ? { priceDay: o.priceDay, ...(sameWeekend ? { priceWeekendDay: null } : {}) } : {}),
+    ...(o.priceWeekendDay ? { priceWeekendDay: o.priceWeekendDay } : {}),
+    ...(o.priceMonth ? { priceMonth: o.priceMonth } : {}),
+  };
+}
+
+const hasNegotiated = (o: NegotiatedPrice) => !!(o.priceDay || o.priceWeekendDay || o.priceMonth);
 
 export function getVehicle(id: number): Vehicle {
   const v = db.select().from(schema.vehicles).where(eq(schema.vehicles.id, id)).get();
@@ -164,7 +200,7 @@ export interface NewCollateral {
   notes?: string | null;
 }
 
-export interface CreateRentalInput {
+export interface CreateRentalInput extends NegotiatedPrice {
   customerId: number;
   vehicleId: number;
   scheduledStart: number;
@@ -187,10 +223,29 @@ export interface CreateRentalInput {
   collaterals: NewCollateral[];
   allowConflict: boolean;
   allowBlacklisted: boolean;
+  channel?: RentalChannel;
+  /** Mã chuyến trên app. */
+  channelRef?: string | null;
+  /** Tiền thuê đúng như trên app (bắt buộc với lượt qua app). */
+  channelPrice?: number | null;
+  channelDayPrice?: number | null;
+  /** Khách đã trả trước qua app → ghi phiếu "Qua app Mioto". */
+  channelPrepaid?: number;
+  /** Phí sàn %; bỏ trống = theo cài đặt (nhân viên không gửi được). */
+  channelFeePct?: number | null;
+  source?: RentalSource | null;
+}
+
+/** Lượt qua app: tiền thuê là MỘT dòng đúng số trên app, không theo bảng giá xe. */
+function rentLines(r: Pick<Rental, 'channel' | 'channelPrice' | 'scheduledStart' | 'scheduledEnd'>, quote: Quote): PriceLine[] {
+  if (r.channel === 'direct' || r.channelPrice == null) return quote.lines;
+  return [{ kind: 'rental', description: `Tiền thuê xe ${fmtDuration(r.scheduledEnd - r.scheduledStart)} (giá trên app ${RENTAL_CHANNEL_LABEL[r.channel]})`, amount: r.channelPrice }];
 }
 
 export function createRental(input: CreateRentalInput, userId: number): Rental {
   if (input.scheduledEnd <= input.scheduledStart) throw badRequest('Giờ trả phải sau giờ nhận');
+  const channel = input.channel ?? 'direct';
+  if (channel !== 'direct' && !(input.channelPrice && input.channelPrice > 0)) throw badRequest(`Nhập tiền thuê đúng như trên app ${RENTAL_CHANNEL_LABEL[channel]}`);
   const vehicle = getVehicle(input.vehicleId);
   if (!vehicle.active || vehicle.archivedAt) throw badRequest('Xe này đang ngưng hoạt động');
   const customer = getCustomer(input.customerId);
@@ -204,9 +259,12 @@ export function createRental(input: CreateRentalInput, userId: number): Rental {
   const rules = getSetting('rules');
   const fineHold = input.fineHoldRequired ?? defaultFineHold(input.depositRequired, rules);
   if (fineHold > input.depositRequired) throw badRequest('Tiền giữ chờ phạt nguội không được lớn hơn tiền cọc');
-  const pricing = vehiclePricing(vehicle);
+  // Giá chốt vào lượt: bảng giá xe, đè bằng giá thỏa thuận riêng nếu khách trả giá.
+  const pricing = negotiatedPricing(vehiclePricing(vehicle), input);
   const quote = quoteRental(input.scheduledStart, input.scheduledEnd, pricing, rules);
   const now = Date.now();
+  const viaApp = channel !== 'direct';
+  const feePct = viaApp ? (input.channelFeePct ?? rules.miotoFeePct) : null;
 
   return db.transaction(() => {
     const code = nextRentalCode(vnParts(input.scheduledStart).year);
@@ -214,6 +272,13 @@ export function createRental(input: CreateRentalInput, userId: number): Rental {
       .insert(schema.rentals)
       .values({
         code,
+        channel,
+        channelRef: viaApp ? input.channelRef || null : null,
+        channelPrice: viaApp ? input.channelPrice! : null,
+        channelDayPrice: viaApp ? input.channelDayPrice || null : null,
+        channelFeePct: feePct,
+        channelFee: viaApp ? channelFeeFor(input.channelPrice!, feePct!) : null,
+        source: viaApp ? null : (input.source ?? null),
         type: 'self_drive',
         status: 'booked',
         customerId: customer.id,
@@ -239,8 +304,11 @@ export function createRental(input: CreateRentalInput, userId: number): Rental {
       .returning()
       .get();
 
-    for (const line of quote.lines) {
+    for (const line of rentLines(rental, quote)) {
       db.insert(schema.charges).values({ rentalId: rental.id, kind: line.kind, description: line.description, amount: line.amount, auto: true, createdBy: userId, createdAt: now }).run();
+    }
+    if (viaApp && input.channelPrepaid && input.channelPrepaid > 0) {
+      addPayment(rental.id, { direction: 'in', purpose: 'rent', method: 'mioto', amount: input.channelPrepaid, note: `Khách trả trước qua app ${RENTAL_CHANNEL_LABEL[channel]}` }, userId);
     }
     if (input.deliveryFee > 0) {
       db.insert(schema.charges).values({ rentalId: rental.id, kind: 'delivery', description: 'Phí giao/nhận xe tận nơi', amount: input.deliveryFee, auto: false, createdBy: userId, createdAt: now }).run();
@@ -257,22 +325,23 @@ export function createRental(input: CreateRentalInput, userId: number): Rental {
     }
     for (const p of input.payments) addPayment(rental.id, { direction: 'in', ...p }, userId);
     for (const c of input.collaterals) addCollateral(rental.id, c, userId);
+    syncChannelFee(rental.id, userId);
     return rental;
   });
 }
 
-/** Tính lại các dòng tiền thuê tự sinh khi đổi lịch/đổi xe. Phụ phí nhập tay giữ nguyên. */
+/** Tính lại các dòng tiền thuê tự sinh khi đổi lịch/đổi xe/đổi giá app. Phụ phí nhập tay giữ nguyên. */
 function recomputeAutoCharges(rental: Rental, pricing: VehiclePricing, userId: number): Quote {
   const quote = quoteRental(rental.scheduledStart, rental.scheduledEnd, pricing, getSetting('rules'));
   const now = Date.now();
   db.delete(schema.charges).where(and(eq(schema.charges.rentalId, rental.id), eq(schema.charges.auto, true))).run();
-  for (const line of quote.lines) {
+  for (const line of rentLines(rental, quote)) {
     db.insert(schema.charges).values({ rentalId: rental.id, kind: line.kind, description: line.description, amount: line.amount, auto: true, createdBy: userId, createdAt: now }).run();
   }
   return quote;
 }
 
-export interface UpdateRentalInput {
+export interface UpdateRentalInput extends NegotiatedPrice {
   vehicleId?: number;
   scheduledStart?: number;
   scheduledEnd?: number;
@@ -288,6 +357,15 @@ export interface UpdateRentalInput {
   /** Sửa ODO đã ghi lúc giao xe (nhập nhầm) — chỉ khi xe đang trong tay khách. */
   pickupOdo?: number;
   allowConflict?: boolean;
+  /** Đổi kênh chỉ khi chưa giao xe. */
+  channel?: RentalChannel;
+  channelRef?: string | null;
+  /** Gia hạn lượt qua app: nhập tổng tiền mới trên app. */
+  channelPrice?: number;
+  channelDayPrice?: number | null;
+  /** Chỉ quản trị. */
+  channelFeePct?: number;
+  source?: RentalSource | null;
 }
 
 export function updateRental(id: number, input: UpdateRentalInput, userId: number): Rental {
@@ -323,6 +401,21 @@ export function updateRental(id: number, input: UpdateRentalInput, userId: numbe
       .get();
     if (prev && input.pickupOdo < prev.odo - 5) throw badRequest(`ODO ${input.pickupOdo} nhỏ hơn ODO lần trước (${prev.odo}). Kiểm tra lại số trên táp-lô.`);
   }
+  const channel = input.channel ?? r.channel;
+  if (channel !== r.channel && r.status !== 'booked') throw badRequest('Đã giao xe, không đổi kênh đặt xe được nữa');
+  const viaApp = channel !== 'direct';
+  if (!viaApp && r.channel !== 'direct') {
+    const payments = db.select().from(schema.payments).where(eq(schema.payments.rentalId, r.id)).all();
+    if ((channelMoney(r, payments)?.prepaid ?? 0) > 0) throw badRequest('Lượt còn phiếu "Qua app Mioto" — hủy phiếu đó ở mục Thu/chi trước khi đổi sang khách trực tiếp');
+  }
+  const channelPrice = viaApp ? (input.channelPrice ?? r.channelPrice) : null;
+  if (viaApp && !(channelPrice && channelPrice > 0)) throw badRequest(`Nhập tiền thuê đúng như trên app ${RENTAL_CHANNEL_LABEL[channel]}`);
+  if (input.channelPrice !== undefined && input.channelPrice !== r.channelPrice && !OPEN_STATUSES.includes(r.status)) {
+    throw badRequest('Lượt thuê đã kết thúc, không đổi tiền thuê trên app được nữa');
+  }
+  const feePct = viaApp ? (input.channelFeePct ?? r.channelFeePct ?? getSetting('rules').miotoFeePct) : null;
+  if (hasNegotiated(input) && !OPEN_STATUSES.includes(r.status)) throw badRequest('Lượt thuê đã kết thúc, không đổi giá thuê được nữa');
+  const priceChanged = channel !== r.channel || channelPrice !== r.channelPrice || hasNegotiated(input);
   const scheduleChanged = next.vehicleId !== r.vehicleId || next.scheduledStart !== r.scheduledStart || next.scheduledEnd !== r.scheduledEnd;
   if (scheduleChanged && OPEN_STATUSES.includes(r.status)) {
     const conflicts = findConflicts(next.vehicleId, next.scheduledStart, next.scheduledEnd, r.id);
@@ -334,6 +427,7 @@ export function updateRental(id: number, input: UpdateRentalInput, userId: numbe
     const oldTotal = extending ? rentalMoney(r.id).totalCharges : 0;
     let pricing = rentalPricing(r);
     if (next.vehicleId !== r.vehicleId) pricing = vehiclePricing(getVehicle(next.vehicleId));
+    pricing = negotiatedPricing(pricing, input);
     const patch: Partial<Rental> = {
       ...next,
       pickupMethod: input.pickupMethod ?? r.pickupMethod,
@@ -346,13 +440,22 @@ export function updateRental(id: number, input: UpdateRentalInput, userId: numbe
       accessories: input.accessories !== undefined ? input.accessories : next.vehicleId !== r.vehicleId ? null : r.accessories,
       notes: input.notes !== undefined ? input.notes : r.notes,
       pricing: JSON.stringify(pricing),
+      channel,
+      channelRef: viaApp ? (input.channelRef !== undefined ? input.channelRef || null : r.channelRef) : null,
+      channelPrice,
+      channelDayPrice: viaApp ? (input.channelDayPrice !== undefined ? input.channelDayPrice || null : r.channelDayPrice) : null,
+      channelFeePct: feePct,
+      // App đã chuyển tiền về thì phí là số thật (trả trước − tiền về), không tính lại theo %.
+      channelFee: viaApp ? (r.channelPayout != null ? r.channelFee : channelFeeFor(channelPrice!, feePct!)) : null,
+      source: viaApp ? null : input.source !== undefined ? input.source : r.source,
       updatedAt: Date.now(),
     };
-    if (scheduleChanged) {
+    if (scheduleChanged || priceChanged) {
       const quote = recomputeAutoCharges({ ...r, ...patch } as Rental, pricing, userId);
       patch.kmLimit = quote.kmLimit;
     }
     const updated = db.update(schema.rentals).set(patch).where(eq(schema.rentals.id, id)).returning().get();
+    syncChannelFee(id, userId);
     if (pickupHo && input.pickupOdo !== undefined && input.pickupOdo !== pickupHo.odo) {
       db.update(schema.handovers).set({ odo: input.pickupOdo }).where(eq(schema.handovers.id, pickupHo.id)).run();
       // Xe chưa ghi ODO nào mới hơn số lúc giao → sửa theo, để lịch bảo dưỡng tính đúng.
@@ -665,20 +768,108 @@ export function cancelRental(id: number, input: CancelInput, userId: number): { 
   const before = rentalMoney(id);
   const plan = planCancellation(before, input.keep);
   if (input.keep > plan.keep) throw badRequest(`Số tiền giữ lại vượt quá tiền khách đã trả (${fmtNumber(plan.keep)} đ)`);
+  // Lượt qua app: phần khách trả trước qua app do app hoàn cho khách, không phải mình chuyển.
+  const payments = db.select().from(schema.payments).where(eq(schema.payments.rentalId, id)).all();
+  const appRefund = Math.min(plan.refundRent, Math.max(0, channelMoney(r, payments)?.prepaid ?? 0));
   return db.transaction(() => {
     const removedCharges = db.delete(schema.charges).where(eq(schema.charges.rentalId, id)).returning({ kind: schema.charges.kind, description: schema.charges.description, amount: schema.charges.amount }).all();
     if (plan.keep > 0) addCharge(id, { kind: 'cancel_fee', description: `Khách hủy chuyến lúc ${fmtDateTime(Date.now())} (hẹn nhận xe ${fmtDateTime(r.scheduledStart)})`, amount: plan.keep }, userId);
     if (plan.offset > 0) addPayment(id, { direction: 'offset', purpose: 'deposit', method: 'offset', amount: plan.offset, note: 'Giữ cọc do khách hủy chuyến' }, userId);
     if (input.refund && plan.refundDeposit > 0) addPayment(id, { direction: 'out', purpose: 'deposit', method: input.refund.method, amount: plan.refundDeposit, note: 'Hoàn cọc khi hủy chuyến' }, userId);
-    if (input.refund && plan.refundRent > 0) addPayment(id, { direction: 'out', purpose: 'rent', method: input.refund.method, amount: plan.refundRent, note: 'Hoàn tiền thuê trả trước khi hủy chuyến' }, userId);
+    if (appRefund > 0) addPayment(id, { direction: 'out', purpose: 'rent', method: 'mioto', amount: appRefund, note: `App ${RENTAL_CHANNEL_LABEL[r.channel]} hoàn tiền trả trước cho khách khi hủy chuyến` }, userId);
+    if (input.refund && plan.refundRent - appRefund > 0) {
+      addPayment(id, { direction: 'out', purpose: 'rent', method: input.refund.method, amount: plan.refundRent - appRefund, note: 'Hoàn tiền thuê trả trước khi hủy chuyến' }, userId);
+    }
     const rental = db
       .update(schema.rentals)
       .set({ status: 'cancelled', cancelReason: input.reason, updatedAt: Date.now() })
       .where(eq(schema.rentals.id, id))
       .returning()
       .get();
+    syncChannelFee(id, userId);
     return { rental, removedCharges };
   });
+}
+
+// ── Lượt qua app (Mioto): phí sàn, tiền app chuyển về ───────────────────────
+
+/**
+ * Hạng mục Thu chi cho phí sàn: dùng hạng mục có sẵn "Quảng cáo, nền tảng" (không thêm hạng mục mới)
+ * để "quay về bản cũ" vẫn mở được trang Thu chi.
+ */
+const CHANNEL_FEE_CATEGORY = 'marketing' as const;
+
+/**
+ * Phí sàn ghi thành một khoản chi "Phí sàn Mioto HD-…" trong Thu chi (gắn lượt thuê, theo xe) để mọi
+ * báo cáo lãi tự trừ. Gọi lại mỗi khi giá app / % phí / tiền về / trạng thái lượt đổi.
+ */
+export function syncChannelFee(rentalId: number, userId: number | null): void {
+  const r = getRental(rentalId);
+  const e = schema.cashEntries;
+  const entry = db.select().from(e).where(eq(e.rentalId, r.id)).get();
+  const fee = effectiveChannelFee(r);
+  const now = Date.now();
+  if (fee > 0) {
+    const label = RENTAL_CHANNEL_LABEL[r.channel];
+    const description = `Phí sàn ${label} ${r.code}${r.channelRef ? ` (chuyến ${r.channelRef})` : ''}`;
+    const values = { amount: fee, vehicleId: r.vehicleId, description, vendor: label, voidedAt: null, voidReason: null, updatedAt: now };
+    if (entry) db.update(e).set(values).where(eq(e.id, entry.id)).run();
+    else db.insert(e).values({ ...values, direction: 'out', category: CHANNEL_FEE_CATEGORY, at: r.createdAt, method: 'transfer', rentalId: r.id, receiptFileIds: [], createdBy: userId, createdAt: now }).run();
+  } else if (entry && !entry.voidedAt) {
+    db.update(e)
+      .set({ voidedAt: now, voidReason: r.status === 'cancelled' ? 'Lượt thuê đã hủy' : 'Không còn phí sàn', updatedAt: now })
+      .where(eq(e.id, entry.id))
+      .run();
+  }
+}
+
+/**
+ * App đã chuyển tiền về: phí sàn thật = khách trả trước qua app − tiền về (thay cho số ước tính theo %).
+ * `null` = hoàn tác (chưa nhận), phí quay về ước tính theo %.
+ */
+export function recordChannelPayout(id: number, input: { amount: number; at: number } | null, userId: number): Rental {
+  const r = getRental(id);
+  if (r.channel === 'direct') throw badRequest('Lượt thuê trực tiếp không có tiền app chuyển về');
+  const payments = db.select().from(schema.payments).where(eq(schema.payments.rentalId, id)).all();
+  const prepaid = channelMoney(r, payments)!.prepaid;
+  if (input && input.amount > prepaid) throw badRequest(`Tiền app chuyển về lớn hơn tiền khách trả trước qua app (${fmtNumber(prepaid)} đ)`);
+  return db.transaction(() => {
+    const patch: Partial<Rental> = input
+      ? { channelPayout: input.amount, channelPaidAt: input.at, channelFee: prepaid - input.amount }
+      : { channelPayout: null, channelPaidAt: null, channelFee: channelFeeFor(r.channelPrice ?? 0, r.channelFeePct ?? getSetting('rules').miotoFeePct) };
+    const updated = db.update(schema.rentals).set({ ...patch, updatedAt: Date.now() }).where(eq(schema.rentals.id, id)).returning().get();
+    syncChannelFee(id, userId);
+    return updated;
+  });
+}
+
+/** Lượt qua app chưa nhận tiền app chuyển về (bỏ lượt không còn gì phải nhận). */
+export function channelOwedRentals() {
+  const rows = db
+    .select({ r: schema.rentals, plate: schema.vehicles.plate, customerName: schema.customers.fullName })
+    .from(schema.rentals)
+    .innerJoin(schema.vehicles, eq(schema.vehicles.id, schema.rentals.vehicleId))
+    .innerJoin(schema.customers, eq(schema.customers.id, schema.rentals.customerId))
+    .where(and(ne(schema.rentals.channel, 'direct'), isNull(schema.rentals.channelPayout)))
+    .orderBy(asc(schema.rentals.scheduledStart))
+    .all();
+  if (!rows.length) return [];
+  const payments = db.select().from(schema.payments).where(inArray(schema.payments.rentalId, rows.map((x) => x.r.id))).all();
+  return rows
+    .map(({ r, plate, customerName }) => ({
+      id: r.id,
+      code: r.code,
+      vehicleId: r.vehicleId,
+      channel: r.channel,
+      channelRef: r.channelRef,
+      status: r.status,
+      start: r.actualStart ?? r.scheduledStart,
+      end: r.actualEnd ?? r.scheduledEnd,
+      plate,
+      customerName,
+      ...channelMoney(r, payments.filter((p) => p.rentalId === r.id))!,
+    }))
+    .filter((x) => x.owed > 0);
 }
 
 // ── Đọc chi tiết ───────────────────────────────────────────────────────────
@@ -726,12 +917,13 @@ export function rentalDetail(id: number) {
     warnings,
     money,
     monthly: monthlyPlan(rental, charges, money),
+    channelMoney: channelMoney(rental, payments),
   };
 }
 
 /** Lượt thuê tháng (từ 2 kỳ trở lên): lịch từng tháng để thu tiền dần. null = không phải thuê tháng. */
 function monthlyPlan(r: Rental, charges: { kind: ChargeKind; amount: number }[], money: MoneySummary): MonthPeriod[] | null {
-  if (r.status === 'cancelled') return null;
+  if (r.status === 'cancelled' || r.channel !== 'direct') return null;
   const pricing = rentalPricing(r);
   if (!pricing.priceMonth) return null;
   const quote = quoteRental(r.scheduledStart, r.scheduledEnd, pricing, getSetting('rules'));

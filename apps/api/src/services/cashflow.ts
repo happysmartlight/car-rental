@@ -3,14 +3,14 @@
 
 import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import type { CashEntry, RecurringCost, Vehicle } from '../db/schema.js';
+import type { CashEntry, RecurringCost, Rental, Vehicle } from '../db/schema.js';
 import { badRequest, notFound } from '../lib/http.js';
 import { CASH_CATEGORY, dueRecurringMonths, monthKeyOf, parseMonthKey, recurringDate, vnMonthStart, type CashCategory, type CashMethod, type Period } from '../shared/cashflow.js';
-import { summarizeMoney, type MoneyPayment, type PaymentDirection } from '../shared/money.js';
-import type { PaymentMethod, RentalStatus } from '../shared/constants.js';
-import { vnDateKey } from '../shared/time.js';
+import { effectiveChannelFee, summarizeMoney, type MoneyPayment, type PaymentDirection } from '../shared/money.js';
+import type { PaymentMethod, RentalChannel, RentalSource, RentalStatus } from '../shared/constants.js';
+import { DAY_MS, vnDateKey } from '../shared/time.js';
 import { markMaintenanceDone } from './maintenance.js';
-import { occupiedRange } from './rentals.js';
+import { channelOwedRentals, occupiedRange } from './rentals.js';
 
 /** null = cả đội xe + chi phí chung; 'shared' = chỉ chi phí chung; số = một xe. */
 export type VehicleFilter = number | 'shared' | null;
@@ -137,6 +137,7 @@ export function updateEntry(id: number, input: Partial<EntryInput>): CashEntry {
   const cur = db.select().from(schema.cashEntries).where(eq(schema.cashEntries.id, id)).get();
   if (!cur) throw notFound('Không tìm thấy khoản thu chi');
   if (cur.voidedAt) throw badRequest('Phiếu đã hủy, không sửa được');
+  if (cur.rentalId != null) throw badRequest('Khoản này app tự ghi theo lượt thuê — sửa ở trang lượt thuê');
   if (input.vehicleId !== undefined) ensureVehicle(input.vehicleId);
   const patch: Partial<CashEntry> = { ...input, updatedAt: Date.now() };
   if (input.category) patch.direction = CASH_CATEGORY[input.category].dir;
@@ -145,6 +146,8 @@ export function updateEntry(id: number, input: Partial<EntryInput>): CashEntry {
 }
 
 export function voidEntry(id: number, reason: string): CashEntry {
+  const cur = db.select({ rentalId: schema.cashEntries.rentalId }).from(schema.cashEntries).where(eq(schema.cashEntries.id, id)).get();
+  if (cur?.rentalId != null) throw badRequest('Khoản này app tự ghi theo lượt thuê — sửa ở trang lượt thuê');
   const e = db
     .update(schema.cashEntries)
     .set({ voidedAt: Date.now(), voidReason: reason, updatedAt: Date.now() })
@@ -538,6 +541,7 @@ export function cashflowReport(period: Period, filter: VehicleFilter, now = Date
 
   const activeFleet = allVehicles.filter((v) => v.archivedAt == null).length;
   const sharedExpense = filter == null ? shared!.expense : typeof filter === 'number' ? sharedExpenseIn(period) : totals.expense;
+  const ofFilter = <T extends { vehicleId: number }>(xs: T[]) => (filter === 'shared' ? [] : typeof filter === 'number' ? xs.filter((x) => x.vehicleId === filter) : xs);
 
   return {
     period,
@@ -552,7 +556,80 @@ export function cashflowReport(period: Period, filter: VehicleFilter, now = Date
     ledger,
     /** Chi phí chung trong kỳ và số xe đang chạy — để ước phần chia mỗi xe. */
     allocation: { sharedExpense, fleet: activeFleet },
+    channels: channelReport(ofFilter(rentalsInPeriod)),
+    /** Lượt qua app chưa nhận tiền app chuyển về (mọi thời điểm, không theo kỳ). */
+    channelOwed: ofFilter(channelOwedRentals()),
     vehicleOptions: allVehicles.map((v) => ({ id: v.id, plate: v.plate, make: v.make, model: v.model, archived: v.archivedAt != null })),
+  };
+}
+
+// ── Theo kênh & nguồn khách ────────────────────────────────────────────────
+
+export interface ChannelRow {
+  channel: RentalChannel;
+  rentals: number;
+  /** Tổng số ngày xe có khách (theo giờ thực tế nếu đã giao/nhận). */
+  days: number;
+  /** Tổng khoản khách phải trả của các lượt (tiền thuê + phụ phí). */
+  revenue: number;
+  /** Phí sàn. */
+  fee: number;
+  /** revenue − fee. */
+  net: number;
+}
+
+export interface SourceRow {
+  source: RentalSource | null;
+  rentals: number;
+  revenue: number;
+}
+
+/**
+ * So sánh kênh đặt xe cho các lượt NHẬN XE trong kỳ (không tính lượt hủy): tính theo khoản phải trả của
+ * lượt — khác phần tổng ở trên tính theo ngày thu tiền. Lượt trực tiếp chia thêm theo nguồn khách.
+ */
+function channelReport(rentals: Rental[]): { rows: ChannelRow[]; sources: SourceRow[]; returning: number } {
+  if (!rentals.length) return { rows: [], sources: [], returning: 0 };
+  const ids = rentals.map((r) => r.id);
+  const revenueOf = new Map<number, number>();
+  for (const c of db.select({ rentalId: schema.charges.rentalId, amount: schema.charges.amount }).from(schema.charges).where(inArray(schema.charges.rentalId, ids)).all()) {
+    revenueOf.set(c.rentalId, (revenueOf.get(c.rentalId) ?? 0) + c.amount);
+  }
+  const rows = new Map<RentalChannel, ChannelRow>();
+  const sources = new Map<RentalSource | null, SourceRow>();
+  for (const r of rentals) {
+    const revenue = revenueOf.get(r.id) ?? 0;
+    const fee = effectiveChannelFee(r);
+    const row = rows.get(r.channel) ?? { channel: r.channel, rentals: 0, days: 0, revenue: 0, fee: 0, net: 0 };
+    row.rentals++;
+    row.days += Math.max(0, (r.actualEnd ?? r.scheduledEnd) - (r.actualStart ?? r.scheduledStart)) / DAY_MS;
+    row.revenue += revenue;
+    row.fee += fee;
+    row.net += revenue - fee;
+    rows.set(r.channel, row);
+    if (r.channel === 'direct') {
+      const s = sources.get(r.source) ?? { source: r.source, rentals: 0, revenue: 0 };
+      s.rentals++;
+      s.revenue += revenue;
+      sources.set(r.source, s);
+    }
+  }
+  // Khách quay lại: đã có lượt (không hủy) trước lượt này.
+  const customerIds = [...new Set(rentals.map((r) => r.customerId))];
+  const firstStart = new Map<number, number>();
+  for (const x of db
+    .select({ customerId: schema.rentals.customerId, start: schema.rentals.scheduledStart, status: schema.rentals.status })
+    .from(schema.rentals)
+    .where(inArray(schema.rentals.customerId, customerIds))
+    .all()) {
+    if (x.status === 'cancelled') continue;
+    firstStart.set(x.customerId, Math.min(firstStart.get(x.customerId) ?? Infinity, x.start));
+  }
+  const returning = rentals.filter((r) => (firstStart.get(r.customerId) ?? Infinity) < r.scheduledStart).length;
+  return {
+    rows: [...rows.values()].map((r) => ({ ...r, days: Math.round(r.days * 10) / 10 })).sort((a, b) => b.revenue - a.revenue),
+    sources: [...sources.values()].sort((a, b) => b.rentals - a.rentals),
+    returning,
   };
 }
 

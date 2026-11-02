@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
-import { and, eq, like } from 'drizzle-orm';
+import { and, asc, eq, isNull, like } from 'drizzle-orm';
 import { config } from '../config.js';
 import { db, schema } from '../db/index.js';
 import type { ContractTemplate, Customer, Handover, HandoverAccessory } from '../db/schema.js';
@@ -20,13 +20,15 @@ import {
   CHARGE_KIND_LABEL,
   COLLATERAL_KIND_LABEL,
   FUEL_LABEL,
+  RENTAL_CHANNEL_LABEL,
   TRANSMISSION_LABEL,
+  type RentalChannel,
   type TemplateKind,
 } from '../shared/constants.js';
-import { cancelPolicyText, planSettlement, rentalFineHold } from '../shared/money.js';
+import { cancelPolicyText, channelMoney, planSettlement, rentalFineHold } from '../shared/money.js';
 import { chargeDays, freeChargesFor, monthKmLimit, quoteRental, rentalChargingPolicy, tripChargingText } from '../shared/pricing.js';
 import { fmtNumber, vndInWords } from '../shared/text.js';
-import { DAY_MS, fmtDate, fmtDateKey, fmtDateTime, fmtDuration, vnDateLong } from '../shared/time.js';
+import { DAY_MS, fmtDate, fmtDateKey, fmtDateTime, fmtDuration, vnDateLong, vnParts } from '../shared/time.js';
 import { rentalAccessoryPlan } from './accessories.js';
 import { rentalDetail, rentalPricing } from './rentals.js';
 
@@ -124,7 +126,7 @@ export const TEMPLATE_FIELDS: { group: string; fields: FieldDoc[] }[] = [
       { key: 'gia.qua_gio', label: 'Phí quá giờ (đ/giờ)' },
       { key: 'gia.thang', label: 'Giá thuê tháng (điều kiện {#co_gia_thang}…{/co_gia_thang})' },
       { key: 'gia.km_thang', label: 'Giới hạn km mỗi tháng' },
-      { key: 'gia.sac', label: 'Xe điện — chính sách sạc pin (điều kiện {#co_sac}…{/co_sac})' },
+      { key: 'gia.sac', label: 'Xe điện — lượt sạc miễn phí, phụ thu, tiền điện (điều kiện {#co_sac}…{/co_sac})' },
       { key: 'gia.sac_mien_phi', label: 'Xe điện — số lượt sạc miễn phí của chuyến này (theo số ngày thuê)' },
       { key: 'gia.phi_sac', label: 'Xe điện — phí mỗi lượt cắm-rút sạc (đ)' },
       { key: 'hd.hinh_thuc', label: 'Hình thức thuê: "theo ngày" / "theo tháng"' },
@@ -223,6 +225,50 @@ export const TEMPLATE_FIELDS: { group: string; fields: FieldDoc[] }[] = [
       { key: 'gia_han.tien_them_chu', label: 'Số tiền tăng thêm / giảm bằng chữ' },
     ],
   },
+  {
+    group: 'Kênh đặt xe (mẫu Mioto)',
+    fields: [
+      { key: 'kenh.ten', label: '"Trực tiếp" / "Mioto"' },
+      { key: 'kenh.ma_chuyen', label: 'Mã chuyến trên app (chưa nhập thì mã hợp đồng của app)' },
+      { key: 'kenh.gia_tri', label: 'Giá trị hợp đồng = tiền thuê trên app (đ)' },
+      { key: 'kenh.gia_tri_chu', label: 'Giá trị hợp đồng bằng chữ' },
+      { key: 'kenh.don_gia', label: 'Đơn giá thuê/ngày trên app (đ)' },
+      { key: 'kenh.tra_truoc', label: 'Khách đã trả trước qua app (đ)' },
+      { key: 'kenh.o_40', label: '☒ nếu khách trả trước một phần qua app, ☐ nếu không' },
+      { key: 'kenh.o_100', label: '☒ nếu khách trả 100% qua app, ☐ nếu không' },
+      { key: 'ben_a.ho_ten', label: 'Bên A là cá nhân: họ tên người đại diện' },
+      { key: 'ben_a.thuong_tru', label: 'Địa chỉ thường trú người đại diện' },
+      { key: 'ben_a.tam_tru', label: 'Địa chỉ tạm trú người đại diện (trống = địa chỉ cửa hàng)' },
+      { key: 'khach.can_cuoc', label: 'Số CCCD/căn cước (trống nếu khách dùng hộ chiếu); kèm _ngay_cap, _noi_cap' },
+      { key: 'khach.ho_chieu', label: 'Số hộ chiếu (trống nếu khách dùng CCCD); kèm _ngay_cap, _noi_cap' },
+      { key: 'khach.gplx_noi_cap', label: 'Nơi cấp GPLX' },
+      { key: 'xe.ten', label: 'Hãng + dòng xe' },
+      { key: 'xe.dang_ky_so', label: 'Số giấy đăng ký xe (cà vẹt)' },
+      { key: 'xe.dang_ky_ngay', label: 'Ngày cấp đăng ký xe' },
+      { key: 'xe.dang_ky_noi', label: 'Nơi cấp đăng ký xe' },
+      { key: 'xe.chu_xe', label: 'Tên chủ xe theo đăng ký' },
+      { key: 'hd.nhan_gio', label: 'Giờ nhận xe (hẹn) — kèm hd.nhan_phut, hd.nhan_ngay (dd/mm/yyyy)' },
+      { key: 'hd.tra_gio', label: 'Giờ trả xe (hẹn) — kèm hd.tra_phut, hd.tra_ngay' },
+      { key: 'hd.ngay_giao', label: 'Ngày giao xe dd/mm/yyyy (ngày ký hợp đồng Mioto)' },
+      { key: 'hd.ngay_giao_dai', label: 'Ngày giao xe dạng "ngày 06 tháng 10 năm 2026"' },
+      { key: 'giao.gio_phut', label: 'Lúc giao xe dạng "14 giờ 30" (cũng có nhan.gio_phut)' },
+      { key: 'giao.ngay', label: 'Ngày giao xe dd/mm/yyyy (cũng có nhan.ngay)' },
+      { key: 'giao.odo_km', label: 'ODO lúc giao, để trống nếu chưa giao (cho ô vuông)' },
+      { key: 'giao.xang_muc', label: 'Mức xăng/pin lúc giao, để trống nếu chưa giao (cho ô vuông)' },
+      { key: 'giao.hh_1', label: 'Dòng hư hỏng có sẵn 1…6 (giao.hh_1 … giao.hh_6; nhan.hh_1 … nhan.hh_6 = hư hỏng mới)' },
+      { key: 'giao.o_binh_thuong', label: '"X" nếu lúc giao xe không ghi hư hỏng nào' },
+      { key: 'nhan.o_giong', label: '"X" nếu lúc nhận xe không có hư hỏng mới' },
+      { key: 'tc.o_mien', label: '"X" nếu miễn thế chấp (đã giao xe, không cọc, không tài sản)' },
+      { key: 'tc.o_co', label: '"X" nếu có thế chấp' },
+      { key: 'tc.giay_to', label: 'Giấy tờ thế chấp' },
+      { key: 'tc.xe_may', label: 'Xe máy thế chấp' },
+      { key: 'tc.ca_vet', label: 'Cà vẹt xe máy' },
+      { key: 'tc.tien_mat', label: 'Tiền cọc' },
+      { key: 'tc.khac', label: 'Tài sản thế chấp khác' },
+      { key: 'nhan.o_tra_du', label: '"X" nếu đã trả khách toàn bộ giấy tờ, tài sản, tiền cọc' },
+      { key: 'nhan.thieu_1', label: 'Giấy tờ / tài sản / cọc chưa trả khách, dòng 1…4 (nhan.thieu_1 … nhan.thieu_4)' },
+    ],
+  },
   { group: 'Khác', fields: [{ key: 'ngay_in', label: 'Thời điểm in' }] },
 ];
 
@@ -230,8 +276,22 @@ export const TEMPLATE_FIELDS: { group: string; fields: FieldDoc[] }[] = [
 
 const money = (n: number | null | undefined) => (n == null ? '' : fmtNumber(n));
 const fuel = (n: number | null | undefined) => (n == null ? '' : `${n}%`);
+const p2 = (n: number) => String(n).padStart(2, '0');
+/** Chữ trong ô vuông vẽ sẵn của mẫu Mioto: dấu X, hoặc khoảng trắng (không để chuỗi rỗng — sẽ thành dòng chấm). */
+const mark = (b: boolean) => (b ? 'X' : ' ');
+/** Ô ☐ in sẵn trong mẫu. */
+const tick = (b: boolean) => (b ? '☒' : '☐');
+/** Đúng `n` dòng (mẫu Mioto có số dòng cố định trong khung): thừa thì gộp vào dòng cuối, thiếu thì để trống. */
+function fixedLines(items: string[], n: number): string[] {
+  const out = items.slice(0, n);
+  if (items.length > n) out[n - 1] = items.slice(n - 1).join('; ');
+  while (out.length < n) out.push(' ');
+  return out;
+}
+const numbered = (prefix: string, xs: string[]) => Object.fromEntries(xs.map((x, i) => [`${prefix}_${i + 1}`, x]));
 
 function customerFields(c: Customer) {
+  const passport = c.idCardType === 'passport';
   return {
     ho_ten: c.fullName,
     ngay_sinh: fmtDateKey(c.dob),
@@ -247,12 +307,21 @@ function customerFields(c: Customer) {
     gplx_hang: c.licenseClass ?? '',
     gplx_han: c.licenseExpiry ? fmtDateKey(c.licenseExpiry) : 'Không thời hạn',
     gplx_ngay_cap: fmtDateKey(c.licenseIssueDate),
+    gplx_noi_cap: c.licenseIssuePlace ?? '',
     lien_he_khan: [c.emergencyName, c.emergencyRelation && `(${c.emergencyRelation})`, c.emergencyPhone].filter(Boolean).join(' '),
+    can_cuoc: passport ? '' : (c.idNumber ?? ''),
+    can_cuoc_ngay_cap: passport ? '' : fmtDateKey(c.idIssueDate),
+    can_cuoc_noi_cap: passport ? '' : (c.idIssuePlace ?? ''),
+    ho_chieu: passport ? (c.idNumber ?? '') : '',
+    ho_chieu_ngay_cap: passport ? fmtDateKey(c.idIssueDate) : '',
+    ho_chieu_noi_cap: passport ? (c.idIssuePlace ?? '') : '',
   };
 }
 
 function handoverFields(h: Handover | undefined, checklistItems: string[]) {
-  if (!h) return { thoi_gian: '', odo: '', xang: '', ghi_chu: '', giay_to: [], hu_hong: [] };
+  // odo_km / xang_muc: in trong ô vuông của mẫu Mioto → chưa có thì để trống, không in dòng chấm.
+  if (!h) return { thoi_gian: '', odo: '', xang: '', ghi_chu: '', giay_to: [], hu_hong: [], gio_phut: '', ngay: '', odo_km: ' ', xang_muc: ' ' };
+  const t = vnParts(h.at);
   return {
     thoi_gian: fmtDateTime(h.at),
     odo: fmtNumber(h.odo),
@@ -260,6 +329,10 @@ function handoverFields(h: Handover | undefined, checklistItems: string[]) {
     ghi_chu: h.notes ?? '',
     giay_to: checklistItems.map((ten) => ({ ten, co: h.checklist[ten] ? 'Có' : 'Không' })),
     hu_hong: h.damages.map((d) => ({ vi_tri: d.zone, mo_ta: d.note })),
+    gio_phut: `${p2(t.hour)} giờ ${p2(t.minute)}`,
+    ngay: fmtDate(h.at),
+    odo_km: fmtNumber(h.odo),
+    xang_muc: fuel(h.fuelLevel),
   };
 }
 
@@ -303,9 +376,57 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
   const ext = d.extensions.at(-1);
   const kmText = (n: number) => (n ? fmtNumber(n) : 'Không giới hạn');
 
+  // Mẫu Mioto: giá trị hợp đồng là tiền thuê trên app; ô trả trước 40% / 100% theo tiền khách trả qua app.
+  // TUYỆT ĐỐI không đưa phí sàn vào đây — dữ liệu này in ra và lưu kèm văn bản.
+  const rentTotal = d.charges.filter((c) => c.kind === 'rental').reduce((s, c) => s + c.amount, 0);
+  const contractValue = r.channel !== 'direct' && r.channelPrice != null ? r.channelPrice : rentTotal;
+  const dayPrice = r.channel !== 'direct' ? (r.channelDayPrice ?? Math.round(contractValue / Math.max(1, tripDays) / 1000) * 1000) : pricing.priceDay;
+  const prepaid = channelMoney(r, d.payments)?.prepaid ?? 0;
+  const sp = vnParts(r.scheduledStart);
+  const ep = vnParts(r.scheduledEnd);
+  const giaoDamages = pickupHo ? pickupHo.damages.map((x) => [x.zone, x.note].filter(Boolean).join(': ')) : [];
+  const nhanDamages = returnHo ? returnHo.damages.filter((x) => x.isNew).map((x) => [x.zone, x.note].filter(Boolean).join(': ')) : [];
+  const collOf = (k: string) =>
+    d.collaterals
+      .filter((c) => c.kind === k)
+      .map((c) => c.description)
+      .join('; ');
+  const depositCash = d.money.depositReceived || r.depositRequired;
+  const hasCollateral = d.collaterals.length > 0 || depositCash > 0;
+  // Lúc nhận xe: giấy tờ / tài sản / cọc chưa trả lại khách.
+  const notReturned = returnHo
+    ? [
+        ...d.collaterals.filter((c) => !c.returnedAt).map((c) => `${COLLATERAL_KIND_LABEL[c.kind]}: ${c.description}`),
+        // Ngắn gọn: in trong một dòng của bảng biên bản Mioto.
+        ...(d.money.depositHeld > 0 ? [`Tiền cọc ${fmtNumber(d.money.depositHeld)} đ${r.fineHoldUntil ? `, giữ đến ${fmtDate(r.fineHoldUntil)}` : ''}`] : []),
+      ]
+    : [];
+
   const data = {
+    kenh: {
+      ten: RENTAL_CHANNEL_LABEL[r.channel],
+      ma_chuyen: r.channelRef || r.code,
+      gia_tri: money(contractValue),
+      gia_tri_chu: vndInWords(contractValue),
+      don_gia: money(dayPrice),
+      tra_truoc: money(prepaid),
+      o_40: tick(prepaid > 0 && prepaid < contractValue),
+      o_100: tick(contractValue > 0 && prepaid >= contractValue),
+    },
+    tc: {
+      giay_to: collOf('document'),
+      xe_may: collOf('motorbike'),
+      ca_vet: d.collaterals.some((c) => c.kind === 'motorbike') ? 'kèm xe máy nêu trên' : '',
+      tien_mat: depositCash > 0 ? `${fmtNumber(depositCash)} đồng` : '',
+      khac: collOf('other'),
+      o_mien: mark(!!pickupHo && !hasCollateral),
+      o_co: mark(hasCollateral),
+    },
     ben_a: {
       ten: biz.name,
+      ho_ten: biz.representative || biz.name,
+      thuong_tru: biz.permanentAddress,
+      tam_tru: biz.currentAddress || biz.address,
       dai_dien: biz.representative,
       chuc_vu: biz.position,
       cccd: biz.idNumber,
@@ -332,6 +453,11 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
       nhien_lieu: v.fuel ? FUEL_LABEL[v.fuel] : '',
       so_khung: v.vin ?? '',
       so_may: v.engineNo ?? '',
+      ten: [v.make, v.model].filter(Boolean).join(' '),
+      dang_ky_so: v.regNumber ?? '',
+      dang_ky_ngay: fmtDateKey(v.regDate),
+      dang_ky_noi: v.regPlace ?? '',
+      chu_xe: v.regOwner || (v.ownerType === 'consigned' ? (v.ownerName ?? '') : biz.representative),
     },
     hd: {
       so: r.code,
@@ -339,6 +465,14 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
       noi_ky: biz.signCity,
       nhan_xe: fmtDateTime(r.scheduledStart),
       tra_xe: fmtDateTime(r.scheduledEnd),
+      nhan_gio: p2(sp.hour),
+      nhan_phut: p2(sp.minute),
+      nhan_ngay: fmtDate(r.scheduledStart),
+      tra_gio: p2(ep.hour),
+      tra_phut: p2(ep.minute),
+      tra_ngay: fmtDate(r.scheduledEnd),
+      ngay_giao: fmtDate(start),
+      ngay_giao_dai: vnDateLong(start),
       thoi_gian: fmtDuration(r.scheduledEnd - r.scheduledStart),
       hinh_thuc: quoteRental(r.scheduledStart, r.scheduledEnd, pricing, rules).mode === 'month' ? 'theo tháng' : 'theo ngày',
       km_gioi_han: r.kmLimit ? fmtNumber(r.kmLimit) : 'Không giới hạn',
@@ -382,9 +516,15 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
     giao: {
       ...handoverFields(pickupHo, rules.checklist),
       phu_kien: accGiao.map((a) => ({ ten: a.name, so_luong: a.quantity, gia_tri: money(a.value), co: yesNo(a.present, giaoChecked), ghi_chu: a.note ?? '' })),
+      ...numbered('hh', fixedLines(giaoDamages, 6)),
+      o_binh_thuong: mark(!!pickupHo && giaoDamages.length === 0),
     },
     nhan: {
       ...handoverFields(returnHo, rules.checklist),
+      ...numbered('hh', fixedLines(nhanDamages, 6)),
+      ...numbered('thieu', fixedLines(notReturned, 4)),
+      o_giong: mark(!!returnHo && nhanDamages.length === 0),
+      o_tra_du: mark(!!returnHo && notReturned.length === 0),
       phu_kien: (accNhan.length ? accNhan : accGiao.filter((a) => !giaoChecked || a.present)).map((a) => {
         const atPickup = accGiao.find((g) => (g.id != null && g.id === a.id) || g.name === a.name);
         return {
@@ -494,19 +634,17 @@ export function getTemplate(id: number): ContractTemplate {
   return t;
 }
 
-export function defaultTemplate(kind: TemplateKind): ContractTemplate | undefined {
-  return (
-    db
-      .select()
-      .from(schema.contractTemplates)
-      .where(and(eq(schema.contractTemplates.kind, kind), eq(schema.contractTemplates.isDefault, true), eq(schema.contractTemplates.active, true)))
-      .get() ??
-    db
-      .select()
-      .from(schema.contractTemplates)
-      .where(and(eq(schema.contractTemplates.kind, kind), eq(schema.contractTemplates.active, true)))
-      .get()
-  );
+/** Mẫu mặc định của loại văn bản cho kênh của lượt; kênh chưa có mẫu loại này (vd phụ lục gia hạn Mioto) thì dùng mẫu trực tiếp. */
+export function defaultTemplate(kind: TemplateKind, channel: RentalChannel = 'direct'): ContractTemplate | undefined {
+  const t = schema.contractTemplates;
+  const forChannel = (c: RentalChannel) => {
+    const ch = c === 'direct' ? isNull(t.channel) : eq(t.channel, c);
+    return (
+      db.select().from(t).where(and(eq(t.kind, kind), ch, eq(t.isDefault, true), eq(t.active, true))).get() ??
+      db.select().from(t).where(and(eq(t.kind, kind), ch, eq(t.active, true))).orderBy(asc(t.id)).get()
+    );
+  };
+  return (channel !== 'direct' ? forChannel(channel) : undefined) ?? forChannel('direct');
 }
 
 export async function generateDocument(rentalId: number, templateId: number, userId: number) {
@@ -563,11 +701,16 @@ export async function retryPdf(documentId: number, userId: number) {
  * Mẫu dựng sẵn. Tăng `rev` khi sửa nội dung mẫu: máy đang chạy sẽ tự lên mẫu mới
  * (thành phiên bản mới của mẫu) — trừ khi người dùng đã thay file mẫu đó (builtin = "<key>-user").
  */
-const BUILTINS: { key: string; rev: number; file: string; name: string; kind: TemplateKind }[] = [
+const BUILTINS: { key: string; rev: number; file: string; name: string; kind: TemplateKind; channel?: RentalChannel }[] = [
   { key: 'contract', rev: 6, file: 'hop-dong-thue-xe.docx', name: 'Hợp đồng thuê xe tự lái', kind: 'contract' },
   { key: 'pickup', rev: 3, file: 'bien-ban-giao-xe.docx', name: 'Biên bản giao xe', kind: 'pickup' },
   { key: 'return', rev: 4, file: 'bien-ban-nhan-xe.docx', name: 'Biên bản nhận xe & quyết toán', kind: 'return' },
   { key: 'extension', rev: 1, file: 'phu-luc-gia-han.docx', name: 'Phụ lục gia hạn hợp đồng', kind: 'extension' },
+  // Mẫu của Mioto (sinh từ file gốc: npm run templates -w apps/api). Biên bản Mioto gộp giao + nhận xe:
+  // in lúc giao thì phần hoàn trả để trống viết tay, in lúc nhận xe thì điền đủ cả hai phần.
+  { key: 'mioto-contract', rev: 1, file: 'mioto-hop-dong.docx', name: 'Hợp đồng Mioto', kind: 'contract', channel: 'mioto' },
+  { key: 'mioto-pickup', rev: 1, file: 'mioto-bien-ban.docx', name: 'Biên bản bàn giao Mioto (giao xe)', kind: 'pickup', channel: 'mioto' },
+  { key: 'mioto-return', rev: 1, file: 'mioto-bien-ban.docx', name: 'Biên bản bàn giao Mioto (nhận xe)', kind: 'return', channel: 'mioto' },
 ];
 
 export function builtinTemplatePath(file: string): string {
@@ -592,13 +735,14 @@ export function ensureBuiltinTemplates(): void {
         .run();
       continue;
     }
+    const t = schema.contractTemplates;
     const hasDefault = db
       .select()
-      .from(schema.contractTemplates)
-      .where(and(eq(schema.contractTemplates.kind, b.kind), eq(schema.contractTemplates.isDefault, true)))
+      .from(t)
+      .where(and(eq(t.kind, b.kind), b.channel ? eq(t.channel, b.channel) : isNull(t.channel), eq(t.isDefault, true)))
       .get();
-    db.insert(schema.contractTemplates)
-      .values({ name: b.name, kind: b.kind, fileId: file.id, version: 1, isDefault: !hasDefault, active: true, builtin: tag, createdAt: now, updatedAt: now })
+    db.insert(t)
+      .values({ name: b.name, kind: b.kind, channel: b.channel ?? null, fileId: file.id, version: 1, isDefault: !hasDefault, active: true, builtin: tag, createdAt: now, updatedAt: now })
       .run();
   }
 }
