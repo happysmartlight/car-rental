@@ -16,6 +16,7 @@ import {
   TrendingDown,
   TrendingUp,
   Wallet,
+  Handshake,
 } from 'lucide-react';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -29,8 +30,8 @@ import { CountUp } from '@/components/ui/count-up';
 import { Badge, Card, CardBody, CardHeader, Empty, ErrorBox, Notice, PageLoader, Stat } from '@/components/ui/misc';
 import { api, qs } from '@/lib/api';
 import { useAuth, useNow } from '@/lib/hooks';
-import type { CashflowReport, LedgerRow, RecurringRow, VehicleCashRow } from '@/lib/types';
-import { cn, errorMessage } from '@/lib/utils';
+import type { CashflowReport, LedgerRow, RecurringRow, VehicleCashRow, OwnerSettlementRow } from '@/lib/types';
+import { cn, errorMessage, telLink } from '@/lib/utils';
 import {
   CASH_CATEGORIES,
   CASH_CATEGORY,
@@ -185,6 +186,13 @@ export default function Cashflow() {
         <div className={cn('anim-stagger space-y-4 transition-opacity', isFetching && 'opacity-60')}>
           <Kpis r={data} />
           {data.channelOwed.length > 0 && <ChannelOwedCard rows={data.channelOwed} />}
+          {data.ownerSettlement.rows.length > 0 && (
+            <OwnerSettlementCard
+              r={data}
+              monthly={kind === 'month'}
+              onPay={(x) => setDialog({ mode: 'new', category: 'owner_payout', vehicleId: x.vehicleId, amount: x.remaining, period, description: `Trả ${x.ownerName ?? 'chủ xe'} ${data.period.label.toLowerCase()}`.slice(0, 300) })}
+            />
+          )}
 
           {typeof data.filter === 'number' && data.allocation.sharedExpense > 0 && data.allocation.fleet > 0 && (
             <Notice tone="gray" icon={Landmark}>
@@ -286,7 +294,7 @@ function Kpis({ r }: { r: CashflowReport }) {
         <Stat
           label="Lãi vận hành"
           value={<CountUp id="cash-profit" value={t.profit} className={profitCls(t.profit)} />}
-          sub={t.profit < 0 ? 'Chi nhiều hơn thu' : margin != null ? `Biên lãi ${margin}%` : 'Thu − chi vận hành'}
+          sub={t.ownerShare > 0 ? `Đã trừ phần chủ xe ${fmtVnd(t.ownerShare)}` : t.profit < 0 ? 'Chi nhiều hơn thu' : margin != null ? `Biên lãi ${margin}%` : 'Thu − chi vận hành'}
           icon={t.profit < 0 ? TrendingDown : TrendingUp}
           tone={t.profit < 0 ? 'red' : 'green'}
         />
@@ -325,6 +333,83 @@ function MiniStat({ label, value, sub, warn }: { label: string; value: number; s
   );
 }
 
+// ── Đối soát chủ xe ký gửi ───────────────────────────────────────────────────
+
+function OwnerSettlementCard({ r, monthly, onPay }: { r: CashflowReport; monthly: boolean; onPay: (row: OwnerSettlementRow) => void }) {
+  const { rows, owedAllTime } = r.ownerSettlement;
+  return (
+    <Card>
+      <CardHeader icon={Handshake} title="Đối soát chủ xe ký gửi" description={`${r.period.label}. Tính trên tiền thuê, vượt km, quá giờ, giảm giá, sau khi trừ phí sàn; không tính đền bù, phí giao xe, bù xăng và các khoản thu hộ.`} />
+      <ul className="divide-y divide-border">
+        {rows.map((x) => (
+          <li key={x.vehicleId} className="space-y-2 px-4 py-3 md:px-5">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <p className="min-w-0">
+                <span className="font-semibold tracking-wide">{x.plate}</span>
+                <span className="ml-2 text-sm text-muted">{x.ownerName ?? 'Chưa ghi tên chủ xe'}</span>
+              </p>
+              {x.ownerPhone && (
+                <a href={telLink(x.ownerPhone)} className="tap-target text-sm text-brand">
+                  {x.ownerPhone}
+                </a>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-2 rounded-xl bg-surface-2/60 p-3 text-sm">
+              <div className="min-w-0">
+                <p className="text-xs text-muted">Phần chủ xe</p>
+                <p className="tabular font-semibold">{fmtVnd(x.share)}</p>
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted">Đã trả</p>
+                <p className="tabular font-semibold">{fmtVnd(x.paid)}</p>
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted">{x.remaining < 0 ? 'Trả dư' : 'Còn phải trả'}</p>
+                <p className={cn('tabular font-semibold', x.remaining > 0 && 'text-red-700 dark:text-red-400')}>{fmtVnd(Math.abs(x.remaining))}</p>
+              </div>
+            </div>
+            {x.lines.length > 0 && (
+              <details className="text-sm">
+                <summary className="flex min-h-10 cursor-pointer items-center text-muted">{x.lines.length} lượt thuê trong kỳ</summary>
+                <ul className="space-y-2 pb-1">
+                  {x.lines.map((l) => (
+                    <li key={l.rentalId}>
+                      <p>
+                        <Link to={`/rentals/${l.rentalId}`} className="font-medium text-brand">
+                          {l.code}
+                        </Link>
+                        {` · ${l.customerName} · giao ${fmtDate(l.at)}`}
+                      </p>
+                      <p className="tabular text-xs text-muted">
+                        {fmtVnd(l.rent)}
+                        {l.fee > 0 && ` − phí sàn ${fmtVnd(l.fee)}`}
+                        {` × ${l.pct}% = `}
+                        <b className="text-fg">{fmtVnd(l.share)}</b>
+                      </p>
+                      {l.status === 'active' && <p className="text-xs text-amber-700 dark:text-amber-400">Đang thuê, số tiền có thể còn đổi khi trả xe</p>}
+                      {l.customerDue > 0 && <p className="text-xs text-amber-700 dark:text-amber-400">Khách còn nợ {fmtVnd(l.customerDue)}</p>}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {monthly && x.remaining > 0 && (
+              <Button size="sm" variant="outline" onClick={() => onPay(x)}>
+                <Wallet /> Ghi đã trả chủ xe
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {owedAllTime > 0 && (
+        <p className="border-t border-border px-4 py-3 text-sm md:px-5">
+          Tổng còn nợ chủ xe các kỳ: <b className="tabular">{fmtVnd(owedAllTime)}</b>
+        </p>
+      )}
+    </Card>
+  );
+}
+
 // ── Theo xe ──────────────────────────────────────────────────────────────────
 
 function VehiclesCard({ r, allocate, onAllocate, onPick }: { r: CashflowReport; allocate: boolean; onAllocate: (v: boolean) => void; onPick: (v: string) => void }) {
@@ -336,7 +421,7 @@ function VehiclesCard({ r, allocate, onAllocate, onPick }: { r: CashflowReport; 
     return shares[active.findIndex((x) => x.vehicleId === v.vehicleId)] ?? 0;
   };
   const rows = r.vehicles.map((v) => ({ v, share: shareOf(v) }));
-  const scale = Math.max(1, ...rows.flatMap(({ v, share }) => [v.income, v.expense + share]));
+  const scale = Math.max(1, ...rows.flatMap(({ v, share }) => [v.income, v.expense + v.ownerShare + share]));
   const sharedVisible = !allocate || !active.length;
 
   return (
@@ -358,6 +443,7 @@ function VehiclesCard({ r, allocate, onAllocate, onPick }: { r: CashflowReport; 
                       <span className="font-semibold tracking-wide">{v.plate}</span>
                       <span className="ml-2 text-xs text-muted">
                         {v.make} {v.model}
+                        {v.ownerType === 'consigned' && ' · ký gửi'}
                         {v.archived && ' · đã lưu trữ'}
                       </span>
                     </span>
@@ -365,11 +451,12 @@ function VehiclesCard({ r, allocate, onAllocate, onPick }: { r: CashflowReport; 
                   </span>
                   <span className="mt-2 block space-y-1">
                     <Bar value={v.income} scale={scale} cls="bg-chart-in" />
-                    <Bar value={v.expense + share} scale={scale} cls="bg-chart-out" />
+                    <Bar value={v.expense + v.ownerShare + share} scale={scale} cls="bg-chart-out" />
                   </span>
                   <span className="tabular mt-1.5 block text-xs text-muted">
                     Thu {fmtVnd(v.income)} · Chi {fmtVnd(v.expense)}
                     {share > 0 && ` + chung ${fmtVnd(share)}`}
+                    {v.ownerShare > 0 && ` · phần chủ xe ${fmtVnd(v.ownerShare)}`}
                     {' · '}
                     {v.rentals} lượt{v.utilization != null && ` · ${v.utilization}% có khách`}
                     {v.capitalOut > 0 && ` · trả góp/đầu tư ${fmtVnd(v.capitalOut)}`}
@@ -402,6 +489,7 @@ function VehiclesCard({ r, allocate, onAllocate, onPick }: { r: CashflowReport; 
             </span>
             <span className="tabular mt-0.5 block text-xs text-muted">
               Thu {fmtVnd(r.totals.income)} · Chi {fmtVnd(r.totals.expense)}
+              {r.totals.ownerShare > 0 && ` · phần chủ xe ${fmtVnd(r.totals.ownerShare)}`}
             </span>
           </li>
         </ul>

@@ -1828,3 +1828,162 @@ describe('xe ký gửi', () => {
     }
   });
 });
+
+describe('đối soát chủ xe ký gửi', () => {
+  const month = '2028-09';
+  let con = 0;
+  let own = 0;
+  let cust = 0;
+  const slot = (day: number) => ({ scheduledStart: at(`${month}-${String(day).padStart(2, '0')}T08:00`), scheduledEnd: at(`${month}-${String(day + 2).padStart(2, '0')}T08:00`) });
+  const report = async (p = month) => (await call('GET', `/api/cashflow?p=${p}`)).json;
+  const rowOf = async (p = month) => (await report(p)).ownerSettlement.rows.find((x: any) => x.vehicleId === con);
+  const book = async (vehicleId: number, day: number, extra: object = {}) => {
+    const r = await call('POST', '/api/rentals', { vehicleId, customerId: cust, ...slot(day), depositRequired: 0, ...extra });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    return r.json.id as number;
+  };
+  const pickup = async (id: number, day: number, odo: number) => {
+    const r = await call('POST', `/api/rentals/${id}/pickup`, { at: at(`${month}-${String(day).padStart(2, '0')}T08:30`), odo, fuelLevel: 100 });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+  };
+  const giveBack = async (id: number, day: number, odo: number, charges: object[]) => {
+    const r = await call('POST', `/api/rentals/${id}/return`, { at: at(`${month}-${String(day + 2).padStart(2, '0')}T08:00`), odo, fuelLevel: 100, charges });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+  };
+
+  it('chuẩn bị xe ký gửi 70%, xe nhà', async () => {
+    con = (await call('POST', '/api/vehicles', { plate: '51S-400.01', priceDay: 1_000_000, kmLimitDay: 0, odo: 100, ownerType: 'consigned', ownerName: 'Chị Lan', ownerPhone: '0900000002', ownerSharePct: 70 })).json.id;
+    own = (await call('POST', '/api/vehicles', { plate: '51S-400.02', priceDay: 1_000_000, kmLimitDay: 0, odo: 100 })).json.id;
+    cust = (await call('POST', '/api/customers', { fullName: 'Khách Đối Soát', idNumber: '079099000999', phone: '0909000999' })).json.id;
+    const row = await rowOf();
+    expect(row).toMatchObject({ share: 0, paid: 0, remaining: 0, ownerName: 'Chị Lan' });
+  });
+
+  it('lượt mới đặt chưa tính; giao xe mới chốt % và tính phần chủ xe', async () => {
+    const id = await book(con, 1);
+    expect((await rowOf()).share).toBe(0);
+    await pickup(id, 1, 200);
+    const row = await rowOf();
+    expect(row.lines).toHaveLength(1);
+    expect(row.lines[0]).toMatchObject({ rentalId: id, pct: 70, rent: 2_000_000, fee: 0, share: 1_400_000, status: 'active' });
+    expect(row).toMatchObject({ share: 1_400_000, remaining: 1_400_000 });
+  });
+
+  it('vượt km tính vào phần chia; đền bù, bù xăng, cầu đường thì không', async () => {
+    const id = (await rowOf()).lines[0].rentalId;
+    await giveBack(id, 1, 500, [
+      { kind: 'over_km', description: 'Vượt 100 km', amount: 300_000 },
+      { kind: 'damage', description: 'Móp cửa', amount: 4_000_000 },
+      { kind: 'fuel', description: 'Bù xăng', amount: 200_000 },
+      { kind: 'toll', description: 'Cầu đường', amount: 50_000 },
+    ]);
+    const row = await rowOf();
+    expect(row.lines[0]).toMatchObject({ rent: 2_300_000, share: 1_610_000, customerDue: 6_550_000 });
+    expect(row.share).toBe(1_610_000);
+  });
+
+  it('lãi trừ phần chủ xe ngay tháng phát sinh, chưa cần trả; xe nhà không bị trừ', async () => {
+    const r = await report();
+    expect(r.totals.ownerShare).toBe(1_610_000);
+    expect(r.totals.profit).toBe(r.totals.income - r.totals.expense - 1_610_000);
+    const v = r.vehicles.find((x: any) => x.vehicleId === con);
+    expect(v).toMatchObject({ ownerShare: 1_610_000, ownerType: 'consigned' });
+    expect(r.vehicles.find((x: any) => x.vehicleId === own)).toMatchObject({ ownerShare: 0, ownerType: 'own' });
+    expect(r.trend.find((x: any) => x.key === month).ownerShare).toBe(1_610_000);
+  });
+
+  it('trả chủ xe tháng sau: ghi đúng tháng phát sinh, không trừ lãi thêm lần nữa', async () => {
+    const paidAt = at('2028-10-05T09:00');
+    const before = await report('2028-10');
+    const e = await call('POST', '/api/cash-entries', { category: 'owner_payout', amount: 1_000_000, at: paidAt, vehicleId: con, method: 'transfer', period: month });
+    expect(e.status, JSON.stringify(e.json)).toBe(200);
+    expect(e.json.entry.period).toBe(month);
+
+    const row = await rowOf();
+    expect(row).toMatchObject({ share: 1_610_000, paid: 1_000_000, remaining: 610_000 });
+
+    const after = await report('2028-10');
+    expect(after.totals.expense).toBe(before.totals.expense);
+    expect(after.totals.profit).toBe(before.totals.profit);
+    expect(after.categories.some((c: any) => c.category === 'owner_payout')).toBe(false);
+    expect(after.ledger.some((l: any) => l.kind === 'entry' && l.entry.id === e.json.entry.id)).toBe(true);
+    // Tháng trả không phát sinh gì thêm cho chủ xe.
+    expect((await rowOf('2028-10'))).toMatchObject({ share: 0, paid: 0, remaining: 0 });
+
+    // Hủy phiếu trả thì số còn phải trả quay lại.
+    expect((await call('POST', `/api/cash-entries/${e.json.entry.id}/void`, { reason: 'Ghi nhầm' })).status).toBe(200);
+    expect((await rowOf()).remaining).toBe(1_610_000);
+
+    const again = await call('POST', '/api/cash-entries', { category: 'owner_payout', amount: 1_610_000, at: paidAt, vehicleId: con, method: 'transfer', period: month });
+    expect(again.status).toBe(200);
+    expect((await rowOf()).remaining).toBe(0);
+  });
+
+  it('không ghi tháng thì lấy tháng của ngày trả', async () => {
+    const r = await call('POST', '/api/cash-entries', { category: 'owner_payout', amount: 10_000, at: at('2028-11-20T09:00'), vehicleId: con, method: 'cash' });
+    expect(r.json.entry.period).toBe('2028-11');
+    expect((await rowOf('2028-11')).remaining).toBe(-10_000);
+    await call('POST', `/api/cash-entries/${r.json.entry.id}/void`, { reason: 'Thử' });
+  });
+
+  it('đổi % sau này không làm sai số cũ; lượt giao sau mới áp % mới', async () => {
+    const full = (await call('GET', `/api/vehicles/${con}`)).json.vehicle;
+    expect((await call('PATCH', `/api/vehicles/${con}`, { ...full, ownerSharePct: 50 })).status).toBe(200);
+    expect((await rowOf()).lines[0]).toMatchObject({ pct: 70, share: 1_610_000 });
+    const id = await book(con, 10);
+    await pickup(id, 10, 600);
+    const row = await rowOf();
+    expect(row.lines.find((l: any) => l.rentalId === id)).toMatchObject({ pct: 50, rent: 2_000_000, share: 1_000_000 });
+    expect(row.share).toBe(2_610_000);
+    await giveBack(id, 10, 700, []);
+  });
+
+  it('lượt qua Mioto: trừ phí sàn rồi mới chia', async () => {
+    const id = await book(con, 15, { channel: 'mioto', channelRef: 'MIDOISOAT', channelPrice: 3_000_000, channelFeePct: 15 });
+    await pickup(id, 15, 800);
+    const line = (await rowOf()).lines.find((l: any) => l.rentalId === id);
+    expect(line).toMatchObject({ rent: 3_000_000, fee: 450_000, pct: 50, share: 1_275_000 });
+    await giveBack(id, 15, 900, []);
+  });
+
+  it('xe chuyển từ nhà sang ký gửi: lượt đã giao trước đó không chia', async () => {
+    const id = await book(own, 20);
+    await pickup(id, 20, 200);
+    const full = (await call('GET', `/api/vehicles/${own}`)).json.vehicle;
+    expect((await call('PATCH', `/api/vehicles/${own}`, { ...full, ownerType: 'consigned', ownerName: 'Anh Minh', ownerSharePct: 60 })).status).toBe(200);
+    const r = await report();
+    const row = r.ownerSettlement.rows.find((x: any) => x.vehicleId === own);
+    expect(row).toMatchObject({ share: 0, lines: [] });
+    await giveBack(id, 20, 300, []);
+  });
+
+  it('báo cáo năm và một xe; tổng còn nợ các kỳ; Excel; nhân viên không xem được', async () => {
+    const year = await report('2028');
+    const y = year.ownerSettlement.rows.find((x: any) => x.vehicleId === con);
+    expect(y.share).toBe(1_610_000 + 1_000_000 + 1_275_000);
+    expect(y.paid).toBe(1_610_000);
+    const one = (await call('GET', `/api/cashflow?p=${month}&v=${con}`)).json;
+    expect(one.totals.ownerShare).toBe(1_610_000 + 1_000_000 + 1_275_000);
+    expect(one.ownerSettlement.rows).toHaveLength(1);
+    expect(one.ownerSettlement.owedAllTime).toBe(1_000_000 + 1_275_000);
+    const shared = (await call('GET', `/api/cashflow?p=${month}&v=shared`)).json;
+    expect(shared.ownerSettlement.rows).toHaveLength(0);
+    expect(shared.totals.ownerShare).toBe(0);
+
+    const file = await call('GET', `/api/cashflow/export?p=${month}`);
+    expect(file.status).toBe(200);
+    const sheets = new PizZip(file.res.rawPayload).file('xl/workbook.xml')!.asText();
+    expect(sheets).toContain('Đối soát chủ xe');
+
+    expect((await call('GET', `/api/cashflow?p=${month}`, undefined, staffCookie)).status).toBe(403);
+    const staffRental = await call('GET', `/api/rentals/${(await rowOf()).lines[0].rentalId}`, undefined, staffCookie);
+    expect(JSON.stringify(staffRental.json)).not.toContain('ownerSharePct');
+  });
+
+  it('trang Tổng quan: lãi tháng cũng đã trừ phần chủ xe', async () => {
+    const { cashTotals } = await import('./services/cashflow.js');
+    const t = cashTotals(at(`${month}-01T00:00`), at('2028-10-01T00:00'));
+    expect(t.ownerShare).toBe(1_610_000 + 1_000_000 + 1_275_000);
+    expect(t.profit).toBe(t.income - t.expense - t.ownerShare);
+  });
+});

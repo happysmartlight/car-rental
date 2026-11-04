@@ -5,12 +5,12 @@ import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from 'driz
 import { db, schema } from '../db/index.js';
 import type { CashEntry, RecurringCost, Rental, Vehicle } from '../db/schema.js';
 import { badRequest, notFound } from '../lib/http.js';
-import { CASH_CATEGORY, dueRecurringMonths, monthKeyOf, parseMonthKey, recurringDate, vehicleCategoryError, vnMonthStart, type CashCategory, type CashMethod, type Period } from '../shared/cashflow.js';
+import { CASH_CATEGORY, dueRecurringMonths, monthKeyOf, ownerShareOf, parseMonthKey, recurringDate, vehicleCategoryError, vnMonthStart, type CashCategory, type CashMethod, type Period } from '../shared/cashflow.js';
 import { effectiveChannelFee, summarizeMoney, type MoneyPayment, type PaymentDirection } from '../shared/money.js';
 import type { PaymentMethod, RentalChannel, RentalSource, RentalStatus } from '../shared/constants.js';
 import { DAY_MS, vnDateKey } from '../shared/time.js';
 import { markMaintenanceDone } from './maintenance.js';
-import { channelOwedRentals, occupiedRange } from './rentals.js';
+import { channelOwedRentals, occupiedRange, rentalMoney } from './rentals.js';
 
 /** null = cả đội xe + chi phí chung; 'shared' = chỉ chi phí chung; số = một xe. */
 export type VehicleFilter = number | 'shared' | null;
@@ -79,6 +79,8 @@ export interface EntryInput {
   vendor: string | null;
   odo: number | null;
   receiptFileIds: string[];
+  /** Trả chủ xe: trả cho tháng nào, "YYYY-MM". Bỏ trống thì lấy tháng của ngày trả. */
+  period?: string | null;
 }
 
 /** Gia hạn giấy tờ / mốc bảo dưỡng của xe ngay khi ghi chi phí (chỉ trường có giá trị mới được ghi). */
@@ -129,7 +131,7 @@ export function createEntry(
   return db.transaction(() => {
     const entry = db
       .insert(schema.cashEntries)
-      .values({ ...input, direction: CASH_CATEGORY[input.category].dir, amount: Math.round(input.amount), createdBy: userId, createdAt: now, updatedAt: now })
+      .values({ ...input, period: input.category === 'owner_payout' ? (input.period ?? monthKeyOf(input.at)) : null, direction: CASH_CATEGORY[input.category].dir, amount: Math.round(input.amount), createdBy: userId, createdAt: now, updatedAt: now })
       .returning()
       .get();
     const renewed = renewal && input.vehicleId != null ? applyRenewal(input.vehicleId, renewal) : {};
@@ -147,7 +149,9 @@ export function updateEntry(id: number, input: Partial<EntryInput>): CashEntry {
   if (cur.voidedAt) throw badRequest('Phiếu đã hủy, không sửa được');
   if (cur.rentalId != null) throw badRequest('Khoản này app tự ghi theo lượt thuê — sửa ở trang lượt thuê');
   ensureCategoryFits(input.category ?? cur.category, input.vehicleId !== undefined ? input.vehicleId : cur.vehicleId);
-  const patch: Partial<CashEntry> = { ...input, updatedAt: Date.now() };
+  const { period, ...rest } = input;
+  const patch: Partial<CashEntry> = { ...rest, updatedAt: Date.now() };
+  if ((input.category ?? cur.category) === 'owner_payout') patch.period = period ?? cur.period ?? monthKeyOf(input.at ?? cur.at);
   if (input.category) patch.direction = CASH_CATEGORY[input.category].dir;
   if (input.amount != null) patch.amount = Math.round(input.amount);
   return db.update(schema.cashEntries).set(patch).where(eq(schema.cashEntries.id, id)).returning().get();
@@ -262,6 +266,134 @@ function entriesIn(from: number, to: number, filter: VehicleFilter): CashEntry[]
   return db.select().from(e).where(and(...conds)).orderBy(asc(e.at)).all();
 }
 
+// ── Phần chủ xe ký gửi ─────────────────────────────────────────────────────
+
+export interface OwnerShareLine {
+  rentalId: number;
+  code: string;
+  status: RentalStatus;
+  customerName: string;
+  vehicleId: number;
+  /** Giờ giao xe thực tế: quyết định lượt thuộc tháng nào. */
+  at: number;
+  pct: number;
+  /** Tiền thuê, vượt km, quá giờ, giảm giá. */
+  rent: number;
+  fee: number;
+  share: number;
+}
+
+/**
+ * Phần chủ xe của các lượt đã giao xe trong [from, to). Trừ vào lãi ngay tháng phát sinh, dù đã trả chủ xe hay chưa.
+ * Tỷ lệ chốt lúc giao xe (rentals.owner_share_pct) nên đổi % sau này không làm sai số các tháng cũ.
+ */
+function ownerShareLines(from: number, to: number, vehicleId?: number): OwnerShareLine[] {
+  const t = schema.rentals;
+  const conds = [isNotNull(t.ownerSharePct), gte(t.actualStart, from), lt(t.actualStart, to)];
+  if (vehicleId != null) conds.push(eq(t.vehicleId, vehicleId));
+  const rows = db
+    .select({ r: t, customerName: schema.customers.fullName })
+    .from(t)
+    .innerJoin(schema.customers, eq(schema.customers.id, t.customerId))
+    .where(and(...conds))
+    .orderBy(asc(t.actualStart))
+    .all()
+    .filter((x) => x.r.status !== 'cancelled');
+  if (!rows.length) return [];
+  const charges = db
+    .select({ rentalId: schema.charges.rentalId, kind: schema.charges.kind, amount: schema.charges.amount })
+    .from(schema.charges)
+    .where(
+      inArray(
+        schema.charges.rentalId,
+        rows.map((x) => x.r.id),
+      ),
+    )
+    .all();
+  return rows.map(({ r, customerName }) => {
+    const fee = effectiveChannelFee(r);
+    const { rent, share } = ownerShareOf(
+      charges.filter((c) => c.rentalId === r.id),
+      fee,
+      r.ownerSharePct!,
+    );
+    return { rentalId: r.id, code: r.code, status: r.status, customerName, vehicleId: r.vehicleId, at: r.actualStart!, pct: r.ownerSharePct!, rent, fee, share };
+  });
+}
+
+export interface OwnerSettlementRow {
+  vehicleId: number;
+  plate: string;
+  make: string;
+  model: string;
+  archived: boolean;
+  ownerName: string | null;
+  ownerPhone: string | null;
+  lines: (OwnerShareLine & { customerDue: number })[];
+  share: number;
+  paid: number;
+  /** Âm là đã trả dư. */
+  remaining: number;
+}
+
+/** Đối soát theo kỳ: phần chủ xe phát sinh, đã trả (khoản "Trả chủ xe" của tháng đó), còn phải trả. */
+function ownerSettlement(period: Period, filter: VehicleFilter): { rows: OwnerSettlementRow[]; owedAllTime: number } {
+  if (filter === 'shared') return { rows: [], owedAllTime: 0 };
+  const vehicleId = filter ?? undefined;
+  const lines = ownerShareLines(0, Number.MAX_SAFE_INTEGER, vehicleId);
+  const e = schema.cashEntries;
+  const payoutConds = [eq(e.category, 'owner_payout'), isNull(e.voidedAt)];
+  if (vehicleId != null) payoutConds.push(eq(e.vehicleId, vehicleId));
+  const payouts = db.select({ vehicleId: e.vehicleId, amount: e.amount, at: e.at, period: e.period }).from(e).where(and(...payoutConds)).all();
+  const monthInPeriod = (key: string) => {
+    const m = parseMonthKey(key);
+    if (!m) return false;
+    const start = vnMonthStart(m.year, m.month);
+    return start >= period.start && start < period.end;
+  };
+  const conds = vehicleId != null ? eq(schema.vehicles.id, vehicleId) : undefined;
+  const rows = db
+    .select()
+    .from(schema.vehicles)
+    .where(conds)
+    .orderBy(asc(schema.vehicles.plate))
+    .all()
+    .map((v): OwnerSettlementRow => {
+      const mine = lines.filter((l) => l.vehicleId === v.id && l.at >= period.start && l.at < period.end);
+      const share = mine.reduce((s, l) => s + l.share, 0);
+      const paid = payouts.filter((p) => p.vehicleId === v.id && monthInPeriod(p.period ?? monthKeyOf(p.at))).reduce((s, p) => s + p.amount, 0);
+      return {
+        vehicleId: v.id,
+        plate: v.plate,
+        make: v.make,
+        model: v.model,
+        archived: v.archivedAt != null,
+        ownerName: v.ownerName,
+        ownerPhone: v.ownerPhone,
+        lines: mine.map((l) => ({ ...l, customerDue: Math.max(0, rentalMoney(l.rentalId).due) })),
+        share,
+        paid,
+        remaining: share - paid,
+      };
+    })
+    .filter((x) => x.lines.length > 0 || x.paid > 0 || (!x.archived && consignedIds(vehicleId).has(x.vehicleId)));
+  const owed = lines.reduce((s, l) => s + l.share, 0) - payouts.reduce((s, p) => s + p.amount, 0);
+  return { rows, owedAllTime: Math.max(0, owed) };
+}
+
+function consignedIds(vehicleId?: number): Set<number> {
+  const conds = [eq(schema.vehicles.ownerType, 'consigned')];
+  if (vehicleId != null) conds.push(eq(schema.vehicles.id, vehicleId));
+  return new Set(
+    db
+      .select({ id: schema.vehicles.id })
+      .from(schema.vehicles)
+      .where(and(...conds))
+      .all()
+      .map((v) => v.id),
+  );
+}
+
 // ── Cộng dồn ───────────────────────────────────────────────────────────────
 
 export interface CashTotals {
@@ -273,7 +405,9 @@ export interface CashTotals {
   income: number;
   /** Chi vận hành (không gồm mua xe, trả góp). */
   expense: number;
-  /** Lãi vận hành = income − expense. */
+  /** Phần chủ xe ký gửi phát sinh trong kỳ (theo tháng giao xe). */
+  ownerShare: number;
+  /** Lãi vận hành = income − expense − ownerShare. */
   profit: number;
   /** Bán xe, thanh lý. */
   capitalIn: number;
@@ -284,7 +418,7 @@ export interface CashTotals {
 }
 
 function emptyTotals(): CashTotals {
-  return { rent: 0, otherIncome: 0, income: 0, expense: 0, profit: 0, capitalIn: 0, capitalOut: 0, net: 0 };
+  return { rent: 0, otherIncome: 0, income: 0, expense: 0, ownerShare: 0, profit: 0, capitalIn: 0, capitalOut: 0, net: 0 };
 }
 
 function addFlow(t: CashTotals, f: { amount: number }) {
@@ -294,7 +428,7 @@ function addFlow(t: CashTotals, f: { amount: number }) {
 function addEntry(t: CashTotals, e: Pick<CashEntry, 'category' | 'amount' | 'voidedAt'>) {
   if (e.voidedAt) return;
   const c = CASH_CATEGORY[e.category];
-  if (!c) return;
+  if (!c || c.settlement) return;
   if (c.capital) {
     if (c.dir === 'in') t.capitalIn += e.amount;
     else t.capitalOut += e.amount;
@@ -304,7 +438,7 @@ function addEntry(t: CashTotals, e: Pick<CashEntry, 'category' | 'amount' | 'voi
 
 function finish(t: CashTotals): CashTotals {
   t.income = t.rent + t.otherIncome;
-  t.profit = t.income - t.expense;
+  t.profit = t.income - t.expense - t.ownerShare;
   t.net = t.profit + t.capitalIn - t.capitalOut;
   return t;
 }
@@ -314,6 +448,7 @@ export function cashTotals(from: number, to: number): CashTotals {
   const t = emptyTotals();
   for (const f of rentFlows(from, to)) addFlow(t, f);
   for (const e of entriesIn(from, to, null)) addEntry(t, e);
+  t.ownerShare = ownerShareLines(from, to).reduce((s, l) => s + l.share, 0);
   return finish(t);
 }
 
@@ -379,6 +514,7 @@ export interface VehicleCashRow extends CashTotals {
   make: string;
   model: string;
   archived: boolean;
+  ownerType: 'own' | 'consigned';
   /** Số lượt thuê nhận xe trong kỳ. */
   rentals: number;
   /** % thời gian xe có khách trong kỳ (tính tới hiện tại); null nếu kỳ chưa bắt đầu. */
@@ -409,6 +545,7 @@ export function cashflowReport(period: Period, filter: VehicleFilter, now = Date
 
   const flows = filter === 'shared' ? [] : rentFlows(from, to, typeof filter === 'number' ? filter : undefined);
   const entries = entriesIn(from, to, filter);
+  const shareLines = filter === 'shared' ? [] : ownerShareLines(from, to, typeof filter === 'number' ? filter : undefined);
 
   // Biểu đồ 12 tháng
   const trendMap = new Map(period.trend.map((k) => [k, emptyTotals()]));
@@ -420,6 +557,10 @@ export function cashflowReport(period: Period, filter: VehicleFilter, now = Date
     const t = trendMap.get(monthKeyOf(e.at));
     if (t) addEntry(t, e);
   }
+  for (const l of shareLines) {
+    const t = trendMap.get(monthKeyOf(l.at));
+    if (t) t.ownerShare += l.share;
+  }
   const trend = period.trend.map((key) => ({ key, ...finish(trendMap.get(key)!) }));
 
   // Tổng kỳ
@@ -428,12 +569,14 @@ export function cashflowReport(period: Period, filter: VehicleFilter, now = Date
   const totals = emptyTotals();
   for (const f of pFlows) addFlow(totals, f);
   for (const e of pEntries) addEntry(totals, e);
+  const pShareLines = shareLines.filter((l) => inPeriod(l.at));
+  totals.ownerShare = pShareLines.reduce((s, l) => s + l.share, 0);
   finish(totals);
 
   // Theo hạng mục
   const catMap = new Map<CashCategory, { category: CashCategory; amount: number; count: number }>();
   for (const e of pEntries) {
-    if (e.voidedAt) continue;
+    if (e.voidedAt || CASH_CATEGORY[e.category]?.settlement) continue;
     const c = catMap.get(e.category) ?? { category: e.category, amount: 0, count: 0 };
     c.amount += e.amount;
     c.count++;
@@ -472,6 +615,7 @@ export function cashflowReport(period: Period, filter: VehicleFilter, now = Date
         const t = emptyTotals();
         for (const f of pFlows) if (f.vehicleId === v.id) addFlow(t, f);
         for (const e of pEntries) if (e.vehicleId === v.id) addEntry(t, e);
+        t.ownerShare = pShareLines.filter((l) => l.vehicleId === v.id).reduce((s, l) => s + l.share, 0);
         finish(t);
         const used = overlapping
           .filter((r) => r.vehicleId === v.id)
@@ -486,11 +630,12 @@ export function cashflowReport(period: Period, filter: VehicleFilter, now = Date
           make: v.make,
           model: v.model,
           archived: v.archivedAt != null,
+          ownerType: v.ownerType,
           rentals: rentalsInPeriod.filter((r) => r.vehicleId === v.id).length,
           utilization: span > 0 ? Math.min(100, Math.round((used / span) * 100)) : null,
         };
       })
-      .filter((r) => !r.archived || r.income || r.expense || r.capitalIn || r.capitalOut || r.rentals);
+      .filter((r) => !r.archived || r.income || r.expense || r.ownerShare || r.capitalIn || r.capitalOut || r.rentals);
     shared = emptyTotals();
     for (const e of pEntries) if (e.vehicleId == null) addEntry(shared, e);
     finish(shared);
@@ -567,6 +712,7 @@ export function cashflowReport(period: Period, filter: VehicleFilter, now = Date
     channels: channelReport(ofFilter(rentalsInPeriod)),
     /** Lượt qua app chưa nhận tiền app chuyển về (mọi thời điểm, không theo kỳ). */
     channelOwed: ofFilter(channelOwedRentals()),
+    ownerSettlement: ownerSettlement(period, filter ?? null),
     vehicleOptions: allVehicles.map((v) => ({ id: v.id, plate: v.plate, make: v.make, model: v.model, archived: v.archivedAt != null })),
   };
 }

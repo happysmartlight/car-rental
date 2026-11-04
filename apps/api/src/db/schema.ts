@@ -306,6 +306,8 @@ export const rentals = sqliteTable(
     /** App đã chuyển tiền về (tiền khách trả trước qua app sau khi trừ phí). */
     channelPayout: integer('channel_payout'),
     channelPaidAt: integer('channel_paid_at'),
+    /** Xe ký gửi: % chủ xe hưởng, chốt lúc giao xe để đổi % sau này không làm sai số cũ. Xe nhà: null. */
+    ownerSharePct: integer('owner_share_pct'),
     /** Lượt trực tiếp: khách biết tới qua đâu. */
     source: text('source').$type<RentalSource>(),
     createdBy: integer('created_by'),

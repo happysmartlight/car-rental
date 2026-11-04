@@ -30,6 +30,8 @@ const zVehicleId = z.coerce
   .optional()
   .transform((v) => v ?? null);
 
+const zMonthKey = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'tháng phải dạng YYYY-MM');
+
 const zEntry = z.object({
   category: z.enum(CASH_CATEGORIES),
   amount: zMoney.refine((n) => n > 0, 'số tiền phải lớn hơn 0'),
@@ -47,6 +49,7 @@ const zEntry = z.object({
     .optional()
     .transform((v) => v ?? null),
   receiptFileIds: z.array(z.string().uuid()).max(12).default([]),
+  period: zMonthKey.nullable().optional(),
 });
 
 const zRenewal = z.object({
@@ -57,8 +60,6 @@ const zRenewal = z.object({
   nextServiceOdo: z.coerce.number().int().min(0).nullable().optional(),
   nextServiceDate: zDateKey,
 });
-
-const zMonthKey = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'tháng phải dạng YYYY-MM');
 
 const zRecurring = z.object({
   category: z.enum(CASH_CATEGORIES),
@@ -204,6 +205,7 @@ function workbook(r: CashflowReport): Sheet[] {
       x.rent,
       x.otherIncome,
       x.expense,
+      x.ownerShare,
       x.profit,
       x.capitalIn,
       x.capitalOut,
@@ -212,7 +214,7 @@ function workbook(r: CashflowReport): Sheet[] {
     sheets.push({
       name: 'Tổng hợp theo xe',
       intro,
-      columns: [{ header: 'Xe', width: 14 }, { header: 'Dòng xe', width: 24 }, { header: 'Lượt thuê', width: 10 }, { header: 'Sử dụng (%)', width: 11 }, money('Thu tiền thuê'), money('Thu khác'), money('Chi vận hành'), money('Lãi vận hành'), money('Bán xe, thanh lý'), money('Mua xe, trả góp'), money('Dòng tiền ròng')],
+      columns: [{ header: 'Xe', width: 14 }, { header: 'Dòng xe', width: 24 }, { header: 'Lượt thuê', width: 10 }, { header: 'Sử dụng (%)', width: 11 }, money('Thu tiền thuê'), money('Thu khác'), money('Chi vận hành'), money('Phần chủ xe ký gửi'), money('Lãi vận hành'), money('Bán xe, thanh lý'), money('Mua xe, trả góp'), money('Dòng tiền ròng')],
       rows: [...r.vehicles.map((v) => row(v.plate, `${v.make} ${v.model}`.trim() + (v.archived ? ' (đã lưu trữ)' : ''), v)), ...(r.shared ? [row('Chi phí chung', 'Không gắn xe', r.shared)] : [])],
       total: row('Tổng cộng', '', { ...t, rentals: r.vehicles.reduce((s, v) => s + v.rentals, 0), utilization: null }),
     });
@@ -230,6 +232,7 @@ function workbook(r: CashflowReport): Sheet[] {
         ['Thu khác', t.otherIncome],
         ['Tổng thu', t.income],
         ['Chi vận hành', t.expense],
+        ['Phần chủ xe ký gửi', t.ownerShare],
         ['Lãi vận hành', t.profit],
         ['Bán xe, thanh lý', t.capitalIn],
         ['Mua xe, trả góp', t.capitalOut],
@@ -276,6 +279,34 @@ function workbook(r: CashflowReport): Sheet[] {
     total: ['', '', 'Cộng', '', '', '', '', ledger.filter((l) => l.direction === 'in').reduce((s, l) => s + l.amount, 0), ledger.filter((l) => l.direction === 'out').reduce((s, l) => s + l.amount, 0)],
   });
 
+  if (r.ownerSettlement.rows.length) {
+    const lines = r.ownerSettlement.rows.flatMap((x) => x.lines.map((l) => ({ x, l })));
+    sheets.push({
+      name: 'Đối soát chủ xe',
+      intro: [`Đối soát chủ xe ký gửi — ${r.period.label} · ${scope}`, 'Tính trên tiền thuê, vượt km, quá giờ, giảm giá, sau khi trừ phí sàn. Không tính đền bù, phí giao xe, bù xăng, khoản thu hộ.'],
+      columns: [
+        { header: 'Xe', width: 13 },
+        { header: 'Chủ xe', width: 22 },
+        { header: 'Lượt thuê', width: 15 },
+        { header: 'Khách', width: 22 },
+        { header: 'Ngày giao', width: 11 },
+        { header: 'Tiền thuê', width: 15, money: true },
+        { header: 'Phí sàn', width: 13, money: true },
+        { header: '%', width: 6 },
+        { header: 'Phần chủ xe', width: 15, money: true },
+      ],
+      rows: [
+        ...lines.map(({ x, l }) => [x.plate, x.ownerName, l.code, l.customerName, fmtDate(l.at), l.rent, l.fee, l.pct, l.share]),
+        [],
+        ...r.ownerSettlement.rows.flatMap((x) => [
+          [x.plate, x.ownerName, 'Phần chủ xe', '', '', '', '', '', x.share],
+          [x.plate, x.ownerName, 'Đã trả', '', '', '', '', '', x.paid],
+          [x.plate, x.ownerName, x.remaining < 0 ? 'Trả dư' : 'Còn phải trả', '', '', '', '', '', Math.abs(x.remaining)],
+        ]),
+      ],
+    });
+  }
+
   sheets.push({
     name: 'Theo hạng mục',
     intro: [`Thu chi theo hạng mục — ${r.period.label} · ${scope}`],
@@ -293,7 +324,7 @@ function workbook(r: CashflowReport): Sheet[] {
 
   sheets.push({
     name: 'Theo tháng',
-    intro: [`Thu chi 12 tháng · ${scope}`],
+    intro: [`Thu chi 12 tháng · ${scope}`, 'Lãi vận hành đã trừ phần chủ xe ký gửi (nếu có).'],
     columns: [
       { header: 'Tháng', width: 14 },
       { header: 'Tổng thu', width: 16, money: true },

@@ -6,6 +6,8 @@
 //   chi = các khoản ghi trong sổ (cash_entries).
 // Nhóm "Vốn & tài chính" (mua xe, trả góp, bán xe) tách riêng: không làm sai lãi vận hành
 // của tháng, nhưng vẫn có trong dòng tiền ròng.
+// Xe ký gửi: phần chủ xe trừ vào lãi ngay tháng giao xe, dù đã trả hay chưa. Khoản "Trả chủ xe"
+// chỉ là thanh toán phần đó nên không tính thêm vào chi.
 
 import { HOUR_MS, VN_OFFSET_MS, vnParts } from './time.js';
 
@@ -71,6 +73,8 @@ export interface CashCategoryInfo {
   odo?: boolean;
   /** Xe ký gửi: chủ xe tự trả, cửa hàng chỉ nhắc nên không ghi vào sổ. */
   ownerPays?: boolean;
+  /** Thanh toán phần đã trừ vào lãi tháng phát sinh: không tính thêm vào chi. */
+  settlement?: boolean;
 }
 
 export const CASH_CATEGORY: Record<CashCategory, CashCategoryInfo> = {
@@ -92,7 +96,7 @@ export const CASH_CATEGORY: Record<CashCategory, CashCategoryInfo> = {
   marketing: { label: 'Quảng cáo, nền tảng', dir: 'out', group: 'overhead', shared: true, placeholder: 'Quảng cáo Facebook, phí sàn' },
   tax: { label: 'Thuế, phí, lệ phí', dir: 'out', group: 'overhead', shared: true },
   other: { label: 'Chi khác', dir: 'out', group: 'overhead' },
-  owner_payout: { label: 'Trả chủ xe ký gửi', dir: 'out', group: 'overhead', placeholder: 'Chia doanh thu tháng cho chủ xe' },
+  owner_payout: { label: 'Trả chủ xe ký gửi', dir: 'out', group: 'overhead', settlement: true, placeholder: 'Chia doanh thu tháng cho chủ xe' },
   loan: { label: 'Trả góp, lãi vay', dir: 'out', group: 'capital', capital: true, placeholder: 'Trả góp ngân hàng kỳ tháng' },
   purchase: { label: 'Mua xe, nâng cấp lớn', dir: 'out', group: 'capital', capital: true },
   insurance_claim: { label: 'Bảo hiểm bồi thường', dir: 'in', group: 'income', placeholder: 'Bảo hiểm chi trả sửa chữa' },
@@ -274,6 +278,15 @@ export function splitEvenly(total: number, n: number): number[] {
 /** Tỷ lệ % làm tròn, null khi mẫu bằng 0. */
 export function pct(part: number, whole: number): number | null {
   return whole > 0 ? Math.round((part / whole) * 100) : null;
+}
+
+/** Khoản tính phần chủ xe: tiền thuê và phụ phí theo mức dùng xe. Không gồm đền bù, phí giao xe, bù xăng, khoản thu hộ. */
+const OWNER_SHARE_KINDS = new Set(['rental', 'over_km', 'over_time', 'discount']);
+
+/** Phần chủ xe của một lượt: (tiền thuê − phí sàn) × %, làm tròn tới đồng. */
+export function ownerShareOf(charges: { kind: string; amount: number }[], channelFee: number, pct: number): { rent: number; share: number } {
+  const rent = charges.filter((c) => OWNER_SHARE_KINDS.has(c.kind)).reduce((s, c) => s + c.amount, 0);
+  return { rent, share: Math.round((Math.max(0, rent - channelFee) * pct) / 100) };
 }
 
 /** Nhân viên chỉ ghi được chi phí vận hành, không ghi trả chủ xe, mua xe, trả góp hay khoản thu. */

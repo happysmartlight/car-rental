@@ -354,7 +354,9 @@ export interface CashTotals {
   income: number;
   /** Chi vận hành. */
   expense: number;
-  /** Lãi vận hành. */
+  /** Phần chủ xe ký gửi phát sinh trong kỳ. */
+  ownerShare: number;
+  /** Lãi vận hành, đã trừ phần chủ xe. */
   profit: number;
   capitalIn: number;
   capitalOut: number;
@@ -368,6 +370,7 @@ export interface VehicleCashRow extends CashTotals {
   make: string;
   model: string;
   archived: boolean;
+  ownerType: 'own' | 'consigned';
   rentals: number;
   utilization: number | null;
 }
@@ -389,6 +392,21 @@ export type LedgerRow =
   | { kind: 'rent'; key: string; at: number; direction: 'in' | 'out'; amount: number; flow: RentFlow; plate: string | null }
   | { kind: 'entry'; key: string; at: number; direction: 'in' | 'out'; amount: number; entry: CashEntry; plate: string | null; recurring: { id: number; description: string | null } | null };
 
+export interface OwnerSettlementRow {
+  vehicleId: number;
+  plate: string;
+  make: string;
+  model: string;
+  archived: boolean;
+  ownerName: string | null;
+  ownerPhone: string | null;
+  lines: { rentalId: number; code: string; status: RentalStatus; customerName: string; vehicleId: number; at: number; pct: number; rent: number; fee: number; share: number; customerDue: number }[];
+  share: number;
+  paid: number;
+  /** Âm là đã trả dư. */
+  remaining: number;
+}
+
 export interface CashflowReport {
   period: Period;
   filter: 'all' | 'shared' | number;
@@ -408,6 +426,7 @@ export interface CashflowReport {
     sources: { source: RentalSource | null; rentals: number; revenue: number }[];
     returning: number;
   };
+  ownerSettlement: { rows: OwnerSettlementRow[]; owedAllTime: number };
   /** Lượt qua Mioto chưa nhận tiền app chuyển về. */
   channelOwed: (ChannelMoney & { id: number; code: string; vehicleId: number; channel: RentalChannel; channelRef: string | null; status: RentalStatus; start: number; end: number; plate: string; customerName: string })[];
 }

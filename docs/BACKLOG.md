@@ -55,7 +55,8 @@ Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 
 - [ ] Kênh cập nhật thử nghiệm (beta) — hiện chỉ theo bản phát hành chính thức.
 
 ### Phase 5
-- [ ] Chủ xe ký gửi: đối soát chia doanh thu theo tháng (đã có trường % ở xe; tiền trả chủ xe ghi được bằng hạng mục "Trả chủ xe ký gửi" trong Thu chi).
+- [x] Chủ xe ký gửi: đối soát theo tháng trong Thu chi (phần chủ xe chốt % lúc giao xe, trừ vào lãi tháng phát sinh).
+- [ ] Xe ký gửi: lượt thuê dài nhiều tháng đang tính hết vào tháng giao xe; hồ sơ chủ xe (CCCD, số tài khoản, ngày hợp đồng, biên bản nhận/trả xe), gộp đối soát theo chủ; mẫu hợp đồng cho xe ký gửi.
 - [ ] Web Push (thông báo trên iPhone không qua Telegram).
 - [ ] Trang đặt xe công khai (cần mở ra Internet: Cloudflare Tunnel / Tailscale Funnel).
 - [ ] OCR GPLX bằng AI (Gemini) — chỉ khi bạn đồng ý gửi ảnh ra ngoài.

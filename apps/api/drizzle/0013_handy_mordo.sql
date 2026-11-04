@@ -1,0 +1,1 @@
+ALTER TABLE `rentals` ADD `owner_share_pct` integer;

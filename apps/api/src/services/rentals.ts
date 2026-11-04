@@ -619,7 +619,7 @@ export function pickup(id: number, input: HandoverInput & { payments: NewPayment
     for (const c of input.collaterals) addCollateral(r.id, c, userId);
     return db
       .update(schema.rentals)
-      .set({ status: 'active', actualStart: input.at, handledBy: userId, updatedAt: now })
+      .set({ status: 'active', actualStart: input.at, handledBy: userId, ownerSharePct: vehicle.ownerType === 'consigned' ? vehicle.ownerSharePct : null, updatedAt: now })
       .where(eq(schema.rentals.id, r.id))
       .returning()
       .get();

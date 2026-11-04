@@ -3,6 +3,17 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.5.2] - 2026-11-04
+
+### Mới
+- **Đối soát chủ xe ký gửi** trong Thu chi: phần chủ xe từng lượt, đã trả, còn phải trả, tổng còn nợ; nút **Ghi đã trả chủ xe** điền sẵn số tiền và tháng; có trong file Excel.
+- Phần chủ xe tính trên tiền thuê, vượt km, quá giờ, giảm giá, sau khi trừ phí sàn. Không tính đền bù, phí giao xe, phí hủy, bù xăng và các khoản thu hộ.
+- **Lãi đã trừ phần chủ xe** ngay tháng giao xe, kể cả ở Tổng quan. Khi ghi đã trả, lãi không bị trừ thêm lần nữa.
+
+### Lưu ý
+- % chia chốt lúc giao xe: đổi % về sau không làm đổi số của lượt đã giao. Lượt giao trước khi xe chuyển sang ký gửi thì không chia.
+- Lượt thuê dài nhiều tháng tính hết vào tháng giao xe. Khách chưa trả vẫn tính phần chủ xe, app có cảnh báo để bạn quyết định lúc trả.
+
 ## [0.5.1] - 2026-11-04
 
 ### Sửa lỗi quan trọng

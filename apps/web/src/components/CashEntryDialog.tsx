@@ -36,7 +36,7 @@ import { Checkbox, DateInput, Field, Input, MoneyInput, NumberInput, Segmented, 
 import { Notice } from './ui/misc';
 
 export type CashDialogState =
-  | { mode: 'new'; vehicleId?: number | null; category?: CashCategory; repeat?: boolean; amount?: number | null; description?: string }
+  | { mode: 'new'; period?: string; vehicleId?: number | null; category?: CashCategory; repeat?: boolean; amount?: number | null; description?: string }
   | { mode: 'edit'; entry: CashEntry; recurringLabel?: string | null }
   | { mode: 'recurring'; recurring?: RecurringRow };
 
@@ -50,6 +50,8 @@ interface Renew {
 }
 
 interface Form {
+  /** Trả chủ xe: trả cho tháng nào, "YYYY-MM". */
+  period: string;
   category: CashCategory;
   amount: number | null;
   date: string;
@@ -74,6 +76,7 @@ function initialForm(s: CashDialogState): Form {
   const today = vnDateKey(Date.now());
   const base: Form = {
     category: 'fuel',
+    period: '',
     amount: null,
     date: today,
     vehicleId: null,
@@ -91,7 +94,7 @@ function initialForm(s: CashDialogState): Form {
   };
   if (s.mode === 'edit') {
     const e = s.entry;
-    return { ...base, category: e.category, amount: e.amount, date: vnDateKey(e.at), vehicleId: e.vehicleId, method: e.method, description: e.description ?? '', vendor: e.vendor ?? '', odo: e.odo, receiptFileIds: e.receiptFileIds };
+    return { ...base, period: e.period ?? '', category: e.category, amount: e.amount, date: vnDateKey(e.at), vehicleId: e.vehicleId, method: e.method, description: e.description ?? '', vendor: e.vendor ?? '', odo: e.odo, receiptFileIds: e.receiptFileIds };
   }
   if (s.mode === 'recurring') {
     const r = s.recurring;
@@ -114,7 +117,7 @@ function initialForm(s: CashDialogState): Form {
     };
   }
   const category = s.category ?? (s.vehicleId ? 'fuel' : 'parking');
-  return { ...base, category, vehicleId: s.vehicleId ?? null, repeat: !!s.repeat, amount: s.amount ?? null, description: s.description ?? '' };
+  return { ...base, period: s.period ?? '', category, vehicleId: s.vehicleId ?? null, repeat: !!s.repeat, amount: s.amount ?? null, description: s.description ?? '' };
 }
 
 /** "YYYY-MM-DD" + n tháng. */
@@ -180,6 +183,7 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
       vendor: f.vendor,
       odo: cat.odo && f.vehicleId ? f.odo : null,
       receiptFileIds: f.receiptFileIds,
+      period: needsConsigned ? f.period || f.date.slice(0, 7) : null,
     };
   };
   const templateBody = () => ({
@@ -381,6 +385,12 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
               <DateInput value={f.date} onChange={(v) => set('date', v ?? '')} />
             </Field>
           </div>
+
+          {needsConsigned && !isTemplate && (
+            <Field label="Trả cho tháng" hint="Phần chủ xe đã trừ vào lãi của tháng đó nên khoản này không trừ lãi lần nữa">
+              <Input type="month" value={f.period || f.date.slice(0, 7)} onChange={(e) => set('period', e.target.value)} />
+            </Field>
+          )}
 
           <Field label="Nội dung">
             <Input value={f.description} onChange={(e) => set('description', e.target.value)} placeholder={cat.placeholder ?? 'Ghi chú ngắn'} maxLength={300} />
