@@ -95,7 +95,7 @@ export function AppShell() {
       {/* ── Sidebar máy tính ── */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-surface lg:flex">
         <div className="flex h-16 items-center gap-2.5 px-5">
-          <div className="flex size-9 items-center justify-center rounded-xl bg-brand text-brand-fg shadow-card">
+          <div className="flex size-9 items-center justify-center rounded-xl bg-brand-solid text-brand-fg shadow-card">
             <Car className="size-5" />
           </div>
           <div className="leading-tight">
@@ -124,7 +124,7 @@ export function AppShell() {
               {n.label}
             </NavLink>
           ))}
-          <button onClick={() => setQuickOpen(true)} className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-brand text-sm font-medium text-brand-fg shadow-card hover:bg-brand-hover">
+          <button onClick={() => setQuickOpen(true)} className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-brand-solid text-sm font-medium text-brand-fg shadow-card hover:bg-brand-hover">
             <Plus className="size-4" /> Tạo nhanh
           </button>
         </nav>
@@ -173,12 +173,12 @@ export function AppShell() {
           <TabLink to="/" end icon={LayoutDashboard} label="Tổng quan" />
           <TabLink to="/calendar" icon={CalendarRange} label="Lịch" />
           <div className="flex justify-center">
-            <button onClick={() => setQuickOpen(true)} aria-label="Tạo nhanh" className="-mt-6 flex size-14 items-center justify-center rounded-2xl bg-brand text-brand-fg shadow-pop active:scale-95">
+            <button onClick={() => setQuickOpen(true)} aria-label="Tạo nhanh" className="-mt-6 flex size-14 items-center justify-center rounded-2xl bg-brand-solid text-brand-fg shadow-pop transition-[scale] active:scale-95">
               <Plus className="size-7" />
             </button>
           </div>
           <TabLink to="/rentals" icon={KeyRound} label="Lượt thuê" />
-          <button onClick={() => setMoreOpen(true)} className="flex flex-col items-center gap-0.5 text-[11px] font-medium text-muted">
+          <button onClick={() => setMoreOpen(true)} className="press flex flex-col items-center gap-0.5 text-[11px] font-medium text-muted">
             <MenuIcon className="size-[22px]" />
             Thêm
           </button>
@@ -261,7 +261,7 @@ export function AppShell() {
 
 function TabLink({ to, icon: Icon, label, end }: { to: string; icon: LucideIcon; label: string; end?: boolean }) {
   return (
-    <NavLink to={to} end={end} className={({ isActive }) => cn('flex flex-col items-center gap-0.5 text-[11px] font-medium', isActive ? 'text-brand' : 'text-muted')}>
+    <NavLink to={to} end={end} className={({ isActive }) => cn('press flex flex-col items-center gap-0.5 text-[11px] font-medium', isActive ? 'text-brand' : 'text-muted')}>
       <Icon className="size-[22px]" />
       {label}
     </NavLink>
@@ -294,7 +294,7 @@ export function Page({
   };
   const max = { default: 'max-w-6xl', narrow: 'max-w-3xl', wide: 'max-w-[1600px]' }[width];
   return (
-    <div className={cn('mx-auto px-4 md:px-6 lg:px-8', max)}>
+    <div className={cn('anim-page mx-auto px-4 md:px-6 lg:px-8', max)}>
       <header className="sticky top-0 z-20 -mx-4 mb-4 border-b border-border bg-bg/85 px-4 pt-safe backdrop-blur-xl md:static md:mx-0 md:mb-6 md:border-0 md:bg-transparent md:px-0 md:pt-6 md:backdrop-blur-none">
         <div className="flex min-h-14 items-center gap-2 py-2">
           {back && (

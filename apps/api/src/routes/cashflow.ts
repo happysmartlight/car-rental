@@ -17,7 +17,7 @@ import {
   type CashflowReport,
   type VehicleFilter,
 } from '../services/cashflow.js';
-import { CASH_CATEGORIES, CASH_CATEGORY, CASH_GROUP_LABEL, CASH_METHODS, RECUR_INTERVALS, currentPeriodKey, fmtMonthKey, parsePeriod } from '../shared/cashflow.js';
+import { CASH_CATEGORIES, CASH_CATEGORY, CASH_GROUP_LABEL, CASH_METHODS, RECUR_INTERVALS, currentPeriodKey, fmtMonthKey, parsePeriod, staffCanRecord } from '../shared/cashflow.js';
 import { PAYMENT_METHOD_LABEL, RENTAL_STATUS } from '../shared/constants.js';
 import { plateKey } from '../shared/text.js';
 import { fmtDate, fmtDateTime } from '../shared/time.js';
@@ -125,8 +125,8 @@ export async function cashflowRoutes(app: FastifyInstance) {
     requireRole(req, 'staff');
     const body = parse(zEntry.extend({ renewal: zRenewal.optional(), maintenanceDone: z.array(z.number().int()).max(50).optional() }), req.body);
     const { renewal, maintenanceDone, ...input } = body;
-    // Nhân viên chỉ ghi được khoản chi (đổ xăng, rửa xe…); thu khác và gia hạn giấy tờ xe do quản trị làm.
-    if (req.user!.role !== 'admin' && (CASH_CATEGORY[input.category].dir !== 'out' || renewal)) throw forbidden();
+    // Nhân viên chỉ ghi được chi phí vận hành (đổ xăng, rửa xe…); thu khác, trả chủ xe, mua xe và gia hạn giấy tờ do quản trị làm.
+    if (req.user!.role !== 'admin' && (!staffCanRecord(input.category) || renewal)) throw forbidden();
     const { entry, renewed, maintenance } = createEntry(input, userId(req), renewal, maintenanceDone);
     audit(req, 'cash.create', 'cash_entry', entry.id, { ...input, renewed, maintenanceDone });
     if (Object.keys(renewed).length) audit(req, 'vehicle.renew', 'vehicle', entry.vehicleId, { fromCashEntry: entry.id, ...renewed });

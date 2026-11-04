@@ -27,6 +27,17 @@ export function parse<T extends z.ZodType>(schema: T, data: unknown): z.infer<T>
   throw badRequest(field ? `${field}: ${issue.message}` : issue.message, 'validation');
 }
 
+/**
+ * Dữ liệu PATCH: chỉ giữ các trường client thực sự gửi.
+ * Zod 4 vẫn chạy .default() và .transform() cho trường vắng mặt trong .partial(), nên parse thẳng
+ * sẽ ghi đè dữ liệu cũ bằng giá trị mặc định (ODO về 0, xe ký gửi thành xe nhà…).
+ */
+export function parsePatch<T extends z.ZodObject>(schema: T, data: unknown): Partial<z.output<T>> {
+  const parsed = parse(schema.partial(), data) as Record<string, unknown>;
+  const sent = data !== null && typeof data === 'object' ? data : {};
+  return Object.fromEntries(Object.entries(parsed).filter(([k]) => Object.hasOwn(sent, k))) as Partial<z.output<T>>;
+}
+
 export function idParam(req: FastifyRequest): number {
   const id = Number((req.params as { id?: string }).id);
   if (!Number.isInteger(id) || id <= 0) throw badRequest('ID không hợp lệ');

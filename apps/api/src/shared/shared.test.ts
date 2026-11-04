@@ -31,6 +31,7 @@ import { addMonthsVn, fmtDateTime, msToVnLocalInput, vnDateLong, vnLocalInputToM
 import {
   CASH_CATEGORY,
   dueRecurringMonths,
+  fleetLeaders,
   fmtCompactVnd,
   groupedCategories,
   monthKeyOf,
@@ -846,6 +847,44 @@ describe('thu chi: kỳ báo cáo, khoản định kỳ, chia chi phí chung', (
     expect(fmtCompactVnd(12_500_000)).toBe('12,5tr');
     expect(fmtCompactVnd(950_000)).toBe('950k');
     expect(fmtCompactVnd(-1_200_000_000)).toBe('−1,2 tỷ');
+  });
+});
+
+describe('xe dẫn đầu trong tháng', () => {
+  const row = (vehicleId: number, rent: number, rentals: number, archived = false) => ({ vehicleId, rent, rentals, archived });
+
+  it('doanh thu và lượt thuê xét riêng, có thể là hai xe khác nhau', () => {
+    expect(fleetLeaders([row(1, 9_000_000, 1), row(2, 3_000_000, 4), row(3, 0, 0)])).toEqual({
+      revenue: { ids: [1], value: 9_000_000 },
+      rentals: { ids: [2], value: 4 },
+    });
+  });
+  it('một xe có thể dẫn đầu cả hai', () => {
+    const r = fleetLeaders([row(1, 9_000_000, 4), row(2, 3_000_000, 1)]);
+    expect(r.revenue?.ids).toEqual([1]);
+    expect(r.rentals?.ids).toEqual([1]);
+  });
+  it('hòa thì cùng dẫn đầu', () => {
+    expect(fleetLeaders([row(1, 100, 3), row(2, 200, 3), row(3, 50, 1)]).rentals).toEqual({ ids: [1, 2], value: 3 });
+  });
+  it('cả đội bằng nhau thì không ai dẫn đầu', () => {
+    expect(fleetLeaders([row(1, 500, 2), row(2, 500, 2)])).toEqual({ revenue: null, rentals: null });
+  });
+  it('đầu tháng chưa có số thì không gắn', () => {
+    expect(fleetLeaders([row(1, 0, 0), row(2, 0, 0)])).toEqual({ revenue: null, rentals: null });
+    expect(fleetLeaders([])).toEqual({ revenue: null, rentals: null });
+  });
+  it('đội chỉ có một xe thì không so với ai', () => {
+    expect(fleetLeaders([row(1, 900, 3)])).toEqual({ revenue: null, rentals: null });
+  });
+  it('tiền hoàn lại làm âm vẫn không thành dẫn đầu', () => {
+    expect(fleetLeaders([row(1, -500, 0), row(2, -100, 0)]).revenue).toBeNull();
+  });
+  it('bỏ qua xe đã lưu trữ', () => {
+    expect(fleetLeaders([row(1, 9_000_000, 9, true), row(2, 500, 2), row(3, 100, 1)])).toEqual({
+      revenue: { ids: [2], value: 500 },
+      rentals: { ids: [2], value: 2 },
+    });
   });
 });
 

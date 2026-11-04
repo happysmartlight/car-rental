@@ -7,11 +7,12 @@
 //    nên app không tự tra được) hoặc từ thông báo trên app VNeTraffic → dán vào app.
 // Mỗi vi phạm tìm được được khớp với lượt thuê đang giữ xe lúc đó (lookupFine).
 
-import { and, asc, eq, gte, isNull, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lte, or } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { getLocalConfig, updateLocalConfig } from '../lib/localConfig.js';
 import { escapeHtml, notify } from '../lib/telegram.js';
 import { plateKey } from '../shared/text.js';
+import { DAY_MS } from '../shared/time.js';
 import { normalizeViolation, type FoundViolation } from '../shared/violationText.js';
 import { lookupFine, recordFine } from './fines.js';
 import { getRental } from './rentals.js';
@@ -24,6 +25,11 @@ export interface MatchedViolation extends FoundViolation {
   renter: { customerId: number; fullName: string; phone: string | null } | null;
   rental: { id: number; code: string } | null;
   nearBoundary: boolean;
+  /** Có ghi "Chủ xe sử dụng" lúc đó. */
+  ownerHeld: boolean;
+  ownerType: 'own' | 'consigned' | null;
+  ownerName: string | null;
+  ownerPhone: string | null;
   /** Đã có trong hồ sơ phạt nguội của app (cùng biển, cùng giờ). */
   recordedFineId: number | null;
 }
@@ -57,7 +63,7 @@ export async function checkProvider(plate: string): Promise<ProviderResult> {
 export function matchViolations(plate: string, list: FoundViolation[]): MatchedViolation[] {
   const key = plateKey(plate);
   return list.map((v) => {
-    if (v.violatedAt == null) return { ...v, verdict: 'no_time', renter: null, rental: null, nearBoundary: false, recordedFineId: null };
+    if (v.violatedAt == null) return { ...v, verdict: 'no_time', renter: null, rental: null, nearBoundary: false, ownerHeld: false, ownerType: null, ownerName: null, ownerPhone: null, recordedFineId: null };
     const found = lookupFine(key, v.violatedAt);
     const m = found.matches[0];
     const recorded = db
@@ -71,6 +77,10 @@ export function matchViolations(plate: string, list: FoundViolation[]): MatchedV
       renter: m ? { customerId: m.customer.id, fullName: m.customer.fullName, phone: m.customer.phone } : null,
       rental: m ? { id: m.rental.id, code: m.rental.code } : null,
       nearBoundary: m?.nearBoundary ?? false,
+      ownerHeld: found.ownerHeld,
+      ownerType: found.vehicle?.ownerType ?? null,
+      ownerName: found.vehicle?.ownerName ?? null,
+      ownerPhone: found.vehicle?.ownerPhone ?? null,
       recordedFineId: recorded?.id ?? null,
     };
   });
@@ -105,7 +115,7 @@ export async function checkRentalFines(rentalId: number, userId: number | null):
       if (m.rental?.id !== rentalId) continue;
       if (!m.recordedFineId && m.violatedAt != null && m.status !== 'paid') {
         const f = recordFine(
-          { plate: v.plate, violatedAt: m.violatedAt, location: m.location, violation: m.violation, source: 'csgt', rentalId, notes: ['Tự phát hiện khi tra trước hạn hoàn cọc', m.unit && `Phát hiện: ${m.unit}`].filter(Boolean).join(' · ') },
+          { plate: v.plate, violatedAt: m.violatedAt, location: m.location, violation: m.violation, source: 'csgt', rentalId: m.ownerHeld ? null : rentalId, notes: ['Tự phát hiện khi tra trước hạn hoàn cọc', m.unit && `Phát hiện: ${m.unit}`].filter(Boolean).join(' · ') },
           userId,
         );
         m.recordedFineId = f.id;
@@ -128,12 +138,15 @@ export interface FleetCheckResult {
   vehicles: { plate: string; ok: boolean; error?: string; found: number; recorded: number }[];
 }
 
+/** Phạt nguội thường về muộn: xe đã lưu trữ (ví dụ trả về chủ ký gửi) vẫn được tra thêm chừng này. */
+const FINE_WATCH_AFTER_ARCHIVE_MS = 90 * DAY_MS;
+
 /**
- * Kiểm tra mọi xe đang hoạt động. Vi phạm CHƯA XỬ PHẠT mà hồ sơ chưa có → tự ghi
+ * Kiểm tra mọi xe trong đội, kể cả xe tạm ngưng và xe mới lưu trữ. Vi phạm CHƯA XỬ PHẠT mà hồ sơ chưa có → tự ghi
  * (khớp sẵn người giữ xe) + báo Telegram. Dịch vụ lỗi → dừng, ghi lại lỗi.
  */
 export async function runFleetFineCheck(userId: number | null): Promise<FleetCheckResult> {
-  const vehicles = db.select().from(schema.vehicles).where(and(isNull(schema.vehicles.archivedAt), eq(schema.vehicles.active, true))).all();
+  const vehicles = db.select().from(schema.vehicles).where(or(isNull(schema.vehicles.archivedAt), gte(schema.vehicles.archivedAt, Date.now() - FINE_WATCH_AFTER_ARCHIVE_MS))).all();
   const result: FleetCheckResult = { ok: true, error: null, checked: 0, found: 0, recorded: 0, vehicles: [] };
   for (const v of vehicles) {
     const r = await checkProvider(v.plate);

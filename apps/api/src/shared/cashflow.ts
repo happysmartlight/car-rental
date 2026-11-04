@@ -69,6 +69,8 @@ export interface CashCategoryInfo {
   renew?: RenewKind;
   /** Có ô ODO lúc làm. */
   odo?: boolean;
+  /** Xe ký gửi: chủ xe tự trả, cửa hàng chỉ nhắc nên không ghi vào sổ. */
+  ownerPays?: boolean;
 }
 
 export const CASH_CATEGORY: Record<CashCategory, CashCategoryInfo> = {
@@ -77,13 +79,13 @@ export const CASH_CATEGORY: Record<CashCategory, CashCategoryInfo> = {
   parking: { label: 'Bến bãi, gửi xe', dir: 'out', group: 'operate', shared: true, placeholder: 'Tiền bãi đậu xe tháng' },
   toll: { label: 'Phí cầu đường, nạp ETC', dir: 'out', group: 'operate', placeholder: 'Nạp tiền thẻ ETC' },
   delivery: { label: 'Đi lại giao nhận xe', dir: 'out', group: 'operate', placeholder: 'Grab / xe ôm về sau khi giao xe' },
-  maintenance: { label: 'Bảo dưỡng định kỳ', dir: 'out', group: 'repair', renew: 'service', odo: true, placeholder: 'Thay dầu, lọc nhớt, lọc gió' },
-  repair: { label: 'Sửa chữa, đồng sơn', dir: 'out', group: 'repair', odo: true, placeholder: 'Sơn lại cản sau, gò móp cửa' },
-  parts: { label: 'Lốp, ắc quy, phụ tùng', dir: 'out', group: 'repair', odo: true, placeholder: 'Thay 2 lốp trước' },
-  accessory: { label: 'Phụ kiện, trang bị', dir: 'out', group: 'repair', placeholder: 'Camera hành trình, thảm sàn' },
-  inspection: { label: 'Đăng kiểm', dir: 'out', group: 'legal', renew: 'inspection', placeholder: 'Đăng kiểm định kỳ' },
-  insurance: { label: 'Bảo hiểm xe', dir: 'out', group: 'legal', renew: 'insurance', placeholder: 'Bảo hiểm thân vỏ 1 năm' },
-  road_fee: { label: 'Phí đường bộ', dir: 'out', group: 'legal', renew: 'road_fee' },
+  maintenance: { label: 'Bảo dưỡng định kỳ', dir: 'out', group: 'repair', ownerPays: true, renew: 'service', odo: true, placeholder: 'Thay dầu, lọc nhớt, lọc gió' },
+  repair: { label: 'Sửa chữa, đồng sơn', dir: 'out', group: 'repair', ownerPays: true, odo: true, placeholder: 'Sơn lại cản sau, gò móp cửa' },
+  parts: { label: 'Lốp, ắc quy, phụ tùng', dir: 'out', group: 'repair', ownerPays: true, odo: true, placeholder: 'Thay 2 lốp trước' },
+  accessory: { label: 'Phụ kiện, trang bị', dir: 'out', group: 'repair', ownerPays: true, placeholder: 'Camera hành trình, thảm sàn' },
+  inspection: { label: 'Đăng kiểm', dir: 'out', group: 'legal', ownerPays: true, renew: 'inspection', placeholder: 'Đăng kiểm định kỳ' },
+  insurance: { label: 'Bảo hiểm xe', dir: 'out', group: 'legal', ownerPays: true, renew: 'insurance', placeholder: 'Bảo hiểm thân vỏ 1 năm' },
+  road_fee: { label: 'Phí đường bộ', dir: 'out', group: 'legal', ownerPays: true, renew: 'road_fee' },
   fine: { label: 'Nộp phạt nguội', dir: 'out', group: 'legal', placeholder: 'Nộp phạt vượt đèn đỏ ngày …' },
   premises: { label: 'Mặt bằng, điện nước, internet', dir: 'out', group: 'overhead', shared: true },
   salary: { label: 'Lương, thưởng nhân viên', dir: 'out', group: 'overhead', shared: true },
@@ -272,6 +274,35 @@ export function splitEvenly(total: number, n: number): number[] {
 /** Tỷ lệ % làm tròn, null khi mẫu bằng 0. */
 export function pct(part: number, whole: number): number | null {
   return whole > 0 ? Math.round((part / whole) * 100) : null;
+}
+
+/** Nhân viên chỉ ghi được chi phí vận hành, không ghi trả chủ xe, mua xe, trả góp hay khoản thu. */
+export function staffCanRecord(category: CashCategory): boolean {
+  const c = CASH_CATEGORY[category];
+  return c.dir === 'out' && !c.capital && category !== 'owner_payout';
+}
+
+/** Lý do hạng mục này không ghi được cho xe này; null nếu hợp lệ. */
+export function vehicleCategoryError(category: CashCategory, vehicle: { ownerType: 'own' | 'consigned' } | null | undefined): string | null {
+  if (category === 'owner_payout' && vehicle?.ownerType !== 'consigned') return 'Trả chủ xe phải gắn với một xe ký gửi';
+  if (vehicle?.ownerType === 'consigned' && CASH_CATEGORY[category].capital) return 'Xe ký gửi không phải tài sản của cửa hàng, không ghi mua xe, trả góp hay bán xe';
+  if (vehicle?.ownerType === 'consigned' && CASH_CATEGORY[category].ownerPays) return 'Xe ký gửi do chủ xe tự trả khoản này, cửa hàng chỉ nhắc chủ xe nên không ghi vào sổ';
+  return null;
+}
+
+/**
+ * Xe dẫn đầu trong kỳ: `revenue` theo `rent` của báo cáo Thu chi, `rentals` theo số lượt.
+ * `rent` là mọi khoản khách trả theo lượt, gồm cả vượt km và đền bù; không gồm bảo hiểm hay thu khác trong sổ.
+ * Hòa thì cùng dẫn đầu. Chưa có số, hoặc cả đội bằng nhau thì không xe nào dẫn đầu.
+ */
+export function fleetLeaders(rows: { vehicleId: number; archived: boolean; rent: number; rentals: number }[]) {
+  const live = rows.filter((r) => !r.archived);
+  const lead = (valueOf: (r: (typeof live)[number]) => number) => {
+    const value = Math.max(0, ...live.map(valueOf));
+    const ids = live.filter((r) => valueOf(r) === value).map((r) => r.vehicleId);
+    return value > 0 && ids.length < live.length ? { ids, value } : null;
+  };
+  return { revenue: lead((r) => r.rent), rentals: lead((r) => r.rentals) };
 }
 
 /** Số tiền gọn cho trục biểu đồ: 950k, 12,5tr, 1,2 tỷ. */

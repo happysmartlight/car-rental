@@ -200,7 +200,7 @@ export function SettingsUpdate() {
       {progress && (
         <Card className={progress.failed ? 'border-red-300' : progress.done ? 'border-emerald-300' : 'border-brand/40'}>
           <CardBody className="flex items-center gap-3 pt-4">
-            {progress.failed ? <CircleAlert className="size-6 text-red-600" /> : progress.done ? <CheckCircle2 className="size-6 text-emerald-600" /> : <Loader2 className="size-6 animate-spin text-brand" />}
+            {progress.failed ? <CircleAlert className="size-6 text-red-600" /> : progress.done ? <CheckCircle2 className="size-6 text-emerald-700" /> : <Loader2 className="size-6 animate-spin text-brand" />}
             <div className="min-w-0 flex-1">
               <p className="font-medium">{progress.failed ? `Cập nhật v${progress.target} không thành công` : progress.done ? `Đã lên v${progress.target}` : `Đang cập nhật lên v${progress.target}`}</p>
               <p className="text-sm text-muted">{progress.failed ?? progress.msg}</p>

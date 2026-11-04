@@ -90,7 +90,7 @@ export function AccessoryManager({ vehicleId }: { vehicleId: number }) {
                   onClick={() => quickAdd.mutate(s.catalogId)}
                   disabled={quickAdd.isPending}
                   title={s.reasons.join(' · ')}
-                  className="group flex items-center gap-1.5 rounded-full border border-border bg-surface py-1 pr-3 pl-2 text-sm hover:border-brand hover:text-brand"
+                  className="group flex items-center gap-1.5 rounded-full border border-border bg-surface py-2.5 pr-3 pl-2 text-sm lg:py-1 hover:border-brand hover:text-brand"
                 >
                   <Plus className="size-3.5 text-muted group-hover:text-brand" />
                   {s.name}
@@ -172,8 +172,8 @@ function AccessoryPicker({ open, onOpenChange, vehicleId, data }: { open: boolea
         onClick={() => toggle(c.id)}
         title={reasons.get(c.id)?.join(' · ') ?? (c.aliases ? `Còn gọi: ${c.aliases}` : undefined)}
         className={cn(
-          'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors',
-          owned ? 'border-transparent bg-surface-2 text-subtle' : on ? 'border-brand bg-brand text-brand-fg' : 'border-border hover:border-brand',
+          'flex items-center gap-1.5 rounded-full border px-3 py-2.5 text-sm transition-colors lg:py-1.5',
+          owned ? 'border-transparent bg-surface-2 text-subtle' : on ? 'border-brand-solid bg-brand-solid text-brand-fg' : 'border-border hover:border-brand',
         )}
       >
         {(owned || on) && <Check className="size-3.5" />}
@@ -258,7 +258,7 @@ function AccessoryPicker({ open, onOpenChange, vehicleId, data }: { open: boolea
                         onClick={() => toggle(s.catalogId)}
                         className={cn('flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left', on ? 'bg-brand-soft' : 'hover:bg-surface-2')}
                       >
-                        <span className={cn('flex size-5 shrink-0 items-center justify-center rounded-md border', on ? 'border-brand bg-brand text-brand-fg' : 'border-border-strong')}>
+                        <span className={cn('flex size-5 shrink-0 items-center justify-center rounded-md border', on ? 'border-brand-solid bg-brand-solid text-brand-fg' : 'border-border-strong')}>
                           {on && <Check className="size-3.5" strokeWidth={3} />}
                         </span>
                         <span className="min-w-0 flex-1">
@@ -293,7 +293,7 @@ function AccessoryPicker({ open, onOpenChange, vehicleId, data }: { open: boolea
             <p className="mb-2 text-sm font-medium">Phụ kiện mới (sẽ vào danh mục)</p>
             <div className="flex flex-wrap gap-1.5">
               {newItems.map((n, i) => (
-                <span key={i} className="flex items-center gap-1.5 rounded-full bg-brand px-3 py-1.5 text-sm text-brand-fg">
+                <span key={i} className="flex items-center gap-1.5 rounded-full bg-brand-solid px-3 py-1.5 text-sm text-brand-fg">
                   {n.name}
                   <button onClick={() => setNewItems(newItems.filter((_, j) => j !== i))} aria-label="Bỏ">
                     ×

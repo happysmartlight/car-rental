@@ -317,7 +317,7 @@ export default function Calendar() {
                         const content = (
                           <>
                             <span className="block truncate text-xs font-semibold">{i.label}</span>
-                            <span className="block truncate text-[11px] opacity-75">{i.type === 'rental' ? `${i.code} · trả ${fmtDateTime(i.scheduledEnd)}` : 'Tạm ngưng'}</span>
+                            <span className="block truncate text-[11px]">{i.type === 'rental' ? `${i.code} · trả ${fmtDateTime(i.scheduledEnd)}` : 'Tạm ngưng'}</span>
                           </>
                         );
                         return i.type === 'rental' ? (

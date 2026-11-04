@@ -33,7 +33,7 @@ export function VehicleStateBadge({ state, blockKind }: { state: 'rented' | 'blo
 }
 
 export function Money({ value, className, signed }: { value: number; className?: string; signed?: boolean }) {
-  return <span className={cn('tabular', signed && value < 0 && 'text-emerald-600 dark:text-emerald-400', className)}>{fmtVnd(value)}</span>;
+  return <span className={cn('tabular', signed && value < 0 && 'text-emerald-700 dark:text-emerald-400', className)}>{fmtVnd(value)}</span>;
 }
 
 /** QR chuyển khoản đúng số tiền + nội dung, theo tài khoản trong Cài đặt. */
@@ -138,7 +138,7 @@ export function SignaturePad({ onChange, className, initial }: { onChange: (blob
           onPointerUp={finish}
           onPointerCancel={finish}
         />
-        {empty && <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-400">Khách ký vào đây</p>}
+        {empty && <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">Khách ký vào đây</p>}
       </div>
       <Button variant="ghost" size="sm" className="mt-1" onClick={clear}>
         <Eraser /> Ký lại
@@ -160,7 +160,7 @@ export function FuelGauge({ value, onChange, readOnly }: { value: number; onChan
             type="button"
             disabled={readOnly}
             onClick={() => onChange?.(Math.round(((i + 1) / bars) * 100))}
-            className={cn('h-8 flex-1 rounded-md transition-colors', i < filled ? (filled <= 2 ? 'bg-red-500' : filled <= 4 ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-surface-3', !readOnly && 'hover:opacity-80')}
+            className={cn('flex-1 rounded-md transition-colors', readOnly ? 'h-8' : 'h-10 lg:h-8', i < filled ? (filled <= 2 ? 'bg-red-500' : filled <= 4 ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-surface-3', !readOnly && 'hover:opacity-80')}
             aria-label={`${Math.round(((i + 1) / bars) * 100)}%`}
           />
         ))}

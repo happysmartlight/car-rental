@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { badRequest, idParam, notFound, parse, requireRole, userId, zFileId, zMoney, zMs, zOptText } from '../lib/http.js';
+import { badRequest, idParam, notFound, parse, parsePatch, requireRole, userId, zFileId, zMoney, zMs, zOptText } from '../lib/http.js';
 import { getLocalConfig, updateLocalConfig } from '../lib/localConfig.js';
 import { checkProvider, matchViolations, parseViolationText, runFleetFineCheck } from '../services/fineCheck.js';
 import { lookupFine, recordFine, recoverFine } from '../services/fines.js';
@@ -50,8 +50,11 @@ export async function fineRoutes(app: FastifyInstance) {
       .orderBy(desc(schema.trafficFines.violatedAt))
       .limit(500)
       .all();
+    const ownerBlocks = db.select().from(schema.vehicleBlocks).where(and(eq(schema.vehicleBlocks.kind, 'owner_use'), isNull(schema.vehicleBlocks.voidedAt))).all();
+    const heldByOwner = (f: { rentalId: number | null; vehicleId: number | null; violatedAt: number }) =>
+      !f.rentalId && ownerBlocks.some((b) => b.vehicleId === f.vehicleId && b.startAt <= f.violatedAt && (b.endAt == null || b.endAt >= f.violatedAt));
     const counts = db.select({ status: schema.trafficFines.status, n: count() }).from(schema.trafficFines).where(isNull(schema.trafficFines.voidedAt)).groupBy(schema.trafficFines.status).all();
-    return { items: rows.map(({ f, c, r }) => ({ ...f, customer: c?.id ? c : null, rental: r?.id ? r : null })), counts };
+    return { items: rows.map(({ f, c, r }) => ({ ...f, customer: c?.id ? c : null, rental: r?.id ? r : null, ownerHeld: heldByOwner(f) })), counts };
   });
 
   app.post('/api/fines', async (req) => {
@@ -148,7 +151,7 @@ export async function fineRoutes(app: FastifyInstance) {
   app.patch('/api/fines/:id', async (req) => {
     requireRole(req, 'staff');
     const id = idParam(req);
-    const body = parse(zFine.partial(), req.body);
+    const body = parsePatch(zFine, req.body);
     const cur = db.select().from(schema.trafficFines).where(eq(schema.trafficFines.id, id)).get();
     if (!cur) throw notFound();
     if (cur.voidedAt) throw badRequest('Hồ sơ đã hủy — khôi phục trước khi sửa');

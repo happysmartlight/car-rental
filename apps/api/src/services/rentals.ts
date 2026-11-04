@@ -140,7 +140,7 @@ export function findConflicts(vehicleId: number, start: number, end: number, exc
       });
     }
   }
-  const blocks = db.select().from(schema.vehicleBlocks).where(eq(schema.vehicleBlocks.vehicleId, vehicleId)).all();
+  const blocks = db.select().from(schema.vehicleBlocks).where(and(eq(schema.vehicleBlocks.vehicleId, vehicleId), isNull(schema.vehicleBlocks.voidedAt))).all();
   for (const b of blocks) {
     if (b.startAt < end && (b.endAt == null || b.endAt > start)) {
       out.push({ type: 'block', id: b.id, label: b.notes || b.location || 'Xe tạm ngưng', start: b.startAt, end: b.endAt });

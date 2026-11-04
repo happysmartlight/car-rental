@@ -94,7 +94,7 @@ export function MaintenanceSchedule({ vehicle }: { vehicle: Vehicle }) {
                     </span>
                     {pct != null && (
                       <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-surface-2">
-                        <span className={cn('block h-full rounded-full', st.bar)} style={{ width: `${Math.max(4, pct * 100)}%` }} />
+                        <span className={cn('anim-grow-x block h-full rounded-full', st.bar)} style={{ width: `${Math.max(4, pct * 100)}%` }} />
                       </span>
                     )}
                   </button>
@@ -380,21 +380,25 @@ function DoneDialog({ vehicle, items, preset, onClose }: { vehicle: Vehicle; ite
         <Field label="Ghi chú">
           <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Dầu 5W-30, thay 2 lốp trước…" maxLength={200} />
         </Field>
-        <div className="space-y-3 rounded-2xl bg-surface-2/60 p-3">
-          <Field label="Chi phí (không bắt buộc)" hint="Nhập để ghi luôn khoản chi Bảo dưỡng định kỳ vào Thu chi của xe">
-            <MoneyInput value={cost} onChange={setCost} />
-          </Field>
-          {!!cost && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Nơi làm">
-                <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Gara, đại lý…" maxLength={120} />
-              </Field>
-              <Field label="Hình thức">
-                <Segmented value={method} onChange={setMethod} className="flex w-full" options={[{ value: 'cash', label: 'Tiền mặt' }, { value: 'transfer', label: 'Chuyển khoản' }]} />
-              </Field>
-            </div>
-          )}
-        </div>
+        {vehicle.ownerType === 'consigned' ? (
+          <Notice tone="gray">Xe ký gửi do chủ xe tự trả nên app chỉ ghi lại việc đã làm, không ghi chi phí vào Thu chi.</Notice>
+        ) : (
+          <div className="space-y-3 rounded-2xl bg-surface-2/60 p-3">
+            <Field label="Chi phí (không bắt buộc)" hint="Nhập để ghi luôn khoản chi Bảo dưỡng định kỳ vào Thu chi của xe">
+              <MoneyInput value={cost} onChange={setCost} />
+            </Field>
+            {!!cost && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Nơi làm">
+                  <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Gara, đại lý…" maxLength={120} />
+                </Field>
+                <Field label="Hình thức">
+                  <Segmented value={method} onChange={setMethod} className="flex w-full" options={[{ value: 'cash', label: 'Tiền mặt' }, { value: 'transfer', label: 'Chuyển khoản' }]} />
+                </Field>
+              </div>
+            )}
+          </div>
+        )}
         {chosen.some((i) => i.status.state === 'unknown') && <p className="text-xs text-muted">Mục "Chưa rõ" sẽ bắt đầu tính hạn từ lần ghi này.</p>}
       </div>
     </Dialog>

@@ -136,7 +136,7 @@ export function TimeInput({ value, onChange, className, ...props }: { value: str
 
 export function Checkbox({ checked, onChange, label, description, className }: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode; description?: ReactNode; className?: string }) {
   return (
-    <label className={cn('flex cursor-pointer items-start gap-3 select-none', className)}>
+    <label className={cn('flex min-h-10 cursor-pointer items-start gap-3 py-2.5 select-none lg:min-h-0 lg:py-0', className)}>
       <button
         type="button"
         role="checkbox"
@@ -144,10 +144,10 @@ export function Checkbox({ checked, onChange, label, description, className }: {
         onClick={() => onChange(!checked)}
         className={cn(
           'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors',
-          checked ? 'border-brand bg-brand text-brand-fg' : 'border-border-strong bg-surface',
+          checked ? 'border-brand-solid bg-brand-solid text-brand-fg' : 'border-border-strong bg-surface',
         )}
       >
-        {checked && <Check className="size-3.5" strokeWidth={3} />}
+        {checked && <Check className="anim-pop size-3.5" strokeWidth={3} />}
       </button>
       <span className="min-w-0">
         <span className="block text-sm">{label}</span>
@@ -159,7 +159,7 @@ export function Checkbox({ checked, onChange, label, description, className }: {
 
 export function Switch({ checked, onChange, label, description, disabled }: { checked: boolean; onChange: (v: boolean) => void; label?: ReactNode; description?: ReactNode; disabled?: boolean }) {
   return (
-    <label className={cn('flex items-center justify-between gap-4', disabled ? 'opacity-60' : 'cursor-pointer')}>
+    <label className={cn('flex min-h-10 items-center justify-between gap-4 lg:min-h-0', disabled ? 'opacity-60' : 'cursor-pointer')}>
       {(label || description) && (
         <span className="min-w-0">
           {label && <span className="block text-sm font-medium">{label}</span>}
@@ -190,7 +190,7 @@ export function Segmented<T extends string>({ value, onChange, options, classNam
           type="button"
           onClick={() => onChange(o.value)}
           className={cn(
-            'flex-1 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors',
+            'flex-1 rounded-lg px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors lg:py-1.5',
             value === o.value ? 'bg-surface text-fg shadow-card ring-1 ring-border dark:bg-hover dark:ring-border-strong' : 'text-muted hover:text-fg',
           )}
         >

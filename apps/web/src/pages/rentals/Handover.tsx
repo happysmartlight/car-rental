@@ -81,7 +81,7 @@ function Step({ n, title, children, description }: { n: number; title: string; c
       <CardHeader
         title={
           <span className="flex items-center gap-2.5">
-            <span className="flex size-6 items-center justify-center rounded-full bg-brand text-xs font-semibold text-brand-fg">{n}</span>
+            <span className="flex size-6 items-center justify-center rounded-full bg-brand-solid text-xs font-semibold text-brand-fg">{n}</span>
             {title}
           </span>
         }
@@ -96,7 +96,7 @@ function GeoStatus({ state }: { state: GeoState }) {
   if (state.status === 'ok' || state.status === 'locating') {
     return (
       <p className="mb-3 flex items-center gap-1.5 text-xs text-muted">
-        <MapPin className={cn('size-3.5 shrink-0', state.status === 'ok' && 'text-emerald-600 dark:text-emerald-400')} />
+        <MapPin className={cn('size-3.5 shrink-0', state.status === 'ok' && 'text-emerald-700 dark:text-emerald-400')} />
         {state.status === 'ok' ? `Đã có vị trí GPS (sai số ±${Math.round(state.fix.accuracy)} m) — đóng kèm lên ảnh` : 'Đang lấy vị trí GPS…'}
       </p>
     );

@@ -265,7 +265,7 @@ function RulesSection() {
                   key={d}
                   type="button"
                   onClick={() => setF({ ...f, weekendDays: f.weekendDays.includes(d) ? f.weekendDays.filter((x) => x !== d) : [...f.weekendDays, d] })}
-                  className={cn('rounded-full border px-3 py-1 text-sm', f.weekendDays.includes(d) ? 'border-brand bg-brand-soft text-brand' : 'border-border')}
+                  className={cn('rounded-full border px-3 py-2.5 text-sm lg:py-1', f.weekendDays.includes(d) ? 'border-brand bg-brand-soft text-brand' : 'border-border')}
                 >
                   {WEEKDAY_LONG[d]}
                 </button>

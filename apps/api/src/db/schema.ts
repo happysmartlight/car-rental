@@ -167,6 +167,9 @@ export const vehicleBlocks = sqliteTable(
     notes: text('notes'),
     createdBy: integer('created_by'),
     createdAt: createdAt(),
+    /** Ghi nhầm: hủy (không xóa) — vẫn giữ làm bằng chứng khi tra phạt nguội, nhưng không còn chặn lịch. */
+    voidedAt: integer('voided_at'),
+    voidReason: text('void_reason'),
   },
   (t) => [index('blocks_vehicle_idx').on(t.vehicleId, t.startAt)],
 );

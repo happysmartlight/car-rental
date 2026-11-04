@@ -76,7 +76,7 @@ function MonthlyPlan({ periods, now, started }: { periods: MonthPeriod[]; now: n
         </span>
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-2">
-        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${(paidFull / periods.length) * 100}%` }} />
+        <div className="anim-grow-x h-full rounded-full bg-emerald-500" style={{ width: `${(paidFull / periods.length) * 100}%` }} />
       </div>
       {next ? (
         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -87,7 +87,7 @@ function MonthlyPlan({ periods, now, started }: { periods: MonthPeriod[]; now: n
           {lateDays > 0 ? <Badge tone="red">Quá hạn {lateDays} ngày</Badge> : lateDays === 0 ? <Badge tone="amber">Đến hạn hôm nay</Badge> : null}
         </div>
       ) : (
-        <p className="mt-2 text-sm text-emerald-600 dark:text-emerald-400">Đã trả đủ tất cả {periods.length} tháng</p>
+        <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-400">Đã trả đủ tất cả {periods.length} tháng</p>
       )}
       <button type="button" onClick={() => setOpen(!open)} className="mt-1.5 text-xs font-medium text-brand">
         {open ? 'Ẩn lịch từng tháng' : 'Xem lịch từng tháng'}
@@ -101,7 +101,7 @@ function MonthlyPlan({ periods, now, started }: { periods: MonthPeriod[]; now: n
               <li key={p.n} className="flex items-center gap-3 px-3 py-1.5 text-sm">
                 <span className="w-[4.5rem] shrink-0 font-medium whitespace-nowrap">Tháng {p.n}</span>
                 <span className="min-w-0 flex-1 text-xs text-muted">{fmtDateRange(p.from, p.to)}</span>
-                <span className={cn('tabular text-xs whitespace-nowrap', done ? 'text-emerald-600 dark:text-emerald-400' : late ? 'font-medium text-red-600 dark:text-red-400' : '')}>
+                <span className={cn('tabular text-xs whitespace-nowrap', done ? 'text-emerald-700 dark:text-emerald-400' : late ? 'font-medium text-red-600 dark:text-red-400' : '')}>
                   {done ? 'Đã trả' : p.paid > 0 ? `Còn ${fmtNumber(p.amount - p.paid)}` : fmtNumber(p.amount)}
                 </span>
               </li>
@@ -286,12 +286,15 @@ export default function RentalDetail() {
 
   return (
     <Page
-      title={
+      title={r.code}
+      subtitle={
         <span className="flex items-center gap-2">
-          {r.code} <RentalStatusBadge status={r.status} overdue={overdue} />
+          <span className="shrink-0">
+            <RentalStatusBadge status={r.status} overdue={overdue} />
+          </span>
+          <span className="truncate">{`${d.vehicle.plate} · ${d.customer.fullName}${viaApp ? ` · qua ${RENTAL_CHANNEL_LABEL[r.channel]}` : ''}`}</span>
         </span>
       }
-      subtitle={`${d.vehicle.plate} · ${d.customer.fullName}${viaApp ? ` · qua ${RENTAL_CHANNEL_LABEL[r.channel]}` : ''}`}
       back="/rentals"
       actions={
         <>
@@ -466,14 +469,14 @@ export default function RentalDetail() {
                   <span className="text-muted">Đã trả</span>
                   <span className="tabular">{fmtVnd(m.rentPaid)}</span>
                 </div>
-                <div className={cn('flex justify-between text-sm font-semibold', m.due > 0 ? 'text-red-600' : m.due < 0 ? 'text-emerald-600' : '')}>
+                <div className={cn('flex justify-between text-sm font-semibold', m.due > 0 ? 'text-red-700' : m.due < 0 ? 'text-emerald-700' : '')}>
                   <span>{m.due >= 0 ? 'Còn phải trả' : 'Thu thừa'}</span>
                   <span className="tabular">{fmtVnd(Math.abs(m.due))}</span>
                 </div>
                 <div className="mt-1 flex justify-between border-t border-border pt-1 text-sm">
                   <span className="text-muted">Cọc đang giữ</span>
                   <span className="tabular">
-                    {fmtVnd(m.depositHeld)} {['booked', 'active'].includes(r.status) && r.depositRequired > m.depositHeld && <span className="text-xs text-amber-600">/ {fmtNumber(r.depositRequired)}</span>}
+                    {fmtVnd(m.depositHeld)} {['booked', 'active'].includes(r.status) && r.depositRequired > m.depositHeld && <span className="text-xs text-amber-700">/ {fmtNumber(r.depositRequired)}</span>}
                   </span>
                 </div>
                 {['booked', 'active', 'returned'].includes(r.status) && agreedHold && agreedHold.amount > 0 && (
@@ -499,7 +502,7 @@ export default function RentalDetail() {
                       </div>
                       {r.channelPayout != null ? (
                         <div className="flex items-center justify-between gap-3">
-                          <span className="text-emerald-600 dark:text-emerald-400">
+                          <span className="text-emerald-700 dark:text-emerald-400">
                             Đã nhận {fmtVnd(r.channelPayout)}
                             {r.channelPaidAt && ` · ${fmtDate(r.channelPaidAt)}`}
                           </span>
@@ -570,7 +573,7 @@ export default function RentalDetail() {
                   {!c.auto && (['booked', 'active', 'returned'].includes(r.status) || isAdmin) && (
                     <button
                       onClick={async () => (await confirm({ title: 'Xóa khoản này?', description: c.description, danger: true, confirmText: 'Xóa' })) && delCharge.mutate(c.id)}
-                      className="text-subtle hover:text-red-600"
+                      className="tap-target text-subtle hover:text-red-600"
                       aria-label="Xóa"
                     >
                       <Trash2 className="size-4" />
@@ -609,14 +612,14 @@ export default function RentalDetail() {
                         {p.voidedAt && ` · đã hủy: ${p.voidReason}`}
                       </p>
                     </div>
-                    <span className={cn('tabular text-sm font-medium', p.direction === 'in' ? 'text-emerald-600' : p.direction === 'out' ? 'text-red-600' : 'text-muted')}>
+                    <span className={cn('tabular text-sm font-medium', p.direction === 'in' ? 'text-emerald-700' : p.direction === 'out' ? 'text-red-600' : 'text-muted')}>
                       {p.direction === 'in' ? '+' : p.direction === 'out' ? '−' : ''}
                       {fmtNumber(p.amount)}
                     </span>
                     {isAdmin && !p.voidedAt && (
                       <button
                         onClick={async () => (await confirm({ title: 'Hủy phiếu này?', description: 'Phiếu vẫn được giữ trong lịch sử (gạch ngang).', danger: true, confirmText: 'Hủy phiếu' })) && voidPayment.mutate(p.id)}
-                        className="text-subtle hover:text-red-600"
+                        className="tap-target text-subtle hover:text-red-600"
                         aria-label="Hủy phiếu"
                       >
                         <RotateCcw className="size-4" />

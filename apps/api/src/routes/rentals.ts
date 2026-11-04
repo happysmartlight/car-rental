@@ -614,7 +614,7 @@ export async function rentalRoutes(app: FastifyInstance) {
     const blocks = db
       .select()
       .from(schema.vehicleBlocks)
-      .where(and(lte(schema.vehicleBlocks.startAt, to), or(isNull(schema.vehicleBlocks.endAt), gte(schema.vehicleBlocks.endAt, from))))
+      .where(and(isNull(schema.vehicleBlocks.voidedAt), lte(schema.vehicleBlocks.startAt, to), or(isNull(schema.vehicleBlocks.endAt), gte(schema.vehicleBlocks.endAt, from))))
       .all();
     const now = Date.now();
     return {

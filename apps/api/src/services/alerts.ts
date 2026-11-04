@@ -2,6 +2,7 @@
 
 import { and, eq, inArray, isNull, lte } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
+import type { Vehicle } from '../db/schema.js';
 import { escapeHtml } from '../lib/telegram.js';
 import { DAY_MS, HOUR_MS, daysUntil, fmtDate, fmtDateKey, fmtDateTime, fmtTime, vnStartOfDay } from '../shared/time.js';
 import { fmtVnd } from '../shared/text.js';
@@ -29,7 +30,13 @@ export interface Alert {
   detail: string;
   link: string;
   at?: number;
+  /** Xe ký gửi: chủ xe tự lo, cửa hàng chỉ nhắc. Tên và SĐT được lọc khỏi phản hồi cho nhân viên. */
+  remindOwner?: boolean;
+  ownerName?: string | null;
+  ownerPhone?: string | null;
 }
+
+const ownerReminder = (v: Vehicle) => (v.ownerType === 'consigned' ? { remindOwner: true, ownerName: v.ownerName, ownerPhone: v.ownerPhone } : {});
 
 const DOC_FIELDS = [
   ['inspectionExpiry', 'Đăng kiểm'],
@@ -136,6 +143,7 @@ export function computeAlerts(now = Date.now()): Alert[] {
           title: d < 0 ? `${label} ${v.plate} đã hết hạn` : `${label} ${v.plate} còn ${d} ngày`,
           detail: `Hạn ${fmtDateKey(key)}`,
           link: `/vehicles/${v.id}`,
+          ...ownerReminder(v),
         });
       }
     }
@@ -163,6 +171,7 @@ export function computeAlerts(now = Date.now()): Alert[] {
       title: `${overdue ? 'Quá hạn' : 'Sắp đến hạn'} bảo dưỡng ${v.plate}`,
       detail: `${parts.join('; ')} · ODO hiện ${fmtNumber(v.odo)} km`,
       link: `/vehicles/${v.id}`,
+      ...ownerReminder(v),
     });
   }
 
@@ -185,7 +194,10 @@ export function buildDigest(now = Date.now()): string | null {
   const alerts = computeAlerts(now);
   if (!alerts.length) return null;
   const lines = [`📋 <b>Việc hôm nay ${fmtDate(now)}</b>`, ''];
-  for (const a of alerts) lines.push(`${ICON[a.severity]} <b>${escapeHtml(a.title)}</b>\n    ${escapeHtml(a.detail)}`);
+  for (const a of alerts) {
+    const owner = a.remindOwner ? `\n    ${escapeHtml(['Nhắc chủ xe', a.ownerName, a.ownerPhone].filter(Boolean).join(' '))}` : '';
+    lines.push(`${ICON[a.severity]} <b>${escapeHtml(a.title)}</b>\n    ${escapeHtml(a.detail)}${owner}`);
+  }
   return lines.join('\n');
 }
 

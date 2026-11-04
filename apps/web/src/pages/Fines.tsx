@@ -39,6 +39,42 @@ interface FineForm {
 
 const emptyForm = (plate = '', at: number | null = null, rentalId: number | null = null): FineForm => ({ plate, violatedAt: at, location: '', violation: '', amount: null, source: 'csgt', noticeFileId: null, rentalId, status: 'new', notes: '' });
 
+/** Nhân viên không nhận được tên chủ xe nên chỉ ghi "chủ xe". */
+const ownerLabel = (v: FineLookup['vehicle']) => (v?.ownerName ? `chủ xe ${v.ownerName}` : 'chủ xe');
+
+const idleEnding = (v: FineLookup['vehicle']) => (v?.ownerType === 'consigned' ? `. Đây là xe ký gửi nên có thể đang ở chỗ ${ownerLabel(v)}, hỏi lại trước khi xử lý.` : ' — xe ở bãi theo dữ liệu đã ghi.');
+
+function BlockText({ b, vehicle }: { b: FineLookup['blocks'][number]; vehicle: FineLookup['vehicle'] }) {
+  return (
+    <>
+      {b.kind === 'owner_use' ? (
+        <>
+          Lúc đó <b>{ownerLabel(vehicle)}</b> đang giữ xe
+        </>
+      ) : (
+        <>
+          Lúc đó xe đang <b>{BLOCK_KIND_LABEL[b.kind].toLowerCase()}</b>
+        </>
+      )}
+      {b.location && ` tại ${b.location}`} ({fmtDateTime(b.startAt)} → {b.endAt ? fmtDateTime(b.endAt) : 'chưa kết thúc'}).
+      {b.kind === 'owner_use' && vehicle?.ownerPhone && (
+        <>
+          {' '}
+          <a href={telLink(vehicle.ownerPhone)} className="underline">
+            {vehicle.ownerPhone}
+          </a>
+        </>
+      )}
+    </>
+  );
+}
+
+/** Vừa có khách giữ xe vừa có ghi chủ xe dùng: app không tự quy cho khách. */
+function OwnerClashNotice({ r }: { r: FineLookup }) {
+  if (r.verdict !== 'rented' || !r.ownerHeld) return null;
+  return <Notice tone="amber">Lúc này cũng có ghi {ownerLabel(r.vehicle)} đang giữ xe. Kiểm tra lại ai giữ xe trước khi báo khách.</Notice>;
+}
+
 function LookupResult({ r, onRecord }: { r: FineLookup; onRecord: (rentalId: number | null) => void }) {
   if (r.verdict === 'unknown_vehicle') {
     return <Notice tone="amber" icon={AlertTriangle}>Biển số {r.plateKey} không có trong danh sách xe.</Notice>;
@@ -92,31 +128,32 @@ function LookupResult({ r, onRecord }: { r: FineLookup; onRecord: (rentalId: num
               </p>
             )}
             <div className="mt-4 flex flex-wrap gap-2">
-              <a href={telLink(m.customer.phone)} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-surface px-3 text-sm font-medium shadow-card">
+              <a href={telLink(m.customer.phone)} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-surface px-3 text-sm font-medium shadow-card lg:h-9">
                 <Phone className="size-4" /> Gọi
               </a>
-              <a href={zaloLink(m.customer.zalo || m.customer.phone)} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-surface px-3 text-sm font-medium shadow-card">
+              <a href={zaloLink(m.customer.zalo || m.customer.phone)} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-surface px-3 text-sm font-medium shadow-card lg:h-9">
                 <MessageCircle className="size-4" /> Zalo
               </a>
-              <Link to={`/rentals/${m.rental.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-surface px-3 text-sm font-medium shadow-card">
+              <Link to={`/rentals/${m.rental.id}`} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-surface px-3 text-sm font-medium shadow-card lg:h-9">
                 Hợp đồng & ảnh giao xe
               </Link>
-              <Button size="sm" className="h-9" onClick={() => onRecord(m.rental.id)}>
+              <Button size="sm" className="lg:h-9" onClick={() => onRecord(m.rental.id)}>
                 <Plus /> Ghi phạt nguội cho khách này
               </Button>
             </div>
           </div>
         ))}
+      <OwnerClashNotice r={r} />
       {r.verdict === 'blocked' &&
         r.blocks.map((b) => (
           <Notice key={b.id} tone="amber" icon={Wrench}>
-            Lúc đó xe đang <b>{BLOCK_KIND_LABEL[b.kind].toLowerCase()}</b>
-            {b.location && ` tại ${b.location}`} ({fmtDateTime(b.startAt)} → {b.endAt ? fmtDateTime(b.endAt) : 'chưa kết thúc'}). {b.notes}
+            <BlockText b={b} vehicle={r.vehicle} /> {b.notes}
           </Notice>
         ))}
       {r.verdict === 'idle' && (
         <Notice tone="blue" icon={Car}>
-          Không có lượt thuê nào đang giữ xe {r.vehicle?.plate} lúc {fmtDateTime(r.at)} — xe ở bãi theo dữ liệu đã ghi.
+          Không có lượt thuê nào đang giữ xe {r.vehicle?.plate} lúc {fmtDateTime(r.at)}
+          {idleEnding(r.vehicle)}
         </Notice>
       )}
       {r.scheduledOnly.map((s) => (
@@ -205,7 +242,7 @@ export default function Fines() {
             {!!vehicles?.length && (
               <div className="flex flex-wrap gap-1.5">
                 {vehicles.map((v) => (
-                  <button key={v.id} onClick={() => setPlate(v.plate)} className={cn('rounded-full border px-3 py-1 text-sm font-medium', plate === v.plate ? 'border-brand bg-brand-soft text-brand' : 'border-border hover:bg-surface-2')}>
+                  <button key={v.id} onClick={() => setPlate(v.plate)} className={cn('rounded-full border px-3 py-2.5 text-sm font-medium lg:py-1', plate === v.plate ? 'border-brand bg-brand-soft text-brand' : 'border-border hover:bg-surface-2')}>
                     {v.plate}
                   </button>
                 ))}
@@ -284,7 +321,7 @@ export default function Fines() {
                       <p className="text-sm text-muted">
                         {fmtDateTime(f.violatedAt)}
                         {f.amount ? <> · <Money value={f.amount} /></> : null}
-                        {f.customer ? ` · ${f.customer.fullName}` : ' · chưa rõ người giữ xe'}
+                        {f.customer ? ` · ${f.customer.fullName}` : f.ownerHeld ? ' · chủ xe giữ xe' : ' · chưa rõ người giữ xe'}
                         {f.rental && ` · ${f.rental.code}`}
                       </p>
                     </div>
@@ -385,14 +422,19 @@ function HolderPanel({ plate, at, rentalId, onPick, autoPick }: { plate: string;
         </button>
       ))}
 
+      <OwnerClashNotice r={r} />
       {r.verdict === 'blocked' &&
         r.blocks.map((b) => (
           <Notice key={b.id} tone="amber" icon={Wrench}>
-            Lúc đó xe đang <b>{BLOCK_KIND_LABEL[b.kind].toLowerCase()}</b>
-            {b.location && ` tại ${b.location}`} ({fmtDateTime(b.startAt)} → {b.endAt ? fmtDateTime(b.endAt) : 'chưa kết thúc'}).
+            <BlockText b={b} vehicle={r.vehicle} />
           </Notice>
         ))}
-      {r.verdict === 'idle' && <Notice tone="blue" icon={Car}>Không có lượt thuê nào lúc {fmtDateTime(at)} — xe ở bãi theo dữ liệu đã ghi.</Notice>}
+      {r.verdict === 'idle' && (
+        <Notice tone="blue" icon={Car}>
+          Không có lượt thuê nào lúc {fmtDateTime(at)}
+          {idleEnding(r.vehicle)}
+        </Notice>
+      )}
       {r.verdict === 'unknown_vehicle' && <Notice tone="gray">Biển số này không thuộc đội xe — vẫn ghi được, chưa gắn khách.</Notice>}
 
       {r.scheduledOnly.map((x) => (

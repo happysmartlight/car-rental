@@ -9,7 +9,7 @@ Giao diện và thông báo **tiếng Việt**. Kế hoạch: [docs/PLAN.md](doc
 - `apps/api` — Fastify 5 + TypeScript (NodeNext, import có đuôi `.js`), SQLite (better-sqlite3) + Drizzle.
   - `src/shared/` — code thuần (giá, tiền, VietQR, QR CCCD, giờ VN, chữ) **dùng chung với web** qua alias `@shared/*`. Không import gì của Node ở đây.
   - `src/services/` — nghiệp vụ (rentals, fines, documents, alerts, updateFlow). Đổi trạng thái lượt thuê chỉ qua `services/rentals.ts`.
-  - `src/routes/` — HTTP; kiểm tra input bằng zod qua `parse()`; lỗi ném `HttpError` (message tiếng Việt).
+  - `src/routes/` — HTTP; kiểm tra input bằng zod qua `parse()`, PATCH dùng `parsePatch()` (không dùng `.partial()` trực tiếp: Zod 4 áp `.default()` cho trường vắng mặt, làm mất dữ liệu cũ); lỗi ném `HttpError` (message tiếng Việt).
   - `src/lib/` — auth, files (sharp), backup, pack (mã hóa), telegram, updater (giao tiếp file với sidecar), scheduler.
 - `apps/web` — React 19 + Vite + Tailwind v4 + Radix. Kiểu dữ liệu: `src/lib/types.ts` (import type từ `@api/db/schema`).
 - `deploy/` — `docker-compose.yml`, `updater.sh` (sidecar cập nhật, sh thuần), `setup.sh`, entrypoint.

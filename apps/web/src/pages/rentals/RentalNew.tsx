@@ -95,7 +95,7 @@ function Section({ n, title, children, action, description }: { n: number; title
       <CardHeader
         title={
           <span className="flex items-center gap-2.5">
-            <span className="flex size-6 items-center justify-center rounded-full bg-brand text-xs font-semibold text-brand-fg">{n}</span>
+            <span className="flex size-6 items-center justify-center rounded-full bg-brand-solid text-xs font-semibold text-brand-fg">{n}</span>
             {title}
           </span>
         }
@@ -349,7 +349,7 @@ export default function RentalNew() {
   const setDays = (n: number) => start && setEnd(start + n * DAY_MS);
   const setMonths = (n: number) => start && setEnd(addMonthsVn(start, n));
   const chip = (active: boolean) =>
-    cn('rounded-full border px-3 py-1 text-xs font-medium', active ? 'border-brand bg-brand-soft text-brand' : 'border-border text-muted hover:bg-surface-2');
+    cn('min-h-10 rounded-full border px-3.5 text-sm font-medium lg:min-h-0 lg:px-3 lg:py-1 lg:text-xs', active ? 'border-brand bg-brand-soft text-brand' : 'border-border text-muted hover:bg-surface-2');
 
   const submit = async (force = false) => {
     if (!customer) return toast.error('Chọn khách thuê');
@@ -460,7 +460,7 @@ export default function RentalNew() {
                   </div>
                 )}
                 {!!discount && (
-                  <div className="flex justify-between gap-3 text-emerald-600">
+                  <div className="flex justify-between gap-3 text-emerald-700">
                     <span>{discountNote || 'Giảm giá'}</span>
                     <span className="tabular">-{fmtNumber(discount)}</span>
                   </div>
@@ -470,7 +470,7 @@ export default function RentalNew() {
             {!viaApp && pre?.quote.mode === 'month' && <Notice tone="violet">Tính theo tháng — rẻ hơn tính theo ngày ({fmtVnd(vehicle.priceMonth ?? 0)}/tháng).</Notice>}
             {(excluded.length > 0 || added.length > 0) && (
               <div className="space-y-0.5 text-sm">
-                {excluded.length > 0 && <p className="text-amber-600">Không kèm: {excluded.map((a) => a.name).join(', ')}</p>}
+                {excluded.length > 0 && <p className="text-amber-700">Không kèm: {excluded.map((a) => a.name).join(', ')}</p>}
                 {added.length > 0 && <p className="text-muted">Thêm: {added.map((a) => a.name).join(', ')}</p>}
               </div>
             )}
@@ -677,7 +677,7 @@ export default function RentalNew() {
                       <span className="block text-xs text-muted">
                         {v.make} {v.model} · {fmtVnd(v.priceDay)}/ngày{v.priceMonth ? ` · ${fmtVnd(v.priceMonth)}/tháng` : ''}
                       </span>
-                      <span className={cn('block text-xs font-medium', isBusy ? 'text-red-600' : 'text-emerald-600')}>{isBusy ? 'Trùng lịch' : validTime ? 'Trống' : ''}</span>
+                      <span className={cn('block text-xs font-medium', isBusy ? 'text-red-600' : 'text-emerald-700')}>{isBusy ? 'Trùng lịch' : validTime ? 'Trống' : ''}</span>
                     </span>
                     {selected && <Check className="size-5 text-brand" />}
                   </button>

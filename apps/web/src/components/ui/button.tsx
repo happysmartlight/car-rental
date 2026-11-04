@@ -5,11 +5,11 @@ import { Link, type LinkProps } from 'react-router';
 import { cn } from '@/lib/utils';
 
 export const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl font-medium transition-colors select-none disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring [&_svg]:size-4 [&_svg]:shrink-0',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl font-medium press select-none disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        primary: 'bg-brand text-brand-fg hover:bg-brand-hover shadow-card active:translate-y-px',
+        primary: 'bg-brand-solid text-brand-fg hover:bg-brand-hover shadow-card',
         secondary: 'bg-surface-2 text-fg hover:bg-surface-3',
         outline: 'border border-border-strong bg-surface text-fg hover:bg-surface-2',
         ghost: 'text-fg hover:bg-surface-2',
@@ -19,11 +19,11 @@ export const buttonVariants = cva(
         link: 'text-brand underline-offset-4 hover:underline px-0 h-auto',
       },
       size: {
-        sm: 'h-8 px-3 text-sm rounded-lg',
+        sm: 'h-10 px-3 text-sm rounded-lg lg:h-8',
         md: 'h-10 px-4 text-sm',
         lg: 'h-12 px-5 text-base',
         icon: 'size-10',
-        'icon-sm': 'size-8 rounded-lg',
+        'icon-sm': 'size-10 rounded-lg lg:size-8',
       },
     },
     defaultVariants: { variant: 'primary', size: 'md' },

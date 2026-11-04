@@ -3,6 +3,26 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.5.1] - 2026-11-04
+
+### Sửa lỗi quan trọng
+- **Lưu trữ hoặc bỏ lưu trữ phụ kiện trong danh mục làm mất giá trị đền bù** và đánh dấu nổi bật của phụ kiện đó. Nếu từng làm vậy, vào **Cài đặt → Phụ kiện** (cả mục đã lưu trữ) kiểm tra và nhập lại giá trị.
+
+### Mới
+- **Trang Xe chia nhóm Xe nhà và Xe ký gửi**; quản trị thấy badge **Top doanh thu** và **Top lượt thuê** của tháng.
+- **Hoạt ảnh và số chạy** ở Tổng quan, Thu chi, biểu đồ, hộp thoại. Tự tắt nếu máy bật giảm chuyển động.
+- **Xe ký gửi**: bắt buộc có tên chủ xe và % chia; Việc cần làm ghi rõ cần nhắc chủ xe nào, có nút gọi. Chủ xe tự trả bảo dưỡng, sửa chữa, phụ tùng, giấy tờ nên các khoản này không ghi được vào sổ cửa hàng.
+- **Phạt nguội**: báo đúng khi chủ xe đang giữ xe, và không tự gắn cho khách nếu cùng lúc có ghi chủ xe dùng.
+
+### Cải thiện
+- Nút trên điện thoại to hơn, dễ bấm một tay. Chữ phụ, số tiền và nút chính ở giao diện tối rõ hơn.
+- Huy hiệu trạng thái ở chi tiết lượt thuê không còn bị cắt; nhãn năm trên biểu đồ không còn chồng nhau.
+
+### Lưu ý
+- Nhân viên không còn thấy thông tin chủ xe, không ghi được trả chủ xe, mua xe, trả góp.
+- Ghi tạm ngưng trùng lượt khách đã đặt phải có quản trị xác nhận. Xe còn lượt chưa xong hoặc đang giữ cọc thì chưa lưu trữ được.
+- App chưa tự tính tiền chia cho chủ xe: bản này vẫn cần tự tính, rồi ghi khoản **Trả chủ xe ký gửi**.
+
 ## [0.5.0] - 2026-11-02
 
 ### Mới

@@ -29,6 +29,8 @@ export interface FineLookupResult {
   verdict: 'rented' | 'blocked' | 'idle' | 'unknown_vehicle';
   matches: FineMatch[];
   blocks: VehicleBlock[];
+  /** Có ghi "Chủ xe sử dụng" lúc đó. Nếu vừa có lượt thuê thì chưa chắc ai giữ xe, không tự quy cho khách. */
+  ownerHeld: boolean;
   /** Lượt thuê THEO LỊCH trùng thời điểm nhưng chưa ghi nhận giao xe — dữ liệu thiếu. */
   scheduledOnly: { rental: Rental; customer: Customer }[];
   /** Các lượt thuê kề trước/sau trong vòng 6 giờ (để đối chiếu khi sát giờ). */
@@ -51,7 +53,7 @@ function driversOf(rentalId: number): Customer[] {
 export function lookupFine(plate: string, at: number): FineLookupResult {
   const key = plateKey(plate);
   const vehicle = db.select().from(schema.vehicles).where(eq(schema.vehicles.plateKey, key)).get() ?? null;
-  const base = { plateKey: key, at, vehicle, matches: [], blocks: [], scheduledOnly: [], nearby: [] };
+  const base = { plateKey: key, at, vehicle, matches: [], blocks: [], ownerHeld: false, scheduledOnly: [], nearby: [] };
   if (!vehicle) return { ...base, verdict: 'unknown_vehicle' };
 
   const segRows = db
@@ -86,6 +88,7 @@ export function lookupFine(plate: string, at: number): FineLookupResult {
     .where(
       and(
         eq(schema.vehicleBlocks.vehicleId, vehicle.id),
+        isNull(schema.vehicleBlocks.voidedAt),
         lte(schema.vehicleBlocks.startAt, at),
         or(isNull(schema.vehicleBlocks.endAt), gte(schema.vehicleBlocks.endAt, at)),
       ),
@@ -108,7 +111,7 @@ export function lookupFine(plate: string, at: number): FineLookupResult {
     .map(({ r, c }) => ({ rental: r, customer: c }));
 
   const verdict = matches.length ? 'rented' : blocks.length ? 'blocked' : 'idle';
-  return { ...base, verdict, matches, blocks, scheduledOnly, nearby };
+  return { ...base, verdict, matches, blocks, ownerHeld: blocks.some((b) => b.kind === 'owner_use'), scheduledOnly, nearby };
 }
 
 export interface NewFine {
@@ -131,9 +134,11 @@ export function recordFine(body: NewFine, userId: number | null) {
   const vehicle = db.select().from(schema.vehicles).where(eq(schema.vehicles.plateKey, key)).get();
   let rentalId = body.rentalId ?? null;
   let customerId = body.customerId ?? null;
+  let ownerHeld = false;
   if (!rentalId) {
     const found = lookupFine(body.plate, body.violatedAt);
-    if (found.matches.length === 1) {
+    ownerHeld = found.ownerHeld;
+    if (found.matches.length === 1 && !ownerHeld) {
       rentalId = found.matches[0].rental.id;
       customerId = found.matches[0].customer.id;
     }
@@ -165,7 +170,7 @@ export function recordFine(body: NewFine, userId: number | null) {
     .get();
   const who = customerId ? db.select().from(schema.customers).where(eq(schema.customers.id, customerId)).get() : null;
   notify(
-    `🚨 <b>Phạt nguội mới</b> ${escapeHtml(f.plate)} lúc ${fmtDateTime(f.violatedAt)}\n${escapeHtml(f.violation ?? '')}${f.amount ? ` · ${fmtVnd(f.amount)}` : ''}\n${who ? `Người giữ xe: ${escapeHtml(who.fullName)} · ${escapeHtml(who.phone ?? '')}` : 'Chưa xác định người giữ xe'}`,
+    `🚨 <b>Phạt nguội mới</b> ${escapeHtml(f.plate)} lúc ${fmtDateTime(f.violatedAt)}\n${escapeHtml(f.violation ?? '')}${f.amount ? ` · ${fmtVnd(f.amount)}` : ''}\n${who ? `Người giữ xe: ${escapeHtml(who.fullName)} · ${escapeHtml(who.phone ?? '')}` : ownerHeld ? `Có ghi chủ xe đang giữ xe lúc đó: ${escapeHtml(vehicle?.ownerName ?? 'chủ xe')} ${escapeHtml(vehicle?.ownerPhone ?? '')}` : 'Chưa xác định người giữ xe'}`,
   );
   return f;
 }

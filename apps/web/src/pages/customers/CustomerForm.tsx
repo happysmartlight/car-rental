@@ -34,10 +34,10 @@ function Section({ title, icon, children, action }: { title: string; icon?: Reac
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold tracking-wide text-muted uppercase">
+        <h2 className="flex items-center gap-2 text-sm font-semibold tracking-wide text-muted uppercase">
           {icon}
           {title}
-        </h3>
+        </h2>
         {action}
       </div>
       {children}
@@ -218,7 +218,7 @@ export function CustomerForm({
         onClick={() => setScanOpen(true)}
         className="flex w-full items-center gap-4 rounded-2xl border border-brand/30 bg-brand-soft p-4 text-left transition-colors hover:border-brand"
       >
-        <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-brand text-brand-fg">
+        <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-brand-solid text-brand-fg">
           <ScanLine className="size-6" />
         </span>
         <span>

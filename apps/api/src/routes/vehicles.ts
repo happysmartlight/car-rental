@@ -1,12 +1,12 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import type { Vehicle } from '../db/schema.js';
 import { audit } from '../lib/audit.js';
-import { badRequest, conflict, idParam, notFound, parse, requireRole, zDateKey, zFileId, zMoney, zMs, zOptText } from '../lib/http.js';
+import { badRequest, conflict, idParam, notFound, parse, parsePatch, requireRole, zDateKey, zFileId, zMoney, zMs, zOptText } from '../lib/http.js';
 import { vehicleAccessories } from '../services/accessories.js';
-import { occupiedRange } from '../services/rentals.js';
+import { findConflicts, occupiedRange } from '../services/rentals.js';
 import { BLOCK_KINDS, FUEL_TYPES, TRANSMISSIONS } from '../shared/constants.js';
 import { formatPlate, plateKey } from '../shared/text.js';
 
@@ -70,7 +70,7 @@ export function vehicleStatuses(vehicles: Vehicle[], now = Date.now()) {
   const blocks = db
     .select()
     .from(schema.vehicleBlocks)
-    .where(and(inArray(schema.vehicleBlocks.vehicleId, ids), sql`${schema.vehicleBlocks.startAt} <= ${now}`, sql`(${schema.vehicleBlocks.endAt} IS NULL OR ${schema.vehicleBlocks.endAt} > ${now})`))
+    .where(and(inArray(schema.vehicleBlocks.vehicleId, ids), isNull(schema.vehicleBlocks.voidedAt), sql`${schema.vehicleBlocks.startAt} <= ${now}`, sql`(${schema.vehicleBlocks.endAt} IS NULL OR ${schema.vehicleBlocks.endAt} > ${now})`))
     .all();
   const out = new Map<number, { state: 'rented' | 'blocked' | 'available' | 'inactive'; current?: unknown; next?: unknown; block?: unknown }>();
   for (const v of vehicles) {
@@ -95,6 +95,26 @@ function ensureUniquePlate(plate: string, excludeId?: number): string {
   const dup = db.select().from(schema.vehicles).where(eq(schema.vehicles.plateKey, key)).get();
   if (dup && dup.id !== excludeId) throw conflict(`Biển số ${dup.plate} đã có trong danh sách xe`, 'duplicate', { existingId: dup.id });
   return key;
+}
+
+/** Xe ký gửi phải có tên chủ và tỷ lệ chia: hợp đồng in tên chủ xe, đối soát cần tỷ lệ. */
+function ensureOwnerInfo(v: { ownerType?: 'own' | 'consigned'; ownerName?: string | null; ownerSharePct?: number | null }) {
+  if (v.ownerType !== 'consigned') return;
+  if (!v.ownerName) throw badRequest('Xe ký gửi cần có tên chủ xe');
+  if (v.ownerSharePct == null) throw badRequest('Xe ký gửi cần có tỷ lệ chủ xe hưởng (%)');
+}
+
+/** Lượt thuê đang mở trùng khoảng tạm ngưng. Không có ngày kết thúc thì coi như kéo dài mãi. */
+function rentalClashes(vehicleId: number, start: number, end: number | null) {
+  return findConflicts(vehicleId, start, end ?? Number.MAX_SAFE_INTEGER).filter((c) => c.type === 'rental');
+}
+
+/** Tạm ngưng đè lên lượt khách đã đặt: chặn lại, chỉ quản trị mới được xác nhận ghi. */
+function assertNoRentalClash(req: FastifyRequest, clashes: ReturnType<typeof rentalClashes>, force?: boolean) {
+  if (!clashes.length) return;
+  const canForce = req.user!.role === 'admin';
+  if (force && canForce) return;
+  throw conflict(`Trùng lượt thuê ${clashes.map((c) => c.label).join(', ')}.${canForce ? '' : ' Nhờ quản trị xử lý.'}`, 'block_overlaps_rental', { rentals: clashes, canForce });
 }
 
 export async function vehicleRoutes(app: FastifyInstance) {
@@ -137,7 +157,7 @@ export async function vehicleRoutes(app: FastifyInstance) {
       .orderBy(desc(schema.rentals.scheduledStart))
       .limit(200)
       .all();
-    const blocks = db.select().from(schema.vehicleBlocks).where(eq(schema.vehicleBlocks.vehicleId, id)).orderBy(desc(schema.vehicleBlocks.startAt)).all();
+    const blocks = db.select().from(schema.vehicleBlocks).where(and(eq(schema.vehicleBlocks.vehicleId, id), isNull(schema.vehicleBlocks.voidedAt))).orderBy(desc(schema.vehicleBlocks.startAt)).all();
     const fines = db.select().from(schema.trafficFines).where(eq(schema.trafficFines.vehicleId, id)).orderBy(desc(schema.trafficFines.violatedAt)).all();
     const revenue = db
       .select({ total: sql<number>`COALESCE(SUM(${schema.charges.amount}), 0)` })
@@ -166,6 +186,7 @@ export async function vehicleRoutes(app: FastifyInstance) {
   app.post('/api/vehicles', async (req) => {
     requireRole(req, 'admin');
     const body = parse(zVehicle, req.body);
+    ensureOwnerInfo(body);
     const key = ensureUniquePlate(body.plate);
     const now = Date.now();
     const v = db
@@ -180,7 +201,10 @@ export async function vehicleRoutes(app: FastifyInstance) {
   app.patch('/api/vehicles/:id', async (req) => {
     requireRole(req, 'admin');
     const id = idParam(req);
-    const body = parse(zVehicle.partial(), req.body);
+    const body = parsePatch(zVehicle, req.body);
+    const before = db.select().from(schema.vehicles).where(eq(schema.vehicles.id, id)).get();
+    if (!before) throw notFound('Không tìm thấy xe');
+    ensureOwnerInfo({ ...before, ...body });
     const patch: Partial<Vehicle> = { ...body, updatedAt: Date.now() };
     if (body.plate) {
       patch.plateKey = ensureUniquePlate(body.plate, id);
@@ -188,7 +212,9 @@ export async function vehicleRoutes(app: FastifyInstance) {
     }
     const v = db.update(schema.vehicles).set(patch).where(eq(schema.vehicles.id, id)).returning().get();
     if (!v) throw notFound('Không tìm thấy xe');
-    audit(req, 'vehicle.update', 'vehicle', id, { fields: Object.keys(body) });
+    // Giao diện gửi cả form, nên chỉ ghi trường thực sự đổi kèm giá trị cũ và mới (đối chứng khi đổi tỷ lệ chia).
+    const changes = (Object.keys(body) as (keyof Vehicle)[]).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(v[k])).map((k) => ({ field: k, from: before[k], to: v[k] }));
+    audit(req, 'vehicle.update', 'vehicle', id, { changes });
     return v;
   });
 
@@ -196,12 +222,13 @@ export async function vehicleRoutes(app: FastifyInstance) {
     requireRole(req, 'admin');
     const id = idParam(req);
     const { archived } = parse(z.object({ archived: z.boolean() }), req.body);
+    // Gồm cả lượt chờ quyết toán, đang giữ cọc: trả xe cho chủ ký gửi rồi thì tiền và phạt nguội của lượt đó vẫn còn dở.
     const open = db
-      .select({ id: schema.rentals.id })
+      .select({ code: schema.rentals.code })
       .from(schema.rentals)
-      .where(and(eq(schema.rentals.vehicleId, id), inArray(schema.rentals.status, ['booked', 'active'])))
+      .where(and(eq(schema.rentals.vehicleId, id), inArray(schema.rentals.status, ['booked', 'active', 'returned', 'settled'])))
       .get();
-    if (archived && open) throw badRequest('Xe còn lượt thuê đang mở, không lưu trữ được');
+    if (archived && open) throw badRequest(`Xe còn lượt ${open.code} chưa xong (đã đặt, đang thuê, chờ quyết toán hoặc đang giữ cọc), xử lý xong mới lưu trữ được`);
     const v = db
       .update(schema.vehicles)
       .set({ archivedAt: archived ? Date.now() : null, active: !archived, updatedAt: Date.now() })
@@ -225,32 +252,47 @@ export async function vehicleRoutes(app: FastifyInstance) {
   app.post('/api/vehicles/:id/blocks', async (req) => {
     requireRole(req, 'staff');
     const vehicleId = idParam(req);
-    const body = parse(zBlock, req.body);
+    const { force, ...body } = parse(zBlock.extend({ force: z.boolean().optional() }), req.body);
     if (body.endAt != null && body.endAt <= body.startAt) throw badRequest('Thời điểm kết thúc phải sau bắt đầu');
+    const clashes = rentalClashes(vehicleId, body.startAt, body.endAt);
+    assertNoRentalClash(req, clashes, force);
     const b = db
       .insert(schema.vehicleBlocks)
       .values({ ...body, vehicleId, createdBy: req.user!.id, createdAt: Date.now() })
       .returning()
       .get();
-    audit(req, 'vehicle.block', 'vehicle', vehicleId, body);
+    audit(req, 'vehicle.block', 'vehicle', vehicleId, { ...body, overlapsRentals: clashes.map((c) => c.label) });
     return b;
   });
 
   app.patch('/api/blocks/:id', async (req) => {
     requireRole(req, 'staff');
     const id = idParam(req);
-    const body = parse(zBlock.partial(), req.body);
+    const { force, ...body } = parsePatch(zBlock.extend({ force: z.boolean().optional() }), req.body);
+    const before = db.select().from(schema.vehicleBlocks).where(and(eq(schema.vehicleBlocks.id, id), isNull(schema.vehicleBlocks.voidedAt))).get();
+    if (!before) throw notFound();
+    // Chỉ xét lượt mới bị đè: kết thúc sớm một khoảng đã trùng từ trước vẫn phải làm được.
+    const known = rentalClashes(before.vehicleId, before.startAt, before.endAt).map((c) => c.id);
+    const clashes = rentalClashes(before.vehicleId, body.startAt ?? before.startAt, body.endAt !== undefined ? body.endAt : before.endAt).filter((c) => !known.includes(c.id));
+    assertNoRentalClash(req, clashes, force);
     const b = db.update(schema.vehicleBlocks).set(body).where(eq(schema.vehicleBlocks.id, id)).returning().get();
     if (!b) throw notFound();
-    audit(req, 'vehicle.block_update', 'vehicle', b.vehicleId, body);
+    audit(req, 'vehicle.block_update', 'vehicle', b.vehicleId, { before, after: body, overlapsRentals: clashes.map((c) => c.label) });
     return b;
   });
 
   app.delete('/api/blocks/:id', async (req) => {
     requireRole(req, 'admin');
     const id = idParam(req);
-    const b = db.delete(schema.vehicleBlocks).where(eq(schema.vehicleBlocks.id, id)).returning().get();
-    if (b) audit(req, 'vehicle.block_delete', 'vehicle', b.vehicleId, b);
+    // Không xóa: khoảng này là bằng chứng ai giữ xe khi có phạt nguội.
+    const { reason } = parse(z.object({ reason: zOptText }), req.body ?? {});
+    const b = db
+      .update(schema.vehicleBlocks)
+      .set({ voidedAt: Date.now(), voidReason: reason })
+      .where(and(eq(schema.vehicleBlocks.id, id), isNull(schema.vehicleBlocks.voidedAt)))
+      .returning()
+      .get();
+    if (b) audit(req, 'vehicle.block_void', 'vehicle', b.vehicleId, b);
     return { ok: true };
   });
 }

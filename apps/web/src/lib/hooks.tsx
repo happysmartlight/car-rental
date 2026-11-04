@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { api } from './api';
 import type { SessionUser, SettingsData } from './types';
@@ -106,6 +106,25 @@ export function useTheme(): [Theme, (t: Theme) => void] {
 }
 
 /** Đếm ngược/tăng mỗi phút để các nhãn "còn 2 giờ" tự cập nhật. */
+/** true từ lần đầu phần tử lọt vào màn hình. Hoạt ảnh ở phần dưới trang đợi tới lúc này, nếu không sẽ chạy xong trước khi người dùng cuộn tới. */
+export function useSeenOnScreen<T extends Element>(threshold = 0.15) {
+  const ref = useRef<T>(null);
+  const [seen, setSeen] = useState(() => typeof IntersectionObserver === 'undefined');
+  useEffect(() => {
+    const el = ref.current;
+    if (seen || !el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setSeen(true);
+      },
+      { threshold },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [seen, threshold]);
+  return [ref, seen] as const;
+}
+
 export function useNow(intervalMs = 60_000): number {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {

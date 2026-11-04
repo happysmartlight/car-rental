@@ -5,7 +5,7 @@ import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from 'driz
 import { db, schema } from '../db/index.js';
 import type { CashEntry, RecurringCost, Rental, Vehicle } from '../db/schema.js';
 import { badRequest, notFound } from '../lib/http.js';
-import { CASH_CATEGORY, dueRecurringMonths, monthKeyOf, parseMonthKey, recurringDate, vnMonthStart, type CashCategory, type CashMethod, type Period } from '../shared/cashflow.js';
+import { CASH_CATEGORY, dueRecurringMonths, monthKeyOf, parseMonthKey, recurringDate, vehicleCategoryError, vnMonthStart, type CashCategory, type CashMethod, type Period } from '../shared/cashflow.js';
 import { effectiveChannelFee, summarizeMoney, type MoneyPayment, type PaymentDirection } from '../shared/money.js';
 import type { PaymentMethod, RentalChannel, RentalSource, RentalStatus } from '../shared/constants.js';
 import { DAY_MS, vnDateKey } from '../shared/time.js';
@@ -22,9 +22,12 @@ export function materializeRecurring(now = Date.now(), onlyId?: number): number 
   const conds = [eq(schema.recurringCosts.active, true)];
   if (onlyId) conds.push(eq(schema.recurringCosts.id, onlyId));
   const list = db.select().from(schema.recurringCosts).where(and(...conds)).all();
+  const consigned = new Set(db.select({ id: schema.vehicles.id }).from(schema.vehicles).where(eq(schema.vehicles.ownerType, 'consigned')).all().map((v) => v.id));
   let created = 0;
   db.transaction(() => {
     for (const t of list) {
+      // Khoản định kỳ tạo từ lúc xe chưa ký gửi: không tự ghi tiếp những khoản chủ xe tự trả.
+      if (t.vehicleId != null && consigned.has(t.vehicleId) && vehicleCategoryError(t.category, { ownerType: 'consigned' })) continue;
       const months = dueRecurringMonths(t, now);
       if (!months.length) continue;
       const done = new Set(
@@ -95,6 +98,11 @@ function ensureVehicle(id: number | null): Vehicle | null {
   return v;
 }
 
+function ensureCategoryFits(category: CashCategory, vehicleId: number | null) {
+  const error = vehicleCategoryError(category, ensureVehicle(vehicleId));
+  if (error) throw badRequest(error);
+}
+
 export function applyRenewal(vehicleId: number, r: VehicleRenewal): Partial<Vehicle> {
   const patch = Object.fromEntries(Object.entries(r).filter(([, v]) => v != null && v !== '')) as Partial<Vehicle>;
   if (!Object.keys(patch).length) return patch;
@@ -115,7 +123,7 @@ export function createEntry(
   renewal?: VehicleRenewal,
   maintenanceDone?: number[],
 ): { entry: CashEntry; renewed: Partial<Vehicle>; maintenance: number } {
-  ensureVehicle(input.vehicleId);
+  ensureCategoryFits(input.category, input.vehicleId);
   if ((renewal || maintenanceDone?.length) && input.vehicleId == null) throw badRequest('Chọn xe để gia hạn giấy tờ / bảo dưỡng');
   const now = Date.now();
   return db.transaction(() => {
@@ -138,7 +146,7 @@ export function updateEntry(id: number, input: Partial<EntryInput>): CashEntry {
   if (!cur) throw notFound('Không tìm thấy khoản thu chi');
   if (cur.voidedAt) throw badRequest('Phiếu đã hủy, không sửa được');
   if (cur.rentalId != null) throw badRequest('Khoản này app tự ghi theo lượt thuê — sửa ở trang lượt thuê');
-  if (input.vehicleId !== undefined) ensureVehicle(input.vehicleId);
+  ensureCategoryFits(input.category ?? cur.category, input.vehicleId !== undefined ? input.vehicleId : cur.vehicleId);
   const patch: Partial<CashEntry> = { ...input, updatedAt: Date.now() };
   if (input.category) patch.direction = CASH_CATEGORY[input.category].dir;
   if (input.amount != null) patch.amount = Math.round(input.amount);
@@ -178,7 +186,7 @@ function checkRule(r: { startMonth: string; endMonth: string | null }) {
 }
 
 export function createRecurring(input: RecurringInput, userId: number): { recurring: RecurringCost; created: number } {
-  ensureVehicle(input.vehicleId);
+  ensureCategoryFits(input.category, input.vehicleId);
   checkRule(input);
   const now = Date.now();
   const recurring = db
@@ -192,7 +200,7 @@ export function createRecurring(input: RecurringInput, userId: number): { recurr
 export function updateRecurring(id: number, input: Partial<RecurringInput>): { recurring: RecurringCost; created: number } {
   const cur = db.select().from(schema.recurringCosts).where(eq(schema.recurringCosts.id, id)).get();
   if (!cur) throw notFound('Không tìm thấy khoản định kỳ');
-  if (input.vehicleId !== undefined) ensureVehicle(input.vehicleId);
+  ensureCategoryFits(input.category ?? cur.category, input.vehicleId !== undefined ? input.vehicleId : cur.vehicleId);
   checkRule({ startMonth: input.startMonth ?? cur.startMonth, endMonth: input.endMonth !== undefined ? input.endMonth : cur.endMonth });
   const recurring = db
     .update(schema.recurringCosts)

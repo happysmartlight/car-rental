@@ -1,7 +1,8 @@
 // Biểu đồ 12 tháng: cột Thu (xanh) + Chi vận hành (cam) cạnh nhau, đường Lãi vận hành.
 // Một trục tiền duy nhất. Rê/chạm vào tháng để xem số; bấm để mở tháng đó. Có bảng số thay thế.
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
+import { useSeenOnScreen } from '@/lib/hooks';
 import type { CashTotals } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { fmtCompactVnd, fmtMonthKey, parseMonthKey } from '@shared/cashflow';
@@ -11,6 +12,8 @@ export type TrendRow = CashTotals & { key: string };
 
 const H = 230;
 const PAD = { top: 14, right: 6, bottom: 34, left: 46 };
+/** Bề rộng cột tháng tối thiểu để hai nhãn năm nằm cạnh nhau không chồng lên nhau. */
+const MIN_BAND_FOR_ADJACENT_YEARS = 32;
 
 /** Bước chia trục tròn: 1, 2, 2.5, 5 × 10^k. */
 function niceStep(range: number, count = 4): number {
@@ -33,14 +36,15 @@ function barPath(x: number, w: number, y0: number, y1: number): string {
 }
 
 export function CashChart({ data, selected, onSelect, className }: { data: TrendRow[]; selected?: string | null; onSelect?: (key: string) => void; className?: string }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const [ref, seen] = useSeenOnScreen<HTMLDivElement>(0.35);
   const [width, setWidth] = useState(0);
   const [hover, setHover] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    // Bỏ qua bề rộng 0 thoáng qua: nếu không, svg bị dựng lại và hoạt ảnh chạy lại từ đầu.
+    const ro = new ResizeObserver(() => setWidth((w) => el.clientWidth || w));
     ro.observe(el);
     setWidth(el.clientWidth);
     return () => ro.disconnect();
@@ -70,7 +74,7 @@ export function CashChart({ data, selected, onSelect, className }: { data: Trend
   return (
     <div ref={ref} className={cn('relative select-none', className)} onPointerLeave={() => setHover(null)}>
       {width > 0 && (
-        <svg width={width} height={H} role="img" aria-label="Biểu đồ thu, chi và lãi theo tháng" className="block overflow-visible">
+        <svg width={width} height={H} role="img" aria-label="Biểu đồ thu, chi và lãi theo tháng" className={cn('block overflow-visible print:[&_*]:[animation:none]!', !seen && '[&_*]:[animation-play-state:paused]!')}>
           {ticks.map((t) => (
             <g key={t}>
               <line x1={PAD.left} x2={width - PAD.right} y1={y(t)} y2={y(t)} stroke={t === 0 ? 'var(--border-strong)' : 'var(--border)'} strokeWidth={1} shapeRendering="crispEdges" />
@@ -84,15 +88,17 @@ export function CashChart({ data, selected, onSelect, className }: { data: Trend
             const x0 = PAD.left + i * band + (band - groupW) / 2;
             const p = parseMonthKey(d.key)!;
             const isSel = selected === d.key;
+            // Nhãn năm ở cột đầu và mỗi tháng 1. Cột đầu là tháng 12 thì sát ngay nhãn tháng 1: màn hình hẹp chỉ giữ năm mới.
+            const showYear = p.month === 1 || (i === 0 && (p.month !== 12 || band >= MIN_BAND_FOR_ADJACENT_YEARS));
             return (
               <g key={d.key}>
                 {(hover === i || isSel) && <rect x={PAD.left + i * band + 1} y={PAD.top} width={Math.max(0, band - 2)} height={plotH} rx={6} fill="var(--hover)" opacity={hover === i ? 0.9 : 0.55} />}
-                <path d={barPath(x0, barW, zero, y(d.income))} fill="var(--chart-in)" />
-                <path d={barPath(x0 + barW + 2, barW, zero, y(d.expense))} fill="var(--chart-out)" />
+                <path d={barPath(x0, barW, zero, y(d.income))} fill="var(--chart-in)" className="anim-grow-y" style={{ transformOrigin: `0 ${zero}px`, animationDelay: `${i * 25}ms` }} />
+                <path d={barPath(x0 + barW + 2, barW, zero, y(d.expense))} fill="var(--chart-out)" className="anim-grow-y" style={{ transformOrigin: `0 ${zero}px`, animationDelay: `${i * 25}ms` }} />
                 <text x={cx(i)} y={H - PAD.bottom + 16} textAnchor="middle" className={cn('text-[11px]', isSel ? 'fill-fg font-semibold' : 'fill-muted')}>
                   T{p.month}
                 </text>
-                {(i === 0 || p.month === 1) && (
+                {showYear && (
                   <text x={cx(i)} y={H - PAD.bottom + 29} textAnchor="middle" className="fill-subtle text-[10px]">
                     {p.year}
                   </text>
@@ -101,9 +107,9 @@ export function CashChart({ data, selected, onSelect, className }: { data: Trend
             );
           })}
 
-          <path d={line} fill="none" stroke="var(--chart-profit)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+          <path d={line} pathLength={1} fill="none" className="anim-draw" stroke="var(--chart-profit)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
           {data.map((d, i) => (
-            <circle key={d.key} cx={cx(i)} cy={y(d.profit)} r={hover === i ? 5 : 4} fill="var(--chart-profit)" stroke="var(--surface)" strokeWidth={2} />
+            <circle key={d.key} cx={cx(i)} cy={y(d.profit)} r={hover === i ? 5 : 4} fill="var(--chart-profit)" stroke="var(--surface)" strokeWidth={2} className="anim-fade" style={{ animationDelay: `${250 + i * 25}ms`, animationFillMode: 'backwards' }} />
           ))}
 
           {/* Vùng bấm: cả cột tháng, to hơn hình vẽ. */}

@@ -17,11 +17,13 @@
   --popover: #ffffff;
   --hover: #eef1f5;
   --fg: #0e1420;
-  --muted: #5f6b7d;
-  --subtle: #7d8798;
+  --muted: #566274;
+  --subtle: #636e80;
   --brand: #2563eb;
+  /* Nền đặc có chữ trắng (nút chính…). Tách khỏi --brand vì giao diện tối cần --brand sáng để làm chữ. */
+  --brand-solid: #2563eb;
   --brand-hover: #1d4ed8;
-  --brand-soft: #e8efff;
+  --brand-soft: #edf2ff;
   --brand-fg: #ffffff;
   --ring: #2563eb55;
   --shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.06);
@@ -47,7 +49,8 @@
   --muted: #a3acbd;
   --subtle: #8089a0;
   --brand: #4f8dfd;
-  --brand-hover: #6a9ffd;
+  --brand-solid: #2b6ae6;
+  --brand-hover: #2563eb;
   --brand-soft: #172446;
   --brand-fg: #ffffff;
   --ring: #4f8dfd55;
@@ -73,6 +76,7 @@
   --color-muted: var(--muted);
   --color-subtle: var(--subtle);
   --color-brand: var(--brand);
+  --color-brand-solid: var(--brand-solid);
   --color-brand-hover: var(--brand-hover);
   --color-brand-soft: var(--brand-soft);
   --color-brand-fg: var(--brand-fg);
@@ -175,6 +179,20 @@
   color: var(--color-violet-400);
 }
 
+/* Vùng bấm tối thiểu 40px cho nút nhỏ nằm trong dòng: nới bằng lớp giả, không đổi bố cục. */
+@utility tap-target {
+  position: relative;
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 40px);
+    height: max(100%, 40px);
+    transform: translate(-50%, -50%);
+  }
+}
+
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
@@ -190,6 +208,56 @@
   scrollbar-width: thin;
 }
 
+/* Chỉ dùng transform, opacity (nhẹ trên điện thoại). Không dùng hiệu ứng nảy, không để lại transform sau khi chạy:
+   transform còn lại sẽ làm hỏng position: fixed/sticky của phần tử con. */
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes slide-down {
+  to {
+    transform: translateY(100%);
+  }
+}
+@keyframes zoom-out {
+  to {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+}
+@keyframes rise {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+}
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes draw-line {
+  from {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes pop {
+  from {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+}
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -221,6 +289,107 @@
 .dark,
 :root {
   --ease-out-soft: cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+/* Vào trang: chỉ đổi opacity, vì Page chứa thanh dính đáy (fixed) mà transform sẽ làm lệch. */
+@utility anim-page {
+  animation: fade-in 0.18s ease-out;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+@utility anim-fade-out {
+  animation: fade-out 0.16s ease-in forwards;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+@utility anim-down {
+  animation: slide-down 0.2s ease-in forwards;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+@utility anim-zoom-out {
+  animation: zoom-out 0.12s ease-in forwards;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+/* Các phần tử con lần lượt hiện ra (thẻ, dòng danh sách). */
+@utility anim-stagger {
+  & > * {
+    animation: rise 0.3s var(--ease-out-soft) backwards;
+  }
+  & > :nth-child(2) {
+    animation-delay: 40ms;
+  }
+  & > :nth-child(3) {
+    animation-delay: 80ms;
+  }
+  & > :nth-child(4) {
+    animation-delay: 120ms;
+  }
+  & > :nth-child(5) {
+    animation-delay: 160ms;
+  }
+  & > :nth-child(6) {
+    animation-delay: 200ms;
+  }
+  & > :nth-child(7) {
+    animation-delay: 240ms;
+  }
+  & > :nth-child(8) {
+    animation-delay: 280ms;
+  }
+  & > :nth-child(n + 9) {
+    animation-delay: 320ms;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    & > * {
+      animation: none;
+    }
+  }
+}
+/* Thanh tiến độ, cột biểu đồ mọc từ gốc. Cột biểu đồ tự đặt transform-origin theo trục 0. */
+@utility anim-grow-x {
+  transform-origin: left;
+  animation: grow-x 0.6s var(--ease-out-soft) backwards;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+@utility anim-grow-y {
+  animation: grow-y 0.5s var(--ease-out-soft) backwards;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+/* Đường vẽ dần: phần tử phải có pathLength="1". */
+@utility anim-draw {
+  animation: draw-line 0.7s ease-out 0.15s backwards;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+@utility anim-pop {
+  animation: pop 0.16s var(--ease-out-soft);
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+/* Phản hồi khi bấm: gồm luôn chuyển màu, nên thay cho transition-colors. */
+@utility press {
+  transition-property: color, background-color, border-color, box-shadow, scale;
+  transition-duration: 150ms;
+  &:active {
+    scale: 0.98;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &:active {
+      scale: none;
+    }
+  }
 }
 
 @utility anim-fade {

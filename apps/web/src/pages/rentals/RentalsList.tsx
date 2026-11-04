@@ -59,7 +59,7 @@ export default function RentalsList() {
               <button
                 key={t.value}
                 onClick={() => setParams({ status: t.value }, { replace: true })}
-                className={cn('shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors', status === t.value ? 'bg-fg text-bg' : 'bg-surface-2 text-muted hover:text-fg')}
+                className={cn('shrink-0 rounded-full px-3.5 py-2.5 text-sm font-medium transition-colors lg:py-1.5', status === t.value ? 'bg-fg text-bg' : 'bg-surface-2 text-muted hover:text-fg')}
               >
                 {t.label}
               </button>
@@ -78,12 +78,12 @@ export default function RentalsList() {
         ) : !data?.items.length ? (
           <Empty icon={KeyRound} title="Không có lượt thuê" description={dq ? 'Thử từ khóa khác.' : 'Lượt thuê mới sẽ hiện ở đây.'} action={<ButtonLink to="/rentals/new"><Plus /> Đặt xe</ButtonLink>} />
         ) : (
-          <ul className="divide-y divide-border">
+          <ul className="anim-stagger divide-y divide-border">
             {data.items.map((r) => {
               const overdue = r.status === 'active' && r.scheduledEnd < now;
               return (
                 <li key={r.id}>
-                  <Link to={`/rentals/${r.id}`} className="flex items-center gap-4 px-4 py-3 hover:bg-surface-2/60 md:px-5">
+                  <Link to={`/rentals/${r.id}`} className="flex items-center gap-4 px-4 py-3 hover:bg-surface-2/60 active:bg-surface-2 md:px-5">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold">{r.vehicle.plate}</span>
@@ -105,9 +105,9 @@ export default function RentalsList() {
                       {r.money.due > 0 && r.status !== 'cancelled' ? (
                         <p className="tabular text-xs text-red-600">Còn {fmtVnd(r.money.due)}</p>
                       ) : r.money.depositHeld > 0 ? (
-                        <p className="tabular text-xs text-amber-600">Giữ cọc {fmtVnd(r.money.depositHeld)}</p>
+                        <p className="tabular text-xs text-amber-700">Giữ cọc {fmtVnd(r.money.depositHeld)}</p>
                       ) : (
-                        <p className="text-xs text-emerald-600">Đã đủ</p>
+                        <p className="text-xs text-emerald-700">Đã đủ</p>
                       )}
                     </div>
                   </Link>

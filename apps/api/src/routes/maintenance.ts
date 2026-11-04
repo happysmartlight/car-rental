@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { idParam, notFound, parse, requireRole, userId, zMoney, zOptText } from '../lib/http.js';
+import { idParam, notFound, parse, parsePatch, requireRole, userId, zMoney, zOptText } from '../lib/http.js';
 import { CASH_METHODS, dateKeyToNoon } from '../shared/cashflow.js';
 import { presetsFor } from '../shared/maintenance.js';
 import { vnDateKey } from '../shared/time.js';
@@ -44,7 +44,7 @@ export async function maintenanceRoutes(app: FastifyInstance) {
   app.patch('/api/maintenance/:id', async (req) => {
     requireRole(req, 'admin');
     const id = idParam(req);
-    const body = parse(zItem.partial(), req.body);
+    const body = parsePatch(zItem, req.body);
     const item = updateMaintenanceItem(id, body);
     audit(req, 'maintenance.update', 'vehicle', item.vehicleId, { itemId: id, ...body });
     return item;

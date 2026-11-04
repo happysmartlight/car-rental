@@ -1,21 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Car, CheckCircle2, CircleAlert, Info, KeyRound, PiggyBank, Plus, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Car, CheckCircle2, CircleAlert, Info, KeyRound, Phone, PiggyBank, Plus, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { Link } from 'react-router';
 import { Page } from '@/components/layout/AppShell';
 import { Thumb } from '@/components/images';
 import { VehicleStateBadge } from '@/components/common';
 import { ButtonLink } from '@/components/ui/button';
+import { CountUp } from '@/components/ui/count-up';
 import { Card, CardHeader, Empty, PageLoader, Stat } from '@/components/ui/misc';
 import { api } from '@/lib/api';
 import { useAuth, useNow } from '@/lib/hooks';
 import type { Dashboard as DashboardData } from '@/lib/types';
-import { cn, relTime } from '@/lib/utils';
+import { cn, relTime, telLink } from '@/lib/utils';
 import { fmtVnd } from '@shared/text';
 import { fmtDateTime, fmtTime, vnDateKey, WEEKDAY_LONG, vnParts, fmtDate } from '@shared/time';
 
 const SEVERITY = {
   danger: { icon: CircleAlert, cls: 'text-red-600 bg-red-50 dark:bg-red-950/40 dark:text-red-400' },
-  warn: { icon: AlertTriangle, cls: 'text-amber-600 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400' },
+  warn: { icon: AlertTriangle, cls: 'text-amber-700 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400' },
   info: { icon: Info, cls: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400' },
 };
 
@@ -39,29 +40,29 @@ export function Dashboard() {
       {isLoading || !data ? (
         <PageLoader />
       ) : (
-        <div className="space-y-5">
+        <div className="anim-stagger space-y-5">
           {isAdmin && data.finance ? (
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Link to="/cashflow" className="block rounded-2xl transition-shadow hover:shadow-pop [&>*]:h-full">
-                <Stat label="Doanh thu tháng" value={fmtVnd(data.finance.revenue)} sub={`${data.finance.rentals} lượt thuê`} icon={Wallet} tone="blue" />
+            <div className="anim-stagger grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Link to="/cashflow" className="press block rounded-2xl hover:shadow-pop [&>*]:h-full">
+                <Stat label="Doanh thu tháng" value={<CountUp id="dash-revenue" value={data.finance.revenue} />} sub={`${data.finance.rentals} lượt thuê`} icon={Wallet} tone="blue" />
               </Link>
-              <Link to="/cashflow" className="block rounded-2xl transition-shadow hover:shadow-pop [&>*]:h-full">
+              <Link to="/cashflow" className="press block rounded-2xl hover:shadow-pop [&>*]:h-full">
                 <Stat
                   label="Lãi tháng"
-                  value={<span className={data.finance.profit < 0 ? 'text-red-600 dark:text-red-400' : undefined}>{fmtVnd(data.finance.profit)}</span>}
+                  value={<CountUp id="dash-profit" value={data.finance.profit} className={data.finance.profit < 0 ? 'text-red-600 dark:text-red-400' : undefined} />}
                   sub={`Đã thu ${fmtVnd(data.finance.income)} · chi ${fmtVnd(data.finance.expense)}`}
                   icon={data.finance.profit < 0 ? TrendingDown : TrendingUp}
                   tone={data.finance.profit < 0 ? 'red' : 'green'}
                 />
               </Link>
-              <Stat label="Cọc đang giữ" value={fmtVnd(data.finance.depositsHeld)} sub="Tiền của khách" icon={PiggyBank} tone="amber" />
-              <Stat label="Đang cho thuê" value={`${data.counts.active ?? 0}/${data.vehicles.length} xe`} sub={`${data.counts.booked ?? 0} lượt đã đặt`} icon={KeyRound} tone="violet" />
+              <Stat label="Cọc đang giữ" value={<CountUp id="dash-deposits" value={data.finance.depositsHeld} />} sub="Tiền của khách" icon={PiggyBank} tone="amber" />
+              <Stat label="Đang cho thuê" value={<CountUp id="dash-active" value={data.counts.active ?? 0} format={(n) => `${n}/${data.vehicles.length} xe`} />} sub={`${data.counts.booked ?? 0} lượt đã đặt`} icon={KeyRound} tone="violet" />
             </div>
           ) : (
-            <div className="grid grid-cols-3 gap-3">
-              <Stat label="Đang thuê" value={data.counts.active ?? 0} />
-              <Stat label="Đã đặt" value={data.counts.booked ?? 0} />
-              <Stat label="Chờ quyết toán" value={data.counts.returned ?? 0} />
+            <div className="anim-stagger grid grid-cols-3 gap-3">
+              <Stat label="Đang thuê" value={<CountUp id="dash-count-active" value={data.counts.active ?? 0} format={String} />} />
+              <Stat label="Đã đặt" value={<CountUp id="dash-count-booked" value={data.counts.booked ?? 0} format={String} />} />
+              <Stat label="Chờ quyết toán" value={<CountUp id="dash-count-returned" value={data.counts.returned ?? 0} format={String} />} />
             </div>
           )}
 
@@ -73,17 +74,23 @@ export function Dashboard() {
                   {data.alerts.map((a, i) => {
                     const S = SEVERITY[a.severity];
                     return (
-                      <li key={i}>
-                        <Link to={a.link} className="flex items-start gap-3 rounded-xl px-2 py-3 hover:bg-surface-2">
+                      <li key={i} className="flex items-center gap-1">
+                        <Link to={a.link} className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-2 py-3 hover:bg-surface-2 active:bg-surface-2">
                           <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-lg', S.cls)}>
                             <S.icon className="size-4" />
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm font-medium">{a.title}</span>
                             <span className="block text-sm text-muted">{a.detail}</span>
+                            {a.remindOwner && <span className="block text-sm font-medium">Nhắc chủ xe{a.ownerName ? ` ${a.ownerName}` : ''}</span>}
                           </span>
                           {a.at && <span className="shrink-0 pt-0.5 text-xs text-subtle">{relTime(a.at, now)}</span>}
                         </Link>
+                        {a.remindOwner && a.ownerPhone && (
+                          <a href={telLink(a.ownerPhone)} aria-label={`Gọi chủ xe ${a.ownerName ?? ''}`.trim()} className="press flex size-10 shrink-0 items-center justify-center rounded-xl text-brand hover:bg-surface-2">
+                            <Phone className="size-5" />
+                          </a>
+                        )}
                       </li>
                     );
                   })}
@@ -99,7 +106,7 @@ export function Dashboard() {
                 <ul className="space-y-1 px-2 pb-2">
                   {data.upcoming.map((u) => (
                     <li key={`${u.kind}${u.id}`}>
-                      <Link to={`/rentals/${u.id}`} className="flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-surface-2">
+                      <Link to={`/rentals/${u.id}`} className="flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-surface-2 active:bg-surface-2">
                         <span className={cn('flex size-9 shrink-0 items-center justify-center rounded-xl', u.kind === 'pickup' ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/40' : 'bg-violet-50 text-violet-600 dark:bg-violet-950/40')}>
                           {u.kind === 'pickup' ? <ArrowUpFromLine className="size-4" /> : <ArrowDownToLine className="size-4" />}
                         </span>
@@ -129,7 +136,7 @@ export function Dashboard() {
                 {data.vehicles.map((v) => {
                   const util = data.finance?.utilization.find((u) => u.vehicleId === v.id);
                   return (
-                    <Link key={v.id} to={`/vehicles/${v.id}`} className="flex gap-3 rounded-2xl border border-border p-3 transition-colors hover:border-border-strong hover:bg-surface-2/50">
+                    <Link key={v.id} to={`/vehicles/${v.id}`} className="flex gap-3 rounded-2xl border border-border p-3 press hover:border-border-strong hover:bg-surface-2/50">
                       {v.photoFileId ? (
                         <Thumb fileId={v.photoFileId} className="size-16 shrink-0" />
                       ) : (
@@ -155,7 +162,7 @@ export function Dashboard() {
                         {util && (
                           <span className="mt-1.5 flex items-center gap-2">
                             <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-3">
-                              <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.min(100, util.pct)}%` }} />
+                              <span className="anim-grow-x block h-full rounded-full bg-brand" style={{ width: `${Math.min(100, util.pct)}%` }} />
                             </span>
                             <span className="tabular text-[11px] text-subtle">{util.pct}% tháng</span>
                           </span>

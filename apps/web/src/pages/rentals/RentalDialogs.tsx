@@ -302,7 +302,7 @@ export function SettleDialog({ d, open, onOpenChange }: DialogProps) {
           <div className="divide-y divide-border rounded-2xl bg-surface-2 px-4 py-2">
             <Row label="Khách trả thêm" value={collect} strong tone={collect ? 'text-red-600' : ''} />
             {refundRent > 0 && <Row label="Hoàn tiền thuê thừa" value={refundRent} strong />}
-            <Row label="Hoàn cọc ngay" value={refundDeposit} strong tone={refundDeposit ? 'text-emerald-600' : ''} />
+            <Row label="Hoàn cọc ngay" value={refundDeposit} strong tone={refundDeposit ? 'text-emerald-700' : ''} />
             <Row label="Giữ lại chờ phạt nguội" value={keepHold} />
           </div>
           {keepHold > 0 && days ? <p className="text-sm text-muted">Hạn hoàn phần giữ lại: {fmtDate((d.rental.actualEnd ?? Date.now()) + days * DAY_MS)}. App sẽ nhắc.</p> : null}
@@ -469,7 +469,7 @@ export function ReleaseHoldDialog({ d, open, onOpenChange }: DialogProps) {
           )}
           <div className="flex items-center justify-between py-2">
             <span className="font-medium">Hoàn lại khách</span>
-            <span className="tabular text-lg font-semibold text-emerald-600 dark:text-emerald-400">{fmtVnd(refund)}</span>
+            <span className="tabular text-lg font-semibold text-emerald-700 dark:text-emerald-400">{fmtVnd(refund)}</span>
           </div>
         </div>
         {owed > 0 && (
@@ -679,7 +679,7 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
                     key={s}
                     type="button"
                     onClick={() => setSource(source === s ? null : s)}
-                    className={cn('rounded-full border px-3 py-1 text-xs font-medium', source === s ? 'border-brand bg-brand-soft text-brand' : 'border-border text-muted hover:bg-surface-2')}
+                    className={cn('min-h-10 rounded-full border px-3.5 text-sm font-medium lg:min-h-0 lg:px-3 lg:py-1 lg:text-xs', source === s ? 'border-brand bg-brand-soft text-brand' : 'border-border text-muted hover:bg-surface-2')}
                   >
                     {RENTAL_SOURCE_LABEL[s]}
                   </button>
@@ -800,7 +800,7 @@ export function CancelDialog({ d, open, onOpenChange }: DialogProps) {
     }
   };
   const chip = (label: string, value: number) => (
-    <button type="button" onClick={() => setKeep(value)} className={cn('rounded-full border px-3 py-1 text-sm', (keep ?? 0) === value ? 'border-brand bg-brand-soft text-brand' : 'border-border hover:bg-surface-2')}>
+    <button type="button" onClick={() => setKeep(value)} className={cn('rounded-full border px-3 py-2.5 text-sm lg:py-1', (keep ?? 0) === value ? 'border-brand bg-brand-soft text-brand' : 'border-border hover:bg-surface-2')}>
       {label}
     </button>
   );

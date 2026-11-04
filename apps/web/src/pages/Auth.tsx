@@ -11,7 +11,7 @@ function AuthLayout({ title, subtitle, children }: { title: string; subtitle: st
     <div className="flex min-h-dvh items-center justify-center bg-bg p-4 pt-safe">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-brand text-brand-fg shadow-pop">
+          <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-brand-solid text-brand-fg shadow-pop">
             <Car className="size-7" />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>

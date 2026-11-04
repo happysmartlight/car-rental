@@ -76,7 +76,7 @@ export default function Quote() {
 
   const setDays = (n: number) => start && setEnd(start + n * DAY_MS);
   const setMonths = (n: number) => start && setEnd(addMonthsVn(start, n));
-  const chip = (active: boolean) => cn('rounded-full border px-3 py-1 text-xs font-medium', active ? 'border-brand bg-brand-soft text-brand' : 'border-border text-muted hover:bg-surface-2');
+  const chip = (active: boolean) => cn('min-h-10 rounded-full border px-3.5 text-sm font-medium lg:min-h-0 lg:px-3 lg:py-1 lg:text-xs', active ? 'border-brand bg-brand-soft text-brand' : 'border-border text-muted hover:bg-surface-2');
 
   const biz = settings?.business;
   const doc = useMemo(() => {
@@ -144,10 +144,10 @@ export default function Quote() {
               const v = x.vehicle;
               const on = x.available && selected.some((s) => s.vehicle.id === v.id);
               return (
-                <Card key={v.id} className={cn('flex flex-col gap-3 p-4', !x.available && 'opacity-75')}>
+                <Card key={v.id} className={cn('flex flex-col gap-3 p-4', !x.available && 'border-dashed border-border-strong bg-transparent shadow-none')}>
                   <div className="flex items-start gap-3">
                     {v.photoFileId ? (
-                      <img src={fileUrl(v.photoFileId, { thumb: true })} alt="" className="size-14 shrink-0 rounded-xl object-cover" />
+                      <img src={fileUrl(v.photoFileId, { thumb: true })} alt="" className={cn('size-14 shrink-0 rounded-xl object-cover', !x.available && 'opacity-60 grayscale')} />
                     ) : (
                       <span className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-surface-2">
                         <Car className="size-6 text-subtle" />
@@ -161,14 +161,14 @@ export default function Quote() {
                           Trống
                         </Badge>
                       ) : (
-                        <p className="mt-0.5 flex items-start gap-1 text-xs font-medium text-red-600 dark:text-red-400">
+                        <p className="mt-0.5 flex items-start gap-1 text-xs font-medium text-red-700 dark:text-red-400">
                           <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
                           Bận: {x.conflicts[0]?.label}
                           {x.conflicts[0] && ` (${fmtDateTime(x.conflicts[0].start)} → ${x.conflicts[0].end ? fmtDateTime(x.conflicts[0].end) : '…'})`}
                         </p>
                       )}
                     </div>
-                    {x.available && <Checkbox className="-m-2 p-2.5" checked={on} onChange={() => toggle(v.id)} label={<span className="sr-only">Chọn gửi báo giá</span>} />}
+                    {x.available && <Checkbox className="-m-2 p-2.5 lg:p-2.5" checked={on} onChange={() => toggle(v.id)} label={<span className="sr-only">Chọn gửi báo giá</span>} />}
                   </div>
                   <div className="rounded-2xl bg-surface-2 p-3 text-sm">
                     {x.quote.lines.map((l, i) => (

@@ -81,10 +81,10 @@ export default function CustomersList() {
             action={<ButtonLink to="/customers/new?scan=1"><ScanLine /> Quét CCCD</ButtonLink>}
           />
         ) : (
-          <ul className="divide-y divide-border">
+          <ul className="anim-stagger divide-y divide-border">
             {data.items.map((c) => (
               <li key={c.id}>
-                <Link to={`/customers/${c.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-2/60 md:px-5">
+                <Link to={`/customers/${c.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-2/60 active:bg-surface-2 md:px-5">
                   <Avatar name={c.fullName} fileId={c.portraitFileId} />
                   <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-2 truncate font-medium">

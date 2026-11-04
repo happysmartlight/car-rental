@@ -18,6 +18,13 @@ import { Badge, Card, CardBody, CardHeader, Notice, Spinner } from './ui/misc';
 
 export const OFFICIAL_LOOKUP_URL = 'https://csgt.bocongan.gov.vn/tra-cuu-phat-nguoi';
 
+function holderText(v: MatchedViolation): string {
+  const owner = v.ownerName ? `chủ xe ${v.ownerName}` : 'chủ xe';
+  if (v.verdict === 'idle') return v.ownerType === 'consigned' ? `Không có lượt thuê nào lúc đó. Đây là xe ký gửi nên có thể đang ở chỗ ${owner}, hỏi lại trước khi xử lý` : 'Không có lượt thuê nào lúc đó — xe ở bãi theo dữ liệu đã ghi';
+  if (v.verdict === 'blocked') return v.ownerHeld ? `Lúc đó ${owner} đang giữ xe` : 'Lúc đó xe đang ở gara / tạm ngưng';
+  return v.verdict === 'unknown_vehicle' ? 'Biển số không có trong danh sách xe' : 'Không đọc được giờ vi phạm';
+}
+
 function ViolationRow({ v, onRecord, recording }: { v: MatchedViolation; onRecord: () => void; recording: boolean }) {
   return (
     <li className="space-y-2 px-4 py-3 md:px-5">
@@ -67,17 +74,21 @@ function ViolationRow({ v, onRecord, recording }: { v: MatchedViolation; onRecor
             )}
           </>
         ) : (
-          <span className="text-muted">
-            {v.verdict === 'idle'
-              ? 'Không có lượt thuê nào lúc đó — xe ở bãi theo dữ liệu đã ghi'
-              : v.verdict === 'blocked'
-                ? 'Lúc đó xe đang ở gara / tạm ngưng'
-                : v.verdict === 'unknown_vehicle'
-                  ? 'Biển số không có trong danh sách xe'
-                  : 'Không đọc được giờ vi phạm'}
-          </span>
+          <>
+            <span className="text-muted">{holderText(v)}</span>
+            {v.ownerPhone && (v.ownerHeld || v.verdict === 'idle') && (
+              <a href={telLink(v.ownerPhone)} className="text-brand">
+                {v.ownerPhone}
+              </a>
+            )}
+          </>
         )}
       </div>
+      {v.renter && v.ownerHeld && (
+        <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+          <TriangleAlert className="size-3.5 shrink-0" /> Lúc này cũng có ghi chủ xe đang giữ xe. Kiểm tra lại ai giữ xe trước khi báo khách.
+        </p>
+      )}
       {v.nearBoundary && (
         <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
           <TriangleAlert className="size-3.5" /> Sát giờ giao/nhận xe — đối chiếu ảnh và biên bản trước khi báo khách.
@@ -183,7 +194,7 @@ export function ViolationCheck({ vehicles }: { vehicles: VehicleWithStatus[] }) 
                   setPlate(v.plate);
                   setResult(null);
                 }}
-                className={cn('rounded-full border px-3 py-1.5 text-sm font-medium', plate === v.plate ? 'border-brand bg-brand-soft text-brand' : 'border-border hover:bg-surface-2')}
+                className={cn('rounded-full border px-3 py-2.5 text-sm font-medium lg:py-1.5', plate === v.plate ? 'border-brand bg-brand-soft text-brand' : 'border-border hover:bg-surface-2')}
               >
                 {v.plate}
               </button>
@@ -283,7 +294,7 @@ export function ViolationCheck({ vehicles }: { vehicles: VehicleWithStatus[] }) 
         {isAdmin && auto && (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-muted">Tự kiểm tra cả đội:</span>
-            <Select value={auto.frequency} onChange={(e) => setFrequency.mutate(e.target.value as FineAutoCheck['frequency'])} className="h-9 w-auto md:h-9">
+            <Select value={auto.frequency} onChange={(e) => setFrequency.mutate(e.target.value as FineAutoCheck['frequency'])} className="h-10 w-auto lg:h-9">
               <option value="off">Tắt</option>
               <option value="daily">Mỗi ngày</option>
               <option value="weekly">Mỗi tuần</option>

@@ -174,6 +174,9 @@ export interface Alert {
   detail: string;
   link: string;
   at?: number;
+  remindOwner?: boolean;
+  ownerName?: string | null;
+  ownerPhone?: string | null;
 }
 
 export interface Dashboard {
@@ -226,6 +229,8 @@ export interface FineLookup {
   verdict: 'rented' | 'blocked' | 'idle' | 'unknown_vehicle';
   matches: FineMatch[];
   blocks: VehicleBlock[];
+  /** Có ghi "Chủ xe sử dụng" lúc đó. */
+  ownerHeld: boolean;
   scheduledOnly: { rental: Rental; customer: Customer }[];
   nearby: { rental: Rental; customer: Customer; segment: RentalSegment }[];
 }
@@ -233,6 +238,8 @@ export interface FineLookup {
 export interface FineListItem extends TrafficFine {
   customer: CustomerLite | null;
   rental: { id: number; code: string } | null;
+  /** Chưa gắn lượt thuê và có ghi chủ xe giữ xe lúc vi phạm. */
+  ownerHeld: boolean;
 }
 
 export interface BusinessSettings {
@@ -295,6 +302,11 @@ export interface MatchedViolation {
   renter: { customerId: number; fullName: string; phone: string | null } | null;
   rental: { id: number; code: string } | null;
   nearBoundary: boolean;
+  ownerHeld: boolean;
+  ownerType: 'own' | 'consigned' | null;
+  /** Nhân viên không nhận được tên và SĐT chủ xe. */
+  ownerName?: string | null;
+  ownerPhone?: string | null;
   recordedFineId: number | null;
 }
 

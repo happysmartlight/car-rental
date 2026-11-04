@@ -85,6 +85,13 @@
       "when": 1793636572518,
       "tag": "0011_ev_energy_fee",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793756255731,
+      "tag": "0012_burly_santa_claus",
+      "breakpoints": true
     }
   ]
 }

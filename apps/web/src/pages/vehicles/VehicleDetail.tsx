@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Archive, ArrowRight, Car, KeyRound, MoreHorizontal, Pencil, Receipt, Share2, Wrench } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
+import { toast } from 'sonner';
 import { AccessoryManager } from '@/components/AccessoryManager';
 import { MaintenanceSchedule } from '@/components/MaintenanceSchedule';
 import { CashEntryDialog, type CashDialogState } from '@/components/CashEntryDialog';
@@ -12,8 +13,9 @@ import { Gallery } from '@/components/images';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Dialog, useConfirm } from '@/components/ui/dialog';
 import { DateTimeInput, Field, Input, Select, Textarea } from '@/components/ui/form';
+import { CountUp } from '@/components/ui/count-up';
 import { Badge, Card, CardBody, CardHeader, Empty, InfoRow, Menu, MenuItem, PageLoader } from '@/components/ui/misc';
-import { api, qs } from '@/lib/api';
+import { ApiError, api, qs } from '@/lib/api';
 import { useAction, useAuth } from '@/lib/hooks';
 import type { CashflowReport, VehicleDetail as Detail } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -45,7 +47,25 @@ export default function VehicleDetail() {
   const [block, setBlock] = useState<{ kind: BlockKind; startAt: number | null; endAt: number | null; location: string; notes: string }>({ kind: 'maintenance', startAt: Date.now(), endAt: null, location: '', notes: '' });
   const { data, isLoading } = useQuery({ queryKey: ['vehicle', id], queryFn: () => api.get<Detail>(`/api/vehicles/${id}`) });
   const inv = { invalidate: [['vehicle', id], ['vehicles'], ['dashboard'], ['calendar']] };
-  const addBlock = useAction(() => api.post(`/api/vehicles/${id}/blocks`, block), { ...inv, success: 'Đã ghi nhận', onSuccess: () => setBlockOpen(false) });
+  const addBlock = useAction(
+    async () => {
+      try {
+        return await api.post(`/api/vehicles/${id}/blocks`, block);
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.code !== 'block_overlaps_rental' || !err.data?.canForce) throw err;
+        const ok = await confirm({ title: 'Vẫn ghi tạm ngưng?', description: `${err.message} Khách đã đặt xe trong khoảng này.`, confirmText: 'Vẫn ghi', danger: true });
+        return ok ? api.post(`/api/vehicles/${id}/blocks`, { ...block, force: true }) : null;
+      }
+    },
+    {
+      ...inv,
+      onSuccess: (r) => {
+        if (!r) return;
+        toast.success('Đã ghi nhận');
+        setBlockOpen(false);
+      },
+    },
+  );
   const endBlock = useAction((blockId: number) => api.patch(`/api/blocks/${blockId}`, { endAt: Date.now() }), { ...inv, success: 'Xe đã sẵn sàng trở lại' });
   const archive = useAction(() => api.post(`/api/vehicles/${id}/archive`, { archived: true }), { invalidate: [['vehicles']], onSuccess: () => navigate('/vehicles') });
 
@@ -148,7 +168,7 @@ export default function VehicleDetail() {
                   {[v.regNumber, v.regDate && `cấp ${fmtDateKey(v.regDate)}`, v.regPlace, v.regOwner && `chủ xe ${v.regOwner}`].filter(Boolean).join(' · ')}
                 </InfoRow>
               )}
-              <InfoRow label="Chủ xe">{v.ownerType === 'own' ? 'Xe nhà' : `${v.ownerName ?? 'Ký gửi'} (${v.ownerSharePct ?? '?'}%)`}</InfoRow>
+              <InfoRow label="Chủ xe">{v.ownerType === 'own' ? 'Xe nhà' : isAdmin ? `${v.ownerName ?? 'Ký gửi'} (${v.ownerSharePct ?? '?'}%)` : 'Xe ký gửi'}</InfoRow>
             </CardBody>
           </Card>
           <Card>
@@ -341,7 +361,7 @@ function VehicleCash({ vehicleId, onAdd }: { vehicleId: number; onAdd: () => voi
   const cell = (label: string, value: number, cls?: string) => (
     <div className="flex min-w-0 items-baseline justify-between gap-3 sm:block">
       <p className="text-sm text-muted sm:text-xs">{label}</p>
-      <p className={cn('tabular font-semibold whitespace-nowrap', cls)}>{fmtVnd(value)}</p>
+      <p className={cn('font-semibold whitespace-nowrap', cls)}><CountUp id={`vehicle-${vehicleId}-${label}`} value={value} className="justify-items-end sm:justify-items-start" /></p>
     </div>
   );
   return (
@@ -360,7 +380,7 @@ function VehicleCash({ vehicleId, onAdd }: { vehicleId: number; onAdd: () => voi
           <div className="grid gap-1.5 rounded-xl bg-surface-2/60 p-3 sm:grid-cols-3 sm:gap-3">
             {cell('Thu', t.income)}
             {cell('Chi', t.expense)}
-            {cell('Lãi', t.profit, t.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}
+            {cell('Lãi', t.profit, t.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400')}
           </div>
         ) : (
           <div className="h-[68px] animate-pulse rounded-xl bg-surface-2" />
@@ -374,7 +394,7 @@ function VehicleCash({ vehicleId, onAdd }: { vehicleId: number; onAdd: () => voi
                 <span className="min-w-0 flex-1 truncate">
                   {l.kind === 'rent' ? `Tiền thuê · ${l.flow.code}` : l.entry.description || CASH_CATEGORY[l.entry.category].label}
                 </span>
-                <span className={cn('tabular shrink-0 font-medium', l.direction === 'in' && 'text-emerald-600 dark:text-emerald-400')}>
+                <span className={cn('tabular shrink-0 font-medium', l.direction === 'in' && 'text-emerald-700 dark:text-emerald-400')}>
                   {l.direction === 'in' ? '+' : '−'}
                   {fmtVnd(l.amount)}
                 </span>
@@ -382,7 +402,7 @@ function VehicleCash({ vehicleId, onAdd }: { vehicleId: number; onAdd: () => voi
             ))}
           </ul>
         )}
-        <Link to={`/cashflow?p=${year}&v=${vehicleId}`} className="inline-flex items-center gap-1 text-sm font-medium text-brand">
+        <Link to={`/cashflow?p=${year}&v=${vehicleId}`} className="tap-target inline-flex items-center gap-1 text-sm font-medium text-brand">
           Xem toàn bộ thu chi của xe <ArrowRight className="size-4" />
         </Link>
       </CardBody>

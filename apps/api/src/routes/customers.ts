@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import type { Customer } from '../db/schema.js';
 import { audit } from '../lib/audit.js';
-import { conflict, idParam, notFound, parse, requireRole, zDateKey, zFileId, zOptText } from '../lib/http.js';
+import { conflict, idParam, notFound, parse, parsePatch, requireRole, zDateKey, zFileId, zOptText } from '../lib/http.js';
 import { driverWarnings } from '../services/rentals.js';
 import { unaccent } from '../shared/text.js';
 
@@ -172,7 +172,7 @@ export async function customerRoutes(app: FastifyInstance) {
   app.patch('/api/customers/:id', async (req) => {
     requireRole(req, 'staff');
     const id = idParam(req);
-    const body = parse(zCustomer.partial(), req.body);
+    const body = parsePatch(zCustomer, req.body);
     const before = db.select().from(schema.customers).where(eq(schema.customers.id, id)).get();
     if (!before) throw notFound('Không tìm thấy khách hàng');
     if (body.idNumber) {

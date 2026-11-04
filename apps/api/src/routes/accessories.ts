@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { badRequest, conflict, idParam, notFound, parse, requireRole, userId, zFileId, zOptText } from '../lib/http.js';
+import { badRequest, conflict, idParam, notFound, parse, parsePatch, requireRole, userId, zFileId, zOptText } from '../lib/http.js';
 import {
   accessoryKey,
   addAccessories,
@@ -57,7 +57,7 @@ export async function accessoryRoutes(app: FastifyInstance) {
   app.patch('/api/accessories/catalog/:id', async (req) => {
     requireRole(req, 'admin');
     const id = idParam(req);
-    const body = parse(zCatalog.partial().extend({ archived: z.boolean().optional() }), req.body);
+    const body = parsePatch(zCatalog.extend({ archived: z.boolean().optional() }), req.body);
     const before = getCatalogItem(id);
     const patch: Partial<typeof before> = { updatedAt: Date.now() };
     for (const k of ['aliases', 'category', 'defaultValue', 'highlight', 'essential', 'evOnly'] as const) {

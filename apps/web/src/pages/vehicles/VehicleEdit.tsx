@@ -146,6 +146,8 @@ export default function VehicleEdit() {
   const save = async () => {
     if (!f.plate?.trim()) return toast.error('Nhập biển số');
     if (!f.priceDay) return toast.error('Nhập giá thuê ngày');
+    if (f.ownerType === 'consigned' && !f.ownerName?.trim()) return toast.error('Nhập tên chủ xe ký gửi');
+    if (f.ownerType === 'consigned' && f.ownerSharePct == null) return toast.error('Nhập tỷ lệ chủ xe hưởng (%)');
     setSaving(true);
     try {
       const v = id ? await api.patch<Vehicle>(`/api/vehicles/${id}`, f) : await api.post<Vehicle>('/api/vehicles', f);
@@ -310,13 +312,13 @@ export default function VehicleEdit() {
           </Field>
           {f.ownerType === 'consigned' && (
             <>
-              <Field label="Tên chủ xe">
+              <Field label="Tên chủ xe" required>
                 <Input {...text('ownerName')} />
               </Field>
               <Field label="SĐT chủ xe">
                 <Input {...text('ownerPhone')} type="tel" />
               </Field>
-              <Field label="Chủ xe hưởng (%)">
+              <Field label="Chủ xe hưởng (%)" required>
                 <NumberInput value={f.ownerSharePct} onChange={(v) => set('ownerSharePct', v)} suffix="%" />
               </Field>
             </>

@@ -25,6 +25,7 @@ import { RentalStatusBadge } from '@/components/common';
 import { Page } from '@/components/layout/AppShell';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Checkbox, Segmented, Select, Switch } from '@/components/ui/form';
+import { CountUp } from '@/components/ui/count-up';
 import { Badge, Card, CardBody, CardHeader, Empty, ErrorBox, Notice, PageLoader, Stat } from '@/components/ui/misc';
 import { api, qs } from '@/lib/api';
 import { useAuth, useNow } from '@/lib/hooks';
@@ -67,7 +68,7 @@ function writePref(key: string, v: string) {
   }
 }
 
-const profitCls = (n: number) => (n < 0 ? 'text-red-600 dark:text-red-400' : n > 0 ? 'text-emerald-600 dark:text-emerald-400' : '');
+const profitCls = (n: number) => (n < 0 ? 'text-red-600 dark:text-red-400' : n > 0 ? 'text-emerald-700 dark:text-emerald-400' : '');
 
 export default function Cashflow() {
   const { isAdmin } = useAuth();
@@ -181,7 +182,7 @@ export default function Cashflow() {
       {isLoading || !data ? (
         !error && <PageLoader />
       ) : (
-        <div className={cn('space-y-4 transition-opacity', isFetching && 'opacity-60')}>
+        <div className={cn('anim-stagger space-y-4 transition-opacity', isFetching && 'opacity-60')}>
           <Kpis r={data} />
           {data.channelOwed.length > 0 && <ChannelOwedCard rows={data.channelOwed} />}
 
@@ -267,31 +268,31 @@ function Kpis({ r }: { r: CashflowReport }) {
   const sharedPart = r.shared?.expense ?? 0;
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="anim-stagger grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
           label="Tổng thu"
-          value={fmtVnd(t.income)}
+          value={<CountUp id="cash-income" value={t.income} />}
           sub={r.filter === 'shared' ? 'Thu khác không gắn xe' : `Tiền thuê ${fmtVnd(t.rent)}${t.otherIncome ? ` · khác ${fmtVnd(t.otherIncome)}` : ''}`}
           icon={ArrowDownLeft}
           tone="blue"
         />
         <Stat
           label="Chi vận hành"
-          value={fmtVnd(t.expense)}
+          value={<CountUp id="cash-expense" value={t.expense} />}
           sub={r.filter === 'all' ? `Theo xe ${fmtVnd(t.expense - sharedPart)} · chung ${fmtVnd(sharedPart)}` : t.income > 0 ? `Bằng ${pct(t.expense, t.income)}% số thu` : 'Chưa có thu trong kỳ'}
           icon={ArrowUpRight}
           tone="amber"
         />
         <Stat
           label="Lãi vận hành"
-          value={<span className={profitCls(t.profit)}>{fmtVnd(t.profit)}</span>}
+          value={<CountUp id="cash-profit" value={t.profit} className={profitCls(t.profit)} />}
           sub={t.profit < 0 ? 'Chi nhiều hơn thu' : margin != null ? `Biên lãi ${margin}%` : 'Thu − chi vận hành'}
           icon={t.profit < 0 ? TrendingDown : TrendingUp}
           tone={t.profit < 0 ? 'red' : 'green'}
         />
         <Stat
           label="Dòng tiền ròng"
-          value={<span className={profitCls(t.net)}>{fmtVnd(t.net)}</span>}
+          value={<CountUp id="cash-net" value={t.net} className={profitCls(t.net)} />}
           sub={t.capitalIn || t.capitalOut ? `Sau mua xe, trả góp ${fmtVnd(t.capitalOut)}${t.capitalIn ? ` · bán ${fmtVnd(t.capitalIn)}` : ''}` : 'Không có khoản vốn, trả góp'}
           icon={Wallet}
           tone="violet"
@@ -317,9 +318,9 @@ function MiniStat({ label, value, sub, warn }: { label: string; value: number; s
           {label}
           <span className="hidden sm:inline"> · hiện tại</span>
         </p>
-        <p className="max-w-full truncate text-[11px] text-subtle sm:order-3">{sub}</p>
+        <p className="max-w-full truncate text-xs text-subtle sm:order-3">{sub}</p>
       </div>
-      <p className={cn('tabular shrink-0 font-semibold sm:order-2 sm:mt-0.5 sm:text-base', warn && 'text-red-600 dark:text-red-400')}>{fmtVnd(value)}</p>
+      <p className={cn('tabular shrink-0 font-semibold sm:order-2 sm:mt-0.5 sm:text-base', warn && 'text-red-600 dark:text-red-400')}><CountUp id={`cash-mini-${label}`} value={value} className="justify-items-end sm:justify-items-start" /></p>
     </div>
   );
 }
@@ -415,7 +416,7 @@ function Bar({ value, scale, cls }: { value: number; scale: number; cls: string 
   const w = value > 0 ? Math.max(1.5, (value / scale) * 100) : 0;
   return (
     <span className="block h-1.5 overflow-hidden rounded-full bg-surface-2">
-      <span className={cn('block h-full rounded-full', cls)} style={{ width: `${w}%` }} />
+      <span className={cn('anim-grow-x block h-full rounded-full', cls)} style={{ width: `${w}%` }} />
     </span>
   );
 }
@@ -650,7 +651,7 @@ function CatRow({ label, amount, count, share, max, cls, capital, onClick }: { l
           </span>
         </span>
         <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-surface-2">
-          <span className={cn('block h-full rounded-full', cls)} style={{ width: `${Math.max(1.5, (Math.abs(amount) / max) * 100)}%` }} />
+          <span className={cn('anim-grow-x block h-full rounded-full', cls)} style={{ width: `${Math.max(1.5, (Math.abs(amount) / max) * 100)}%` }} />
         </span>
       </button>
     </li>
@@ -750,7 +751,7 @@ function LedgerItem({ l, onOpen }: { l: LedgerRow; onOpen: (l: LedgerRow) => voi
     </span>
   );
   const amount = (voided?: boolean) => (
-    <span className={cn('tabular shrink-0 text-right font-semibold whitespace-nowrap', isIn && 'text-emerald-600 dark:text-emerald-400', voided && 'text-subtle line-through')}>
+    <span className={cn('tabular shrink-0 text-right font-semibold whitespace-nowrap', isIn && 'text-emerald-700 dark:text-emerald-400', voided && 'text-subtle line-through')}>
       {isIn ? '+' : '−'}
       {fmtVnd(l.amount)}
     </span>

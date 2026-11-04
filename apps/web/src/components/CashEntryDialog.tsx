@@ -19,6 +19,8 @@ import {
   groupedCategories,
   parseMonthKey,
   recurringText,
+  staffCanRecord,
+  vehicleCategoryError,
   type CashCategory,
   type CashDirection,
   type CashMethod,
@@ -132,6 +134,9 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
   }, [state]);
 
   const { data: vehicles } = useQuery({ queryKey: ['vehicles'], queryFn: () => api.get<VehicleWithStatus[]>('/api/vehicles'), enabled: open });
+  // Trả chủ xe vẫn phải ghi được cho xe ký gửi đã trả về chủ (đã lưu trữ).
+  const needsConsigned = f.category === 'owner_payout';
+  const { data: archivedVehicles } = useQuery({ queryKey: ['vehicles', 'archived'], queryFn: () => api.get<Vehicle[]>('/api/vehicles?archived=1'), enabled: open && isAdmin && needsConsigned });
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }));
   const setRenew = (patch: Partial<Renew>) => setF((x) => ({ ...x, renew: { ...x.renew, ...patch } }));
 
@@ -149,7 +154,7 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
     set('category', categoriesOf(d)[0]);
   };
   const changeCategory = (c: CashCategory) => {
-    setF((x) => ({ ...x, category: c, vehicleId: CASH_CATEGORY[c].shared && mode === 'new' && !(state?.mode === 'new' && state.vehicleId) ? null : x.vehicleId, renew: NO_RENEW, maintenanceDone: [] }));
+    setF((x) => ({ ...x, category: c, vehicleId: (CASH_CATEGORY[c].shared && mode === 'new' && !(state?.mode === 'new' && state.vehicleId)) || vehicleCategoryError(c, vehicle) ? null : x.vehicleId, renew: NO_RENEW, maintenanceDone: [] }));
   };
 
   const inv = { invalidate: [['cashflow'], ['recurring'], ['dashboard'], ['vehicle'], ['maintenance']] };
@@ -200,6 +205,7 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
     async () => {
       if (!f.amount || f.amount <= 0) throw new Error('Nhập số tiền');
       if (!f.date) throw new Error('Chọn ngày');
+      if (needsConsigned && f.vehicleId == null) throw new Error('Chọn xe ký gửi cần trả tiền');
       if (isTemplate) {
         if (f.endMonth && f.endMonth < f.date.slice(0, 7)) throw new Error('Tháng kết thúc phải từ tháng bắt đầu trở đi');
         const r = recurring
@@ -228,8 +234,17 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
     mode === 'recurring' ? (recurring ? 'Sửa khoản định kỳ' : 'Thêm khoản định kỳ') : entry ? (voided ? 'Phiếu đã hủy' : `Sửa khoản ${dir === 'out' ? 'chi' : 'thu'}`) : `Ghi khoản ${dir === 'out' ? 'chi' : 'thu'}`;
   const pastCount = isTemplate && f.date && !recurring ? dueRecurringMonths({ startMonth: f.date.slice(0, 7), endMonth: f.endMonth || null, intervalMonths: f.intervalMonths, dayOfMonth: Number(f.date.slice(8, 10)) }).length : 0;
   const readOnly = voided;
-  const vehicleOptions = vehicles ?? [];
-  const missingVehicle = f.vehicleId != null && vehicles && !vehicle;
+  const notForConsigned = (c: CashCategory) => !!vehicleCategoryError(c, { ownerType: 'consigned' });
+  const vehicleOptions = needsConsigned
+    ? [...(vehicles ?? []), ...(archivedVehicles ?? [])].filter((v) => v.ownerType === 'consigned')
+    : notForConsigned(f.category)
+      ? (vehicles ?? []).filter((v) => v.ownerType !== 'consigned')
+      : (vehicles ?? []);
+  const missingVehicle = f.vehicleId != null && vehicles && !vehicleOptions.some((v) => v.id === f.vehicleId);
+  const categoryGroups = groupedCategories(dir)
+    // Giữ hạng mục đang chọn để phiếu cũ vẫn hiện đúng khi mở sửa.
+    .map((g) => ({ ...g, items: g.items.filter((c) => c === f.category || ((isAdmin || staffCanRecord(c)) && !(vehicle?.ownerType === 'consigned' && notForConsigned(c)))) }))
+    .filter((g) => g.items.length);
 
   return (
     <Dialog
@@ -302,7 +317,7 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Hạng mục" required>
               <Select value={f.category} onChange={(e) => changeCategory(e.target.value as CashCategory)}>
-                {groupedCategories(dir).map((g) => (
+                {categoryGroups.map((g) => (
                   <optgroup key={g.group} label={g.label}>
                     {g.items.map((c) => (
                       <option key={c} value={c}>
@@ -324,16 +339,42 @@ export function CashEntryDialog({ state, onClose }: { state: CashDialogState | n
             </Notice>
           )}
 
+          {f.category === 'insurance_claim' && vehicle?.ownerType === 'consigned' && (
+            <Notice tone="amber">Đây là xe ký gửi nên tiền bảo hiểm có thể thuộc về chủ xe. App vẫn tính khoản này vào thu của cửa hàng; nếu trả lại chủ xe, hãy ghi thêm khoản "Trả chủ xe ký gửi".</Notice>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Xe" hint={f.vehicleId == null ? 'Chi phí chung — xem báo cáo có thể chia đều cho các xe' : undefined}>
+            <Field
+              label="Xe"
+              required={needsConsigned}
+              hint={
+                needsConsigned
+                  ? vehicleOptions.length
+                    ? 'Chỉ hiện xe ký gửi, gồm cả xe đã trả về chủ'
+                    : 'Chưa có xe ký gửi nào'
+                  : vehicle?.ownerType === 'consigned'
+                    ? 'Xe ký gửi: bảo dưỡng, sửa chữa, giấy tờ do chủ xe tự trả nên không có trong Hạng mục'
+                    : cat.ownerPays
+                      ? 'Không có xe ký gửi vì chủ xe tự trả khoản này'
+                      : f.vehicleId == null
+                        ? 'Chi phí chung — xem báo cáo có thể chia đều cho các xe'
+                        : undefined
+              }
+            >
               <Select value={f.vehicleId ?? ''} onChange={(e) => set('vehicleId', e.target.value ? Number(e.target.value) : null)}>
-                <option value="">Chung — không gắn xe</option>
+                {needsConsigned ? (
+                  <option value="" disabled>
+                    Chọn xe ký gửi
+                  </option>
+                ) : (
+                  <option value="">Chung — không gắn xe</option>
+                )}
                 {vehicleOptions.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.plate} · {v.make} {v.model}
                   </option>
                 ))}
-                {missingVehicle && <option value={f.vehicleId!}>Xe đã lưu trữ (#{f.vehicleId})</option>}
+                {missingVehicle && <option value={f.vehicleId!}>{vehicle ? `${vehicle.plate} · ${vehicle.make} ${vehicle.model}` : `Xe đã lưu trữ (#${f.vehicleId})`}</option>}
               </Select>
             </Field>
             <Field label={isTemplate ? 'Bắt đầu từ ngày' : 'Ngày'} required hint={isTemplate && f.date ? `Ghi vào ngày ${Number(f.date.slice(8, 10))} mỗi kỳ` : undefined}>
@@ -438,7 +479,7 @@ function RenewFields({ kind, vehicle: v, date, odo, renew, onChange }: { kind: R
   const chips = (items: { label: string; apply: () => void }[]) => (
     <div className="mt-1.5 flex flex-wrap gap-1.5">
       {items.map((c) => (
-        <button key={c.label} type="button" onClick={c.apply} className="rounded-lg bg-surface-2 px-2 py-1 text-xs font-medium text-muted hover:bg-surface-3 hover:text-fg">
+        <button key={c.label} type="button" onClick={c.apply} className="min-h-10 rounded-lg bg-surface-2 px-2.5 text-sm font-medium text-muted hover:bg-surface-3 hover:text-fg lg:min-h-0 lg:px-2 lg:py-1 lg:text-xs">
           {c.label}
         </button>
       ))}
