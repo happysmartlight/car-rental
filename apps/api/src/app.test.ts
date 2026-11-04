@@ -1865,7 +1865,7 @@ describe('đối soát chủ xe ký gửi', () => {
     await pickup(id, 1, 200);
     const row = await rowOf();
     expect(row.lines).toHaveLength(1);
-    expect(row.lines[0]).toMatchObject({ rentalId: id, pct: 70, rent: 2_000_000, fee: 0, share: 1_400_000, status: 'active' });
+    expect(row.lines[0]).toMatchObject({ rentalId: id, pct: 70, rent: 2_000_000, share: 1_400_000, status: 'active' });
     expect(row).toMatchObject({ share: 1_400_000, remaining: 1_400_000 });
   });
 
@@ -1938,12 +1938,31 @@ describe('đối soát chủ xe ký gửi', () => {
     await giveBack(id, 10, 700, []);
   });
 
-  it('lượt qua Mioto: trừ phí sàn rồi mới chia', async () => {
-    const id = await book(con, 15, { channel: 'mioto', channelRef: 'MIDOISOAT', channelPrice: 3_000_000, channelFeePct: 15 });
-    await pickup(id, 15, 800);
-    const line = (await rowOf()).lines.find((l: any) => l.rentalId === id);
-    expect(line).toMatchObject({ rent: 3_000_000, fee: 450_000, pct: 50, share: 1_275_000 });
-    await giveBack(id, 15, 900, []);
+  it('Mioto không cho phép xe ký gửi: chặn đặt mới, đổi kênh, đổi xe và chuyển xe sang ký gửi', async () => {
+    const mioto = { channel: 'mioto', channelRef: 'MIDOISOAT', channelPrice: 3_000_000, channelFeePct: 15 };
+    const blocked = await call('POST', '/api/rentals', { vehicleId: con, customerId: cust, ...slot(15), depositRequired: 0, ...mioto });
+    expect(blocked.status).toBe(400);
+    expect(blocked.json.error).toContain('Mioto không cho phép xe ký gửi');
+
+    // Lượt trực tiếp của xe ký gửi không đổi sang Mioto được.
+    const direct = await book(con, 15);
+    expect((await call('PATCH', `/api/rentals/${direct}`, mioto)).status).toBe(400);
+    expect((await call('POST', `/api/rentals/${direct}/cancel`, { reason: 'Thử xong' })).status).toBe(200);
+
+    // Xe nhà vẫn đặt qua Mioto được, nhưng không đổi lượt đó sang xe ký gửi được.
+    const home = (await call('POST', '/api/vehicles', { plate: '51S-400.03', priceDay: 1_000_000, kmLimitDay: 0, odo: 100 })).json.id;
+    const viaApp = await book(home, 15, mioto);
+    expect((await call('PATCH', `/api/rentals/${viaApp}`, { vehicleId: con })).status).toBe(400);
+
+    // Còn lượt Mioto đang mở thì chưa chuyển xe sang ký gửi được; xong lượt đó thì được.
+    const full = (await call('GET', `/api/vehicles/${home}`)).json.vehicle;
+    const consign = { ...full, ownerType: 'consigned', ownerName: 'Anh Hùng', ownerSharePct: 60 };
+    const stop = await call('PATCH', `/api/vehicles/${home}`, consign);
+    expect(stop.status).toBe(400);
+    expect(stop.json.error).toContain('Mioto');
+    expect((await call('GET', `/api/vehicles/${home}`)).json.vehicle.ownerType).toBe('own');
+    expect((await call('POST', `/api/rentals/${viaApp}/cancel`, { reason: 'Thử xong' })).status).toBe(200);
+    expect((await call('PATCH', `/api/vehicles/${home}`, consign)).status).toBe(200);
   });
 
   it('xe chuyển từ nhà sang ký gửi: lượt đã giao trước đó không chia', async () => {
@@ -1960,12 +1979,12 @@ describe('đối soát chủ xe ký gửi', () => {
   it('báo cáo năm và một xe; tổng còn nợ các kỳ; Excel; nhân viên không xem được', async () => {
     const year = await report('2028');
     const y = year.ownerSettlement.rows.find((x: any) => x.vehicleId === con);
-    expect(y.share).toBe(1_610_000 + 1_000_000 + 1_275_000);
+    expect(y.share).toBe(1_610_000 + 1_000_000);
     expect(y.paid).toBe(1_610_000);
     const one = (await call('GET', `/api/cashflow?p=${month}&v=${con}`)).json;
-    expect(one.totals.ownerShare).toBe(1_610_000 + 1_000_000 + 1_275_000);
+    expect(one.totals.ownerShare).toBe(1_610_000 + 1_000_000);
     expect(one.ownerSettlement.rows).toHaveLength(1);
-    expect(one.ownerSettlement.owedAllTime).toBe(1_000_000 + 1_275_000);
+    expect(one.ownerSettlement.owedAllTime).toBe(1_000_000);
     const shared = (await call('GET', `/api/cashflow?p=${month}&v=shared`)).json;
     expect(shared.ownerSettlement.rows).toHaveLength(0);
     expect(shared.totals.ownerShare).toBe(0);
@@ -1983,7 +2002,7 @@ describe('đối soát chủ xe ký gửi', () => {
   it('trang Tổng quan: lãi tháng cũng đã trừ phần chủ xe', async () => {
     const { cashTotals } = await import('./services/cashflow.js');
     const t = cashTotals(at(`${month}-01T00:00`), at('2028-10-01T00:00'));
-    expect(t.ownerShare).toBe(1_610_000 + 1_000_000 + 1_275_000);
+    expect(t.ownerShare).toBe(1_610_000 + 1_000_000);
     expect(t.profit).toBe(t.income - t.expense - t.ownerShare);
   });
 });

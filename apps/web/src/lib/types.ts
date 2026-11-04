@@ -400,7 +400,7 @@ export interface OwnerSettlementRow {
   archived: boolean;
   ownerName: string | null;
   ownerPhone: string | null;
-  lines: { rentalId: number; code: string; status: RentalStatus; customerName: string; vehicleId: number; at: number; pct: number; rent: number; fee: number; share: number; customerDue: number }[];
+  lines: { rentalId: number; code: string; status: RentalStatus; customerName: string; vehicleId: number; at: number; pct: number; rent: number; share: number; customerDue: number }[];
   share: number;
   paid: number;
   /** Âm là đã trả dư. */

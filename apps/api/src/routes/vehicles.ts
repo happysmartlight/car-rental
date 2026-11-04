@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
@@ -205,6 +205,14 @@ export async function vehicleRoutes(app: FastifyInstance) {
     const before = db.select().from(schema.vehicles).where(eq(schema.vehicles.id, id)).get();
     if (!before) throw notFound('Không tìm thấy xe');
     ensureOwnerInfo({ ...before, ...body });
+    if (body.ownerType === 'consigned' && before.ownerType !== 'consigned') {
+      const viaApp = db
+        .select({ code: schema.rentals.code })
+        .from(schema.rentals)
+        .where(and(eq(schema.rentals.vehicleId, id), inArray(schema.rentals.status, ['booked', 'active']), ne(schema.rentals.channel, 'direct')))
+        .get();
+      if (viaApp) throw badRequest(`Xe còn lượt ${viaApp.code} đặt qua Mioto, mà Mioto không cho phép xe ký gửi. Xong lượt đó mới chuyển xe sang ký gửi được`);
+    }
     const patch: Partial<Vehicle> = { ...body, updatedAt: Date.now() };
     if (body.plate) {
       patch.plateKey = ensureUniquePlate(body.plate, id);

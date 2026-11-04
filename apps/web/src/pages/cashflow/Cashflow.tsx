@@ -339,7 +339,7 @@ function OwnerSettlementCard({ r, monthly, onPay }: { r: CashflowReport; monthly
   const { rows, owedAllTime } = r.ownerSettlement;
   return (
     <Card>
-      <CardHeader icon={Handshake} title="Đối soát chủ xe ký gửi" description={`${r.period.label}. Tính trên tiền thuê, vượt km, quá giờ, giảm giá, sau khi trừ phí sàn; không tính đền bù, phí giao xe, bù xăng và các khoản thu hộ.`} />
+      <CardHeader icon={Handshake} title="Đối soát chủ xe ký gửi" description={`${r.period.label}. Tính trên tiền thuê, vượt km, quá giờ, giảm giá; không tính đền bù, phí giao xe, bù xăng và các khoản thu hộ.`} />
       <ul className="divide-y divide-border">
         {rows.map((x) => (
           <li key={x.vehicleId} className="space-y-2 px-4 py-3 md:px-5">
@@ -382,7 +382,6 @@ function OwnerSettlementCard({ r, monthly, onPay }: { r: CashflowReport; monthly
                       </p>
                       <p className="tabular text-xs text-muted">
                         {fmtVnd(l.rent)}
-                        {l.fee > 0 && ` − phí sàn ${fmtVnd(l.fee)}`}
                         {` × ${l.pct}% = `}
                         <b className="text-fg">{fmtVnd(l.share)}</b>
                       </p>

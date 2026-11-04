@@ -181,16 +181,17 @@ export function Switch({ checked, onChange, label, description, disabled }: { ch
 }
 
 /** Nhóm nút chọn một (thay cho radio). */
-export function Segmented<T extends string>({ value, onChange, options, className }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; className?: string }) {
+export function Segmented<T extends string>({ value, onChange, options, className }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode; disabled?: boolean }[]; className?: string }) {
   return (
     <div className={cn('inline-flex rounded-xl bg-surface-2 p-1', className)}>
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
+          disabled={o.disabled}
           onClick={() => onChange(o.value)}
           className={cn(
-            'flex-1 rounded-lg px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors lg:py-1.5',
+            'flex-1 rounded-lg px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50 lg:py-1.5',
             value === o.value ? 'bg-surface text-fg shadow-card ring-1 ring-border dark:bg-hover dark:ring-border-strong' : 'text-muted hover:text-fg',
           )}
         >

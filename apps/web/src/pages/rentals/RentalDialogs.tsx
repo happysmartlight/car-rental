@@ -18,6 +18,7 @@ import type { Customer, Precheck, RentalDetail, RentalFineCheck, VehicleWithStat
 import type { VehiclePricing } from '@shared/pricing';
 import { cn, errorMessage } from '@/lib/utils';
 import {
+  channelVehicleError,
   CHARGE_KINDS,
   CHARGE_KIND_LABEL,
   COLLATERAL_KINDS,
@@ -599,7 +600,7 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
         {booked && (
           <Field label="Xe">
             <Select value={vehicleId} onChange={(e) => setVehicleId(Number(e.target.value))}>
-              {(vehicles ?? []).filter((v) => v.active).map((v) => (
+              {(vehicles ?? []).filter((v) => v.active && !channelVehicleError(channel, v)).map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.plate} · {v.make} {v.model}
                 </option>
@@ -637,7 +638,7 @@ export function EditRentalDialog({ d, open, onOpenChange }: DialogProps) {
             onChange={setChannel}
             options={[
               { value: 'direct', label: 'Khách trực tiếp' },
-              { value: 'mioto', label: 'Đặt qua Mioto' },
+              { value: 'mioto', label: 'Đặt qua Mioto', disabled: vehicles?.find((v) => v.id === vehicleId)?.ownerType === 'consigned' },
             ]}
           />
         )}

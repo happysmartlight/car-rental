@@ -51,6 +51,10 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
 /** Kênh đặt xe — mỗi kênh có mẫu hợp đồng/biên bản riêng. */
 export const RENTAL_CHANNELS = ['direct', 'mioto'] as const;
 export type RentalChannel = (typeof RENTAL_CHANNELS)[number];
+/** Mioto không cho phép xe ký gửi nên xe ký gửi chỉ nhận khách trực tiếp. */
+export function channelVehicleError(channel: RentalChannel, vehicle: { ownerType: 'own' | 'consigned' } | null | undefined): string | null {
+  return channel !== 'direct' && vehicle?.ownerType === 'consigned' ? 'Mioto không cho phép xe ký gửi, xe này chỉ nhận khách trực tiếp' : null;
+}
 export const RENTAL_CHANNEL_LABEL: Record<RentalChannel, string> = { direct: 'Trực tiếp', mioto: 'Mioto' };
 /** Phí sàn mặc định (%) khi chưa chỉnh trong Cài đặt. */
 export const DEFAULT_MIOTO_FEE_PCT = 15;

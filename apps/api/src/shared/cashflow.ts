@@ -283,10 +283,10 @@ export function pct(part: number, whole: number): number | null {
 /** Khoản tính phần chủ xe: tiền thuê và phụ phí theo mức dùng xe. Không gồm đền bù, phí giao xe, bù xăng, khoản thu hộ. */
 const OWNER_SHARE_KINDS = new Set(['rental', 'over_km', 'over_time', 'discount']);
 
-/** Phần chủ xe của một lượt: (tiền thuê − phí sàn) × %, làm tròn tới đồng. */
-export function ownerShareOf(charges: { kind: string; amount: number }[], channelFee: number, pct: number): { rent: number; share: number } {
+/** Phần chủ xe của một lượt: tiền thuê × %, làm tròn tới đồng. Xe ký gửi chỉ nhận khách trực tiếp nên không có phí sàn. */
+export function ownerShareOf(charges: { kind: string; amount: number }[], pct: number): { rent: number; share: number } {
   const rent = charges.filter((c) => OWNER_SHARE_KINDS.has(c.kind)).reduce((s, c) => s + c.amount, 0);
-  return { rent, share: Math.round((Math.max(0, rent - channelFee) * pct) / 100) };
+  return { rent, share: Math.round((Math.max(0, rent) * pct) / 100) };
 }
 
 /** Nhân viên chỉ ghi được chi phí vận hành, không ghi trả chủ xe, mua xe, trả góp hay khoản thu. */

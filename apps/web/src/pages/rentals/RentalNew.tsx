@@ -19,6 +19,7 @@ import { cn, errorMessage } from '@/lib/utils';
 import { cancelPolicyText, channelFeeFor, defaultFineHold } from '@shared/money';
 import { chargeDays } from '@shared/pricing';
 import {
+  channelVehicleError,
   COLLATERAL_KINDS,
   COLLATERAL_KIND_LABEL,
   DEFAULT_MIOTO_FEE_PCT,
@@ -560,9 +561,10 @@ export default function RentalNew() {
               onChange={setChannel}
               options={[
                 { value: 'direct', label: 'Khách trực tiếp' },
-                { value: 'mioto', label: 'Đặt qua Mioto' },
+                { value: 'mioto', label: 'Đặt qua Mioto', disabled: vehicle?.ownerType === 'consigned' },
               ]}
             />
+            {vehicle?.ownerType === 'consigned' && <p className="mb-3 text-xs text-muted">Xe ký gửi chỉ nhận khách trực tiếp vì Mioto không cho phép.</p>}
             {viaApp && (
               <Field label="Mã chuyến Mioto" hint="In làm số hợp đồng Mioto; tìm lượt thuê theo mã này" className="mb-3">
                 <Input value={channelRef} onChange={(e) => setChannelRef(e.target.value.toUpperCase())} placeholder="Mã trên app Mioto" autoCapitalize="characters" />
@@ -654,8 +656,9 @@ export default function RentalNew() {
                 </button>
               ))}
             </div>
+            {viaApp && activeVehicles.some((v) => v.ownerType === 'consigned') && <p className="mt-3 text-xs text-muted">Không hiện xe ký gửi vì Mioto không cho phép.</p>}
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              {activeVehicles.map((v) => {
+              {activeVehicles.filter((v) => !channelVehicleError(channel, v)).map((v) => {
                 const isBusy = busy.has(v.id);
                 const selected = v.id === vehicleId;
                 return (

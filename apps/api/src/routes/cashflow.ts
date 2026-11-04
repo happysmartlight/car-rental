@@ -283,7 +283,7 @@ function workbook(r: CashflowReport): Sheet[] {
     const lines = r.ownerSettlement.rows.flatMap((x) => x.lines.map((l) => ({ x, l })));
     sheets.push({
       name: 'Đối soát chủ xe',
-      intro: [`Đối soát chủ xe ký gửi — ${r.period.label} · ${scope}`, 'Tính trên tiền thuê, vượt km, quá giờ, giảm giá, sau khi trừ phí sàn. Không tính đền bù, phí giao xe, bù xăng, khoản thu hộ.'],
+      intro: [`Đối soát chủ xe ký gửi — ${r.period.label} · ${scope}`, 'Tính trên tiền thuê, vượt km, quá giờ, giảm giá. Không tính đền bù, phí giao xe, bù xăng, khoản thu hộ.'],
       columns: [
         { header: 'Xe', width: 13 },
         { header: 'Chủ xe', width: 22 },
@@ -291,17 +291,16 @@ function workbook(r: CashflowReport): Sheet[] {
         { header: 'Khách', width: 22 },
         { header: 'Ngày giao', width: 11 },
         { header: 'Tiền thuê', width: 15, money: true },
-        { header: 'Phí sàn', width: 13, money: true },
         { header: '%', width: 6 },
         { header: 'Phần chủ xe', width: 15, money: true },
       ],
       rows: [
-        ...lines.map(({ x, l }) => [x.plate, x.ownerName, l.code, l.customerName, fmtDate(l.at), l.rent, l.fee, l.pct, l.share]),
+        ...lines.map(({ x, l }) => [x.plate, x.ownerName, l.code, l.customerName, fmtDate(l.at), l.rent, l.pct, l.share]),
         [],
         ...r.ownerSettlement.rows.flatMap((x) => [
-          [x.plate, x.ownerName, 'Phần chủ xe', '', '', '', '', '', x.share],
-          [x.plate, x.ownerName, 'Đã trả', '', '', '', '', '', x.paid],
-          [x.plate, x.ownerName, x.remaining < 0 ? 'Trả dư' : 'Còn phải trả', '', '', '', '', '', Math.abs(x.remaining)],
+          [x.plate, x.ownerName, 'Phần chủ xe', '', '', '', '', x.share],
+          [x.plate, x.ownerName, 'Đã trả', '', '', '', '', x.paid],
+          [x.plate, x.ownerName, x.remaining < 0 ? 'Trả dư' : 'Còn phải trả', '', '', '', '', Math.abs(x.remaining)],
         ]),
       ],
     });

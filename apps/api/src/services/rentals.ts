@@ -8,7 +8,7 @@ import { badRequest, conflict, notFound } from '../lib/http.js';
 import { getSetting } from '../lib/settings.js';
 import { ageAt } from '../shared/cccd.js';
 import type { ChargeKind, CollateralKind, PaymentMethod, RentalChannel, RentalSource, RentalStatus } from '../shared/constants.js';
-import { RENTAL_CHANNEL_LABEL, RENTAL_STATUS } from '../shared/constants.js';
+import { channelVehicleError, RENTAL_CHANNEL_LABEL, RENTAL_STATUS } from '../shared/constants.js';
 import {
   channelFeeFor,
   channelMoney,
@@ -248,6 +248,8 @@ export function createRental(input: CreateRentalInput, userId: number): Rental {
   if (channel !== 'direct' && !(input.channelPrice && input.channelPrice > 0)) throw badRequest(`Nhập tiền thuê đúng như trên app ${RENTAL_CHANNEL_LABEL[channel]}`);
   const vehicle = getVehicle(input.vehicleId);
   if (!vehicle.active || vehicle.archivedAt) throw badRequest('Xe này đang ngưng hoạt động');
+  const channelError = channelVehicleError(channel, vehicle);
+  if (channelError) throw badRequest(channelError);
   const customer = getCustomer(input.customerId);
   if (customer.blacklisted && !input.allowBlacklisted) {
     throw conflict(`Khách ${customer.fullName} nằm trong danh sách đen`, 'blacklisted');
@@ -403,6 +405,10 @@ export function updateRental(id: number, input: UpdateRentalInput, userId: numbe
   }
   const channel = input.channel ?? r.channel;
   if (channel !== r.channel && r.status !== 'booked') throw badRequest('Đã giao xe, không đổi kênh đặt xe được nữa');
+  if (r.status === 'booked') {
+    const channelError = channelVehicleError(channel, getVehicle(next.vehicleId));
+    if (channelError) throw badRequest(channelError);
+  }
   const viaApp = channel !== 'direct';
   if (!viaApp && r.channel !== 'direct') {
     const payments = db.select().from(schema.payments).where(eq(schema.payments.rentalId, r.id)).all();
@@ -619,7 +625,7 @@ export function pickup(id: number, input: HandoverInput & { payments: NewPayment
     for (const c of input.collaterals) addCollateral(r.id, c, userId);
     return db
       .update(schema.rentals)
-      .set({ status: 'active', actualStart: input.at, handledBy: userId, ownerSharePct: vehicle.ownerType === 'consigned' ? vehicle.ownerSharePct : null, updatedAt: now })
+      .set({ status: 'active', actualStart: input.at, handledBy: userId, ownerSharePct: vehicle.ownerType === 'consigned' && r.channel === 'direct' ? vehicle.ownerSharePct : null, updatedAt: now })
       .where(eq(schema.rentals.id, r.id))
       .returning()
       .get();

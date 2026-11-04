@@ -853,16 +853,16 @@ describe('thu chi: kỳ báo cáo, khoản định kỳ, chia chi phí chung', (
 
 describe('phần chủ xe ký gửi', () => {
   const c = (kind: string, amount: number) => ({ kind, amount });
-  it('tính trên tiền thuê, vượt km, quá giờ, giảm giá, sau khi trừ phí sàn', () => {
-    expect(ownerShareOf([c('rental', 2_000_000), c('over_km', 300_000), c('over_time', 100_000), c('discount', -400_000)], 300_000, 70)).toEqual({ rent: 2_000_000, share: 1_190_000 });
+  it('tính trên tiền thuê, vượt km, quá giờ, giảm giá', () => {
+    expect(ownerShareOf([c('rental', 2_000_000), c('over_km', 300_000), c('over_time', 100_000), c('discount', -400_000)], 70)).toEqual({ rent: 2_000_000, share: 1_400_000 });
   });
   it('không tính đền bù, phí giao xe, bù xăng, vệ sinh, cầu đường, phạt, phí hủy', () => {
     const other = ['damage', 'accessory', 'delivery', 'fuel', 'cleaning', 'toll', 'fine', 'other', 'cancel_fee'].map((k) => c(k, 1_000_000));
-    expect(ownerShareOf([c('rental', 1_000_000), ...other], 0, 50)).toEqual({ rent: 1_000_000, share: 500_000 });
+    expect(ownerShareOf([c('rental', 1_000_000), ...other], 50)).toEqual({ rent: 1_000_000, share: 500_000 });
   });
-  it('làm tròn tới đồng, phí sàn lớn hơn tiền thuê thì phần chia bằng 0', () => {
-    expect(ownerShareOf([c('rental', 1_000_001)], 0, 33).share).toBe(330_000);
-    expect(ownerShareOf([c('rental', 100_000)], 200_000, 70).share).toBe(0);
+  it('làm tròn tới đồng, giảm giá nhiều hơn tiền thuê thì phần chia bằng 0', () => {
+    expect(ownerShareOf([c('rental', 1_000_001)], 33).share).toBe(330_000);
+    expect(ownerShareOf([c('rental', 100_000), c('discount', -200_000)], 70).share).toBe(0);
   });
 });
 

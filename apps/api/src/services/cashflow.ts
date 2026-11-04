@@ -279,7 +279,6 @@ export interface OwnerShareLine {
   pct: number;
   /** Tiền thuê, vượt km, quá giờ, giảm giá. */
   rent: number;
-  fee: number;
   share: number;
 }
 
@@ -311,13 +310,11 @@ function ownerShareLines(from: number, to: number, vehicleId?: number): OwnerSha
     )
     .all();
   return rows.map(({ r, customerName }) => {
-    const fee = effectiveChannelFee(r);
     const { rent, share } = ownerShareOf(
       charges.filter((c) => c.rentalId === r.id),
-      fee,
       r.ownerSharePct!,
     );
-    return { rentalId: r.id, code: r.code, status: r.status, customerName, vehicleId: r.vehicleId, at: r.actualStart!, pct: r.ownerSharePct!, rent, fee, share };
+    return { rentalId: r.id, code: r.code, status: r.status, customerName, vehicleId: r.vehicleId, at: r.actualStart!, pct: r.ownerSharePct!, rent, share };
   });
 }
 

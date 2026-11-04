@@ -3,11 +3,17 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.5.3] - 2026-11-04
+
+### Thay đổi
+- **Xe ký gửi chỉ nhận khách trực tiếp**, vì Mioto không cho phép xe ký gửi. App chặn khi đặt xe, sửa lượt và khi chuyển xe còn lượt Mioto đang mở sang ký gửi. Xe nhà vẫn đặt qua Mioto như cũ.
+- Phần chủ xe chỉ còn **tiền thuê × %**, không còn phí sàn trong đối soát và file Excel.
+
 ## [0.5.2] - 2026-11-04
 
 ### Mới
 - **Đối soát chủ xe ký gửi** trong Thu chi: phần chủ xe từng lượt, đã trả, còn phải trả, tổng còn nợ; nút **Ghi đã trả chủ xe** điền sẵn số tiền và tháng; có trong file Excel.
-- Phần chủ xe tính trên tiền thuê, vượt km, quá giờ, giảm giá, sau khi trừ phí sàn. Không tính đền bù, phí giao xe, phí hủy, bù xăng và các khoản thu hộ.
+- Phần chủ xe tính trên tiền thuê, vượt km, quá giờ, giảm giá. Không tính đền bù, phí giao xe, phí hủy, bù xăng và các khoản thu hộ.
 - **Lãi đã trừ phần chủ xe** ngay tháng giao xe, kể cả ở Tổng quan. Khi ghi đã trả, lãi không bị trừ thêm lần nữa.
 
 ### Lưu ý
