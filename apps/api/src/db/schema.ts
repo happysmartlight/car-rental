@@ -27,7 +27,7 @@ import type {
 } from '../shared/constants.js';
 import type { IdCardType } from '../shared/cccd.js';
 import type { CashCategory, CashDirection, CashMethod } from '../shared/cashflow.js';
-import type { PaymentDirection, PaymentPurpose } from '../shared/money.js';
+import type { PaymentDirection, PaymentPurpose, SettlementRecord } from '../shared/money.js';
 import type { EnergyMethod } from '../shared/pricing.js';
 
 const createdAt = () => integer('created_at').notNull();
@@ -284,6 +284,8 @@ export const rentals = sqliteTable(
     /** Cọc giữ lại chờ phạt nguội đã thỏa thuận khi đặt xe — in vào hợp đồng (null = lượt cũ, theo cài đặt). */
     fineHoldRequired: integer('fine_hold_required'),
     fineHoldDays: integer('fine_hold_days'),
+    /** Số liệu chốt lúc quyết toán + công nợ nếu khách chưa trả đủ (null = chưa quyết toán / lượt cũ). */
+    settlement: text('settlement', { mode: 'json' }).$type<SettlementRecord>(),
     /** Phụ kiện kèm lượt này, chỉnh lúc đặt xe; present=false = lượt này không kèm (null = theo danh sách của xe). */
     accessories: text('accessories', { mode: 'json' }).$type<HandoverAccessory[]>(),
     notes: text('notes'),

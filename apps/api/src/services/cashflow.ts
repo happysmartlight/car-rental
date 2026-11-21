@@ -5,7 +5,7 @@ import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from 'driz
 import { db, schema } from '../db/index.js';
 import type { CashEntry, RecurringCost, Rental, Vehicle } from '../db/schema.js';
 import { badRequest, notFound } from '../lib/http.js';
-import { CASH_CATEGORY, dueRecurringMonths, monthKeyOf, ownerShareOf, parseMonthKey, recurringDate, vehicleCategoryError, vnMonthStart, type CashCategory, type CashMethod, type Period } from '../shared/cashflow.js';
+import { CASH_CATEGORY, dueRecurringMonths, fmtMonthKey, monthKeyOf, ownerShareOf, parseMonthKey, recurringDate, vehicleCategoryError, vnMonthStart, type CashCategory, type CashMethod, type Period, type Quarter } from '../shared/cashflow.js';
 import { effectiveChannelFee, summarizeMoney, type MoneyPayment, type PaymentDirection } from '../shared/money.js';
 import type { PaymentMethod, RentalChannel, RentalSource, RentalStatus } from '../shared/constants.js';
 import { DAY_MS, vnDateKey } from '../shared/time.js';
@@ -256,6 +256,73 @@ export function rentFlows(from: number, to: number, vehicleId?: number): RentFlo
       vehicleId: r.vehicleId,
       customerName: c.fullName,
     }));
+}
+
+// ── Doanh thu theo quý (kê khai thuế hộ kinh doanh) ─────────────────────────
+
+/** direct: khách đặt trực tiếp · app: khách trả qua app (Mioto khai/khấu trừ thay) · app_direct: khách đặt qua app nhưng trả thẳng cho cửa hàng. */
+export type RevenueGroup = 'direct' | 'app' | 'app_direct';
+
+export interface RevenueLine extends RentFlow {
+  plate: string;
+  channel: RentalChannel;
+  group: RevenueGroup;
+}
+
+export interface RevenueMonth {
+  key: string;
+  label: string;
+  direct: number;
+  app: number;
+  appDirect: number;
+  /** Doanh thu tự kê khai. */
+  declared: number;
+}
+
+export interface RevenueReport {
+  quarter: Quarter;
+  /** Có tính tiền khách đặt qua app nhưng trả thẳng cho cửa hàng vào phần tự kê khai không. */
+  includeAppDirect: boolean;
+  months: RevenueMonth[];
+  totals: Omit<RevenueMonth, 'key' | 'label'>;
+  lines: RevenueLine[];
+}
+
+/** Doanh thu theo tiền thật nhận được trong quý (cùng cách tính với trang Thu chi), tách theo kênh để biết phần nào tự kê khai. */
+export function revenueReport(quarter: Quarter, includeAppDirect: boolean): RevenueReport {
+  const flows = rentFlows(quarter.start, quarter.end);
+  const ids = [...new Set(flows.map((f) => f.rentalId))];
+  const channels = new Map(
+    ids.length ? db.select({ id: schema.rentals.id, channel: schema.rentals.channel }).from(schema.rentals).where(inArray(schema.rentals.id, ids)).all().map((r) => [r.id, r.channel]) : [],
+  );
+  const plates = new Map(db.select({ id: schema.vehicles.id, plate: schema.vehicles.plate }).from(schema.vehicles).all().map((v) => [v.id, v.plate]));
+  const lines: RevenueLine[] = flows.map((f) => {
+    const channel = channels.get(f.rentalId) ?? 'direct';
+    return { ...f, plate: plates.get(f.vehicleId) ?? '', channel, group: channel === 'direct' ? 'direct' : f.method === 'mioto' ? 'app' : 'app_direct' };
+  });
+  const isDeclared = (g: RevenueGroup) => g === 'direct' || (includeAppDirect && g === 'app_direct');
+  const sumOf = (rows: RevenueLine[]) => {
+    const t = { direct: 0, app: 0, appDirect: 0, declared: 0 };
+    for (const l of rows) {
+      if (l.group === 'direct') t.direct += l.amount;
+      else if (l.group === 'app') t.app += l.amount;
+      else t.appDirect += l.amount;
+      if (isDeclared(l.group)) t.declared += l.amount;
+    }
+    return t;
+  };
+  return {
+    quarter,
+    includeAppDirect,
+    months: quarter.months.map((key) => ({ key, label: fmtMonthKey(key), ...sumOf(lines.filter((l) => monthKeyOf(l.at) === key)) })),
+    totals: sumOf(lines),
+    lines,
+  };
+}
+
+/** Khoản này có nằm trong doanh thu tự kê khai của báo cáo không. */
+export function revenueDeclared(r: Pick<RevenueReport, 'includeAppDirect'>, l: Pick<RevenueLine, 'group'>): boolean {
+  return l.group === 'direct' || (r.includeAppDirect && l.group === 'app_direct');
 }
 
 function entriesIn(from: number, to: number, filter: VehicleFilter): CashEntry[] {

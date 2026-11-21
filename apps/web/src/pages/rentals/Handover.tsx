@@ -2,12 +2,12 @@
 // Đang làm dở mà iPhone tải lại trang (mở camera nhiều lần, có cuộc gọi…) → mở lại vẫn còn nguyên (nháp trên máy).
 
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownToLine, ArrowUpFromLine, Check, History, MapPin, MapPinOff, Plus, Trash2 } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, Check, History, MapPin, MapPinOff, Plus, Receipt, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
 import { Page } from '@/components/layout/AppShell';
-import { FuelGauge, SignaturePad } from '@/components/common';
+import { BatteryInput, FuelGauge, SignaturePad } from '@/components/common';
 import { Gallery, PhotoInput } from '@/components/images';
 import { AccessoryAdder, handoverItems } from '@/components/RentalAccessories';
 import { Button } from '@/components/ui/button';
@@ -21,11 +21,13 @@ import { useSettings } from '@/lib/hooks';
 import type { HandoverAccessory, RentalDetail, VehicleAccessoriesData } from '@/lib/types';
 import { cn, errorMessage } from '@/lib/utils';
 import { mergeAccessoryPlan } from '@shared/accessories';
+import { dueAfterDeposit, rentalAdvanceDeposit, rentalFineHold } from '@shared/money';
 import { CHARGE_KINDS, CHARGE_KIND_LABEL, DAMAGE_ZONES, PHOTO_SLOTS, type ChargeKind } from '@shared/constants';
 import { chargeDays, chargingCharge, energyCharge, freeChargesFor, rentalChargingPolicy, type EnergyMethod, type VehiclePricing } from '@shared/pricing';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { fmtDateTime, fmtDuration, fmtTime } from '@shared/time';
 import { useQueryClient } from '@tanstack/react-query';
+import { HandoverReview } from './HandoverReview';
 
 interface Damage {
   zone: string;
@@ -68,6 +70,8 @@ interface HandoverDraft {
   energyMode?: EnergyMode | null;
   collect: Collect;
   collectDeposit: Collect;
+  /** Nhận xe: đã tra phí thu phí không dừng (ETC) trong thời gian thuê. */
+  etcChecked?: boolean;
 }
 
 const DRAFT_TTL = 24 * 3600_000;
@@ -145,7 +149,9 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
   const [energyMode, setEnergyMode] = useState<EnergyMode | null>(null);
   const [collect, setCollect] = useState<Collect>({ amount: null, method: 'transfer' });
   const [collectDeposit, setCollectDeposit] = useState<Collect>({ amount: null, method: 'transfer' });
+  const [etcChecked, setEtcChecked] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const [initialized, setInitialized] = useState(false);
   /** Người dùng đã đụng vào form — chỉ từ lúc này mới lưu nháp (mở ra xem rồi thoát thì thôi). */
   const [touched, setTouched] = useState(false);
@@ -211,6 +217,7 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
       setEnergyMode(x.energyMode ?? null);
       setCollect(x.collect);
       setCollectDeposit(x.collectDeposit);
+      setEtcChecked(!!x.etcChecked);
       setRestoredAt(saved.savedAt);
       setTouched(true);
       return;
@@ -218,7 +225,8 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
     if (isPickup) {
       setOdo(d.vehicle.odo);
       setChecklist(Object.fromEntries(settings.rules.checklist.map((c) => [c, true])));
-      setCollect({ amount: Math.max(0, d.money.due) || null, method: 'transfer' });
+      // Tiền thuê cần thu đã trừ cọc giữ xe (cọc khách gửi trước); cọc thu lúc giao là cọc phạt nguội, không trừ.
+      setCollect({ amount: Math.max(0, dueAfterDeposit(d.money, d.money.depositHeld).net) || null, method: 'transfer' });
       setCollectDeposit({ amount: Math.max(0, d.rental.depositRequired - d.money.depositHeld) || null, method: 'transfer' });
     } else {
       setFuel(pickupHo?.fuelLevel ?? 100);
@@ -282,7 +290,7 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
     },
     [d, isPickup, geoNow],
   );
-  const draft: HandoverDraft = { at, odo, fuel, photos, extraPhotos, damages, checklist, notes, signature: signatureUrl, charges, acc, chargeSessions, energyMode, collect, collectDeposit };
+  const draft: HandoverDraft = { at, odo, fuel, photos, extraPhotos, damages, checklist, notes, signature: signatureUrl, charges, acc, chargeSessions, energyMode, collect, collectDeposit, etcChecked };
   useDraftAutosave(draftKey, draft, initialized && touched && !wrongStatus && !saving && !done.current);
   const touch = () => !touched && setTouched(true);
   const startOver = async () => {
@@ -294,15 +302,26 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
 
   if (isLoading || !d) return <PageLoader />;
   const r = d.rental;
+  const isEv = d.vehicle.fuel === 'electric';
   const missingPhotos = PHOTO_SLOTS.filter((s) => !photos[s.key]).length;
   const extraTotal = charges.reduce((s, c) => s + (c.amount ?? 0), 0);
-  const due = Math.max(0, d.money.due);
+  // Còn phải trả = tổng − đã trả − cọc giữ xe (cọc gửi trước lúc giao xe); cọc phạt nguội thu lúc giao không trừ.
+  const advance = rentalAdvanceDeposit(d);
+  const owed = dueAfterDeposit(d.money, advance);
+  const due = Math.max(0, owed.net);
   // Trả một phần thì làm tròn nghìn đồng; 100% giữ đúng số còn phải trả.
   const shareAmount = (pct: number) => (pct === 100 ? due : Math.round((due * pct) / 100 / 1000) * 1000);
 
-  const submit = async () => {
+  const chargeLines = charges.filter((c) => c.amount).map((c) => ({ kind: c.kind, description: c.description || CHARGE_KIND_LABEL[c.kind], amount: c.amount! }));
+  /** Bấm "Xác nhận" → hiện bảng tóm tắt để xem lại một lượt, đồng ý mới ghi. */
+  const review = () => {
     if (!at) return toast.error('Chọn thời điểm');
     if (odo == null) return toast.error('Nhập số ODO');
+    setReviewing(true);
+  };
+
+  const submit = async () => {
+    if (!at || odo == null) return;
     setSaving(true);
     try {
       const sigBlob = signature ?? (signatureUrl ? await dataUrlToBlob(signatureUrl) : null);
@@ -337,13 +356,14 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
         toast.success('Đã giao xe');
         navigate(`/rentals/${id}`, { replace: true });
       } else {
-        await api.post(`/api/rentals/${id}/return`, { ...body, charges: charges.filter((c) => c.amount).map((c) => ({ kind: c.kind, description: c.description || CHARGE_KIND_LABEL[c.kind], amount: c.amount })) });
+        await api.post(`/api/rentals/${id}/return`, { ...body, charges: chargeLines });
         finish();
         toast.success('Đã nhận lại xe — tiếp theo: quyết toán');
         navigate(`/rentals/${id}?settle=1`, { replace: true });
       }
       void qc.invalidateQueries();
     } catch (err) {
+      setReviewing(false);
       toast.error(errorMessage(err));
     } finally {
       setSaving(false);
@@ -388,9 +408,10 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
             </div>
             <div className="mt-4">
               <p className="mb-1.5 text-sm font-medium">
-                Mức xăng / pin {!isPickup && pickupHo && <span className="font-normal text-muted">(lúc giao {pickupHo.fuelLevel}%)</span>}
+                {isEv ? 'Mức pin' : d.vehicle.fuel === 'diesel' ? 'Mức dầu' : 'Mức xăng'} {!isPickup && pickupHo && <span className="font-normal text-muted">(lúc giao {pickupHo.fuelLevel}%)</span>}
               </p>
-              <FuelGauge value={fuel} onChange={setFuel} />
+              {isEv ? <BatteryInput value={fuel} onChange={setFuel} /> : <FuelGauge value={fuel} onChange={setFuel} />}
+              {isEv && <p className="mt-1 text-xs text-muted">Kéo thanh hoặc gõ đúng số % trên màn hình xe.</p>}
             </div>
           </Step>
 
@@ -500,7 +521,7 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
           </Step>
 
           {isPickup ? (
-            <Step n={5} title="Thu tiền khi giao xe" description={`Còn phải trả ${fmtVnd(due)} · cọc đã nhận ${fmtVnd(d.money.depositHeld)}/${fmtVnd(r.depositRequired)}`}>
+            <Step n={5} title="Thu tiền khi giao xe" description={`Còn phải trả ${fmtVnd(due)}${owed.credit > 0 ? ` (đã trừ ${fmtVnd(owed.credit)} cọc giữ xe)` : ''} · cọc đã nhận ${fmtVnd(d.money.depositHeld)}/${fmtVnd(r.depositRequired)}`}>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Thu tiền thuê">
                   <MoneyInput value={collect.amount} onChange={(v) => setCollect({ ...collect, amount: v })} />
@@ -529,6 +550,17 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
             </Step>
           ) : (
             <Step n={5} title="Phụ phí" description={`Tự gợi ý trễ giờ, vượt km${charging ? ', sạc pin, tiền điện' : ''} — sửa được. Thêm xăng, vệ sinh, hư hỏng nếu có.`}>
+              {pickupHo && (
+                <div className="mb-4 rounded-2xl bg-surface-2 p-3">
+                  <p className="flex items-start gap-2 text-sm">
+                    <Receipt className="mt-0.5 size-4 shrink-0 text-muted" />
+                    <span>
+                      Tra phí qua trạm thu phí không dừng (ETC) của <b>{d.vehicle.plate}</b> từ <b className="tabular">{fmtDateTime(pickupHo.at)}</b> đến <b className="tabular">{fmtDateTime(at ?? Date.now())}</b> trên app VETC / ePass — có phí thì bấm "{CHARGE_KIND_LABEL.toll}" bên dưới để thu khách.
+                    </span>
+                  </p>
+                  <Checkbox className="mt-1" checked={etcChecked} onChange={setEtcChecked} label="Đã tra phí ETC" />
+                </div>
+              )}
               {charging && (
                 <div className="mb-4 grid gap-4 sm:grid-cols-2">
                   <Field
@@ -611,12 +643,41 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
           </Step>
 
           <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 lg:bottom-4">
-            <Button size="lg" className="w-full shadow-pop" onClick={submit} loading={saving}>
+            <Button size="lg" className="w-full shadow-pop" onClick={review} loading={saving}>
               {isPickup ? <ArrowUpFromLine /> : <ArrowDownToLine />} {isPickup ? 'Xác nhận giao xe' : 'Xác nhận nhận xe'}
               {missingPhotos > 0 && <span className="text-xs opacity-80">(thiếu {missingPhotos} ảnh)</span>}
               {missingPhotos === 0 && <Check />}
             </Button>
           </div>
+          {at && odo != null && (
+            <HandoverReview
+              open={reviewing}
+              onOpenChange={(o) => !saving && setReviewing(o)}
+              onConfirm={submit}
+              saving={saving}
+              kind={kind}
+              d={d}
+              advance={advance}
+              fineHold={settings ? rentalFineHold(r, settings.rules).amount : null}
+              v={{
+                at,
+                odo,
+                fuel,
+                photosTaken: PHOTO_SLOTS.length - missingPhotos,
+                photoSlots: PHOTO_SLOTS.length,
+                extraPhotos: extraPhotos.length,
+                damages: damages.filter((x) => x.zone && (x.note || x.fileId)),
+                checklist,
+                acc,
+                signed: !!(signature ?? signatureUrl),
+                notes,
+                collect,
+                collectDeposit,
+                charges: isPickup ? [] : chargeLines,
+                etcChecked,
+              }}
+            />
+          )}
         </div>
       )}
     </Page>

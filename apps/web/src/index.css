@@ -197,6 +197,55 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Thanh trượt mức pin: phần đã đầy tô theo --level, tới --pct; núm to dễ kéo trên điện thoại (vùng chạm 40px). */
+@utility range-level {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 2.5rem;
+  background: transparent;
+  cursor: pointer;
+  &:focus {
+    outline: none;
+  }
+  &::-webkit-slider-runnable-track {
+    height: 0.75rem;
+    border-radius: 999px;
+    background: linear-gradient(to right, var(--level) var(--pct), var(--surface-3) var(--pct));
+  }
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 1.75rem;
+    height: 1.75rem;
+    margin-top: -0.5rem;
+    border-radius: 999px;
+    background: #fff;
+    border: 3px solid var(--level);
+    box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+  }
+  &:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px var(--ring);
+  }
+  &::-moz-range-track {
+    height: 0.75rem;
+    border-radius: 999px;
+    background: var(--surface-3);
+  }
+  &::-moz-range-progress {
+    height: 0.75rem;
+    border-radius: 999px;
+    background: var(--level);
+  }
+  &::-moz-range-thumb {
+    box-sizing: border-box;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 999px;
+    background: #fff;
+    border: 3px solid var(--level);
+    box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+  }
+}
+
 @utility pt-safe {
   padding-top: env(safe-area-inset-top);
 }

@@ -19,7 +19,7 @@ import {
   vehicleChargingPolicy,
   type VehiclePricing,
 } from './pricing.js';
-import { cancelForfeit, cancelMessage, cancelPolicyText, defaultFineHold, monthPeriods, monthsNote, planCancellation, planSettlement, rentalFineHold, summarizeMoney } from './money.js';
+import { advanceDeposit, cancelForfeit, cancelMessage, cancelPolicyText, defaultFineHold, dueAfterDeposit, monthPeriods, monthsNote, planCancellation, planSettlement, rentalFineHold, summarizeMoney } from './money.js';
 import { mergeAccessoryPlan } from './accessories.js';
 import { CAR_MAKES, findCarMake, findCarModel } from './carModels.js';
 import { suggestBookingSlot } from './booking.js';
@@ -38,9 +38,13 @@ import {
   ownerShareOf,
   nextRecurringDate,
   parsePeriod,
+  parseQuarter,
+  quarterKeyOf,
+  quarterOfPeriod,
   recurringDate,
   recurringText,
   shiftPeriod,
+  shiftQuarter,
   splitEvenly,
   switchPeriodKind,
 } from './cashflow.js';
@@ -440,6 +444,10 @@ describe('sổ tiền & quyết toán', () => {
     expect(s.depositHeld).toBe(5000000);
     const plan = planSettlement(s, 2000000);
     expect(plan).toEqual({ offset: 300000, collect: 0, refundRent: 0, keepHold: 2000000, refundDeposit: 2700000 });
+    // Chỉ cấn trừ cọc giữ xe (gửi trước lúc giao); cọc phạt nguội (thu lúc giao) giữ lại / hoàn, không trừ vào tiền thuê.
+    expect(planSettlement(s, 2000000, 0)).toEqual({ offset: 0, collect: 300000, refundRent: 0, keepHold: 2000000, refundDeposit: 3000000 });
+    const small = summarizeMoney([{ amount: 1400000 }], [{ direction: 'in', purpose: 'deposit', amount: 300000 }, { direction: 'in', purpose: 'deposit', amount: 2000000 }]);
+    expect(planSettlement(small, 2000000, 300000)).toEqual({ offset: 300000, collect: 1100000, refundRent: 0, keepHold: 2000000, refundDeposit: 0 });
   });
   it('phiếu đã hủy không tính', () => {
     const s = summarizeMoney([{ amount: 1000 }], [{ direction: 'in', purpose: 'rent', amount: 1000, voidedAt: 1 }]);
@@ -642,9 +650,12 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
     ret: null,
     charges: rent,
     money: summarizeMoney(rent, paid),
+    fineHold: { amount: 2000000, days: 15 },
     graceMinutes: 60,
     shopName: 'Xe Happy',
   };
+  /** Đã trả 1 triệu tiền thuê + 2,5 triệu cọc: 500k gửi trước (cọc giữ xe), 2 triệu nhận lúc giao xe (cọc phạt nguội). */
+  const partDeposit = [paid[0], { direction: 'in' as const, purpose: 'deposit' as const, amount: 2500000 }];
   const shop = { name: 'Xe Happy', phone: '0901 234 567', bank: { name: 'Vietcombank', account: '0123456789', holder: 'NGUYEN VAN B' } };
 
   it('giai đoạn gửi được theo trạng thái', () => {
@@ -656,17 +667,48 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
   });
 
   it('giao xe: hẹn trả, km tới ODO bao nhiêu, hiện trạng, lượt sạc, còn phải trả kèm chuyển khoản', () => {
-    const doc = buildRentalShare(base);
+    const doc = buildRentalShare({ ...base, money: summarizeMoney(rent, partDeposit), advanceDeposit: 500000 });
     const text = rentalShareText(doc, shop);
     expect(text).toContain('XÁC NHẬN GIAO XE — HD-2026-0001');
     expect(text).toContain('• Hẹn trả: 08:00 04/12/2026');
     expect(text).toContain('• Giới hạn quãng đường: 900 km (đến ODO 1.900)');
     expect(text).toContain('• Hiện trạng có sẵn: Cản trước: trầy 5cm');
-    expect(text).toContain('• Còn phải trả: 2.000.000đ');
+    expect(text).toContain('• Tiền cọc đã nhận: 2.500.000đ / 5.000.000đ');
+    expect(text).toContain('• Trừ tiền cọc giữ xe: −500.000đ');
+    expect(text).toContain('• Còn phải trả: 1.500.000đ');
+    expect(text).toContain('Tiền cọc 2.000.000đ nhận lúc giao xe là cọc phạt nguội, không trừ vào tiền thuê');
     expect(text).toContain('trả trễ tính 150.000đ/giờ');
     expect(text).toContain('chuyến 3 ngày được sạc miễn phí 2 lượt');
-    expect(text).toContain('💳 Chuyển khoản 2.000.000đ (còn phải trả): Vietcombank 0123456789 — NGUYEN VAN B, nội dung: HD-2026-0001');
+    expect(text).toContain('💳 Chuyển khoản 1.500.000đ (còn phải trả): Vietcombank 0123456789 — NGUYEN VAN B, nội dung: HD-2026-0001');
     expect(doc.photos).toEqual(['f1']);
+  });
+
+  it('còn phải trả = tổng − đã trả − cọc giữ xe (gửi trước lúc giao); cọc phạt nguội không trừ', () => {
+    const total = [{ kind: 'rental' as const, description: 'Tiền thuê', amount: 1400000 }];
+    const money = summarizeMoney(total, [{ direction: 'in', purpose: 'deposit', amount: 300000 }]);
+    const shown = (advanceDeposit?: number) => rentalShareText(buildRentalShare({ ...base, rental: { ...base.rental, depositRequired: 300000 }, charges: total, money, advanceDeposit }), shop);
+    // Khách gửi trước 300k → cọc giữ xe, trừ hết (đúng ca trong ảnh: 1.400.000 − 300.000).
+    expect(shown(300000)).toContain('• Trừ tiền cọc giữ xe: −300.000đ');
+    expect(shown(300000)).toContain('• Còn phải trả: 1.100.000đ');
+    expect(shown(300000)).toContain('💳 Chuyển khoản 1.100.000đ');
+    expect(shown()).toContain('• Còn phải trả: 1.100.000đ');
+    // 300k nhận lúc giao xe → cọc phạt nguội, không trừ.
+    expect(shown(0)).not.toContain('Trừ tiền cọc giữ xe');
+    expect(shown(0)).toContain('• Còn phải trả: 1.400.000đ');
+    expect(shown(0)).toContain('Tiền cọc 300.000đ nhận lúc giao xe là cọc phạt nguội');
+    // Cọc nhiều hơn số còn nợ: chỉ trừ tới đủ, phần dư hoàn khi quyết toán; không trừ quá cọc đang giữ.
+    expect(dueAfterDeposit({ due: 100000, depositHeld: 5000000 }, 5000000)).toEqual({ credit: 100000, net: 0 });
+    expect(dueAfterDeposit({ due: 1400000, depositHeld: 200000 }, 300000)).toEqual({ credit: 200000, net: 1200000 });
+    expect(dueAfterDeposit({ due: -50000, depositHeld: 5000000 }, 5000000)).toEqual({ credit: 0, net: -50000 });
+    // Phân loại theo lúc ghi sổ so với lúc ghi biên bản giao xe; phiếu hủy không tính.
+    const pays = [
+      { direction: 'in' as const, purpose: 'deposit' as const, amount: 300000, createdAt: 100 },
+      { direction: 'in' as const, purpose: 'deposit' as const, amount: 999, createdAt: 150, voidedAt: 160 },
+      { direction: 'in' as const, purpose: 'rent' as const, amount: 500000, createdAt: 180 },
+      { direction: 'in' as const, purpose: 'deposit' as const, amount: 2000000, createdAt: 200 },
+    ];
+    expect(advanceDeposit(pays, 200)).toBe(300000);
+    expect(advanceDeposit(pays, null)).toBe(2300000);
   });
 
   it('nhận xe: trễ giờ, km đã đi, thiếu phụ kiện, hư hỏng mới, phần trừ vào cọc', () => {
@@ -694,7 +736,9 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
     expect(text).toContain('• Hư hỏng mới: Gương trái: nứt');
     expect(text).not.toContain('Cản trước');
     expect(text).toContain('• Tổng cộng: 3.450.000đ');
-    expect(text).toContain('Khoản 2.450.000đ còn phải trả sẽ được trừ vào tiền cọc khi quyết toán.');
+    expect(text).toContain('• Trừ tiền cọc giữ xe: −2.450.000đ');
+    expect(text).toContain('• Còn phải trả: 0đ');
+    expect(text).toContain('Khoản 2.450.000đ được trừ vào tiền cọc giữ xe khi quyết toán.');
     expect(doc.pay).toBeNull();
   });
 
@@ -735,7 +779,8 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
     expect(text).toContain('• Nhận xe: 08:00 01/12/2026');
     expect(text).toContain('• Trả xe: 08:00 04/12/2026');
     expect(text).toContain('• Giao xe tận nơi: 12 Nguyễn Huệ, Q1');
-    expect(text).toContain('• Tiền thuê còn lại: 3.000.000đ');
+    expect(text).toContain('• Trừ tiền cọc giữ xe: −2.000.000đ');
+    expect(text).toContain('• Tiền thuê còn lại: 1.000.000đ');
     expect(text).toContain('• Tiền cọc: 2.000.000đ / 5.000.000đ (còn thiếu 3.000.000đ)');
     expect(text).toContain('mang theo: CCCD + GPLX bản gốc');
     expect(text).toContain('giữ lại 2.000.000đ tiền cọc trong 15 ngày');
@@ -754,7 +799,8 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
       stage: 'extend',
       rental: { ...base.rental, scheduledEnd: at('2026-12-05T08:00'), kmLimit: 1200 },
       charges,
-      money: summarizeMoney(charges, paid),
+      money: summarizeMoney(charges, partDeposit),
+      advanceDeposit: 500000,
       extension: { oldEnd: at('2026-12-04T08:00'), newEnd: at('2026-12-05T08:00'), oldTotal: 3000000, newTotal: 4000000 },
     });
     const text = rentalShareText(doc, shop);
@@ -764,8 +810,9 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
     expect(text).toContain('• Gia hạn thêm: 1 ngày');
     expect(text).toContain('• Giới hạn quãng đường: 1.200 km (đến ODO 2.200)');
     expect(text).toContain('• Tăng thêm: 1.000.000đ');
-    expect(text).toContain('• Còn phải trả: 3.000.000đ');
-    expect(doc.pay).toMatchObject({ amount: 3000000, note: 'HD-2026-0001' });
+    expect(text).toContain('• Trừ tiền cọc giữ xe: −500.000đ');
+    expect(text).toContain('• Còn phải trả: 2.500.000đ');
+    expect(doc.pay).toMatchObject({ amount: 2500000, note: 'HD-2026-0001' });
   });
 
   it('báo phạt nguội: giờ, lỗi, mức phạt, mình đã nộp thay thì xin hoàn lại kèm QR', () => {
@@ -949,5 +996,24 @@ describe('thuê tháng: thu tiền từng tháng', () => {
       [3_000_000, 0],
     ]);
     expect(monthPeriods(start, at('2025-08-05T05:30'), 3, 18_000_000, 54_000_000, 60_000_000).every((p) => p.paid === p.amount)).toBe(true);
+  });
+});
+
+describe('quý kê khai thuế (giờ VN)', () => {
+  it('ranh giới quý theo giờ VN, chuyển quý, quý của kỳ đang xem', () => {
+    const q = parseQuarter('2026-Q4')!;
+    expect(q).toMatchObject({ year: 2026, q: 4, label: 'Quý 4/2026', months: ['2026-10', '2026-11', '2026-12'] });
+    expect(q.start).toBe(vnLocalInputToMs('2026-10-01T00:00'));
+    expect(q.end).toBe(vnLocalInputToMs('2027-01-01T00:00'));
+    // 00:10 ngày 1/4 giờ VN là quý 2 dù giờ UTC vẫn còn ngày 31/3.
+    expect(quarterKeyOf(vnLocalInputToMs('2026-03-31T23:30'))).toBe('2026-Q1');
+    expect(quarterKeyOf(vnLocalInputToMs('2026-04-01T00:10'))).toBe('2026-Q2');
+    expect(shiftQuarter('2026-Q4', 1)).toBe('2027-Q1');
+    expect(shiftQuarter('2026-Q1', -1)).toBe('2025-Q4');
+    expect(quarterOfPeriod('2026-08')).toBe('2026-Q3');
+    expect(quarterOfPeriod('2026', vnLocalInputToMs('2026-05-10T10:00'))).toBe('2026-Q2');
+    expect(quarterOfPeriod('2025', vnLocalInputToMs('2026-05-10T10:00'))).toBe('2025-Q4');
+    expect(parseQuarter('2026-Q5')).toBeNull();
+    expect(parseQuarter('2026-4')).toBeNull();
   });
 });

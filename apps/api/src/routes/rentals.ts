@@ -379,6 +379,8 @@ export async function rentalRoutes(app: FastifyInstance) {
         fineHoldDays: zFineHoldDays.optional(),
         returnCollaterals: z.boolean().default(true),
         note: zOptText,
+        debtDueAt: zMs.nullable().optional(),
+        debtNote: zOptText,
       }),
       req.body,
     );

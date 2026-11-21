@@ -50,6 +50,7 @@ import { PAYMENT_METHOD_LABEL, RENTAL_CHANNEL_LABEL, RENTAL_SOURCE_LABEL } from 
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { WEEKDAY_LONG, fmtDate, fmtDateTime, vnDateKey, vnParts } from '@shared/time';
 import { CashChart, CashLegend, CashTrendTable } from './CashChart';
+import { QuarterRevenueCard } from './QuarterRevenue';
 
 const ALLOC_KEY = 'cash.allocateShared';
 const VIEW_KEY = 'cash.trendView';
@@ -251,6 +252,7 @@ export default function Cashflow() {
           </div>
 
           {data.channels.rows.length > 0 && <ChannelsCard r={data} />}
+          {data.filter === 'all' && <QuarterRevenueCard period={period} />}
 
           <div ref={ledgerRef} className="scroll-mt-20">
             <LedgerCard r={data} cat={ledgerCat} onCat={setLedgerCat} onOpen={(l) => l.kind === 'entry' && setDialog({ mode: 'edit', entry: l.entry, recurringLabel: l.recurring?.description ?? null })} />

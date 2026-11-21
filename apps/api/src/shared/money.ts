@@ -57,6 +57,31 @@ export interface SettlementPlan {
   refundDeposit: number;
 }
 
+/**
+ * Số liệu chốt lúc quyết toán (lưu vào lượt thuê): in biên bản đúng như đã chốt thay vì tính lại từ sổ tiền,
+ * và ghi công nợ khi khách chưa trả đủ.
+ */
+export interface SettlementRecord {
+  at: number;
+  /** Sổ tiền ngay TRƯỚC khi quyết toán. */
+  totalCharges: number;
+  rentPaid: number;
+  depositHeld: number;
+  /** Cấn trừ cọc → tiền thuê. */
+  offset: number;
+  /** Khách trả thêm ngay lúc quyết toán. */
+  collect: number;
+  refundRent: number;
+  refundDeposit: number;
+  /** Cọc giữ lại chờ phạt nguội. */
+  keepHold: number;
+  /** Khách còn nợ sau quyết toán (0 = trả đủ). */
+  debt: number;
+  /** Khách hẹn trả nợ trước lúc này (null = chưa hẹn). */
+  debtDueAt: number | null;
+  debtNote: string | null;
+}
+
 /** Mức giữ cọc chờ phạt nguội gợi ý khi đặt xe: theo cài đặt nhưng không vượt tiền cọc của lượt. */
 export function defaultFineHold(deposit: number, rules: { fineHoldAmount: number }): number {
   return Math.max(0, Math.min(rules.fineHoldAmount, deposit));
@@ -70,10 +95,55 @@ export function rentalFineHold(
   return { amount: r.fineHoldRequired ?? defaultFineHold(r.depositRequired, rules), days: r.fineHoldDays ?? rules.fineHoldDays };
 }
 
-/** Gợi ý quyết toán: cấn trừ cọc trước, giữ một phần cọc chờ phạt nguội, hoàn phần còn lại. */
-export function planSettlement(s: MoneySummary, fineHoldAmount: number): SettlementPlan {
+/**
+ * Cọc giữ xe: tiền cọc ghi nhận TRƯỚC lúc bấm giao xe (chưa giao thì tính hết) — được trừ vào tiền thuê.
+ * Cọc thu từ lúc giao xe trở đi (trong form giao xe, hay ghi sau đó) là cọc phạt nguội: không trừ, giữ đối soát rồi hoàn.
+ * So theo lúc ghi sổ (`createdAt`) chứ không theo giờ giao xe người dùng chọn, để chọn giờ lùi/tới không làm lệch.
+ */
+export function advanceDeposit(payments: (MoneyPayment & { createdAt: number })[], pickupRecordedAt: number | null): number {
+  return payments
+    .filter((p) => !p.voidedAt && p.purpose === 'deposit' && p.direction !== 'offset' && (pickupRecordedAt == null || p.createdAt < pickupRecordedAt))
+    .reduce((s, p) => s + (p.direction === 'in' ? p.amount : -p.amount), 0);
+}
+
+/**
+ * Tiền khách còn phải trả khi đã gửi cọc trước: tổng − đã thanh toán − cọc giữ xe (cọc phạt nguội không trừ).
+ * `credit`: phần cọc trừ vào tiền thuê (không vượt số còn nợ, không vượt cọc đang giữ). `net` < 0: mình đang thu thừa.
+ */
+export function dueAfterDeposit(s: Pick<MoneySummary, 'due' | 'depositHeld'>, advance: number): { credit: number; net: number } {
+  const credit = Math.min(Math.max(0, s.due), Math.max(0, Math.min(advance, s.depositHeld)));
+  return { credit, net: s.due - credit };
+}
+
+/** Như `dueAfterDeposit` nhưng theo trạng thái lượt: đã quyết toán (hay hủy) thì cọc đã cấn trừ thật, không trừ thêm. */
+export function rentalDue(status: string, s: Pick<MoneySummary, 'due' | 'depositHeld'>, advance: number): { credit: number; net: number } {
+  return status === 'booked' || status === 'active' || status === 'returned' ? dueAfterDeposit(s, advance) : { credit: 0, net: s.due };
+}
+
+interface RentalLedger {
+  rental: { status: string };
+  money: MoneySummary;
+  payments: (MoneyPayment & { createdAt: number })[];
+  handovers: { kind: string; createdAt: number }[];
+}
+
+/** Cọc giữ xe của một lượt, từ sổ tiền + lúc ghi biên bản giao xe. */
+export function rentalAdvanceDeposit(d: RentalLedger): number {
+  return advanceDeposit(d.payments, d.handovers.find((h) => h.kind === 'pickup')?.createdAt ?? null);
+}
+
+/** Còn phải trả của một lượt (trang chi tiết, phiếu gửi khách, gợi ý thu tiền). */
+export function rentalOwed(d: RentalLedger): { credit: number; net: number } {
+  return rentalDue(d.rental.status, d.money, rentalAdvanceDeposit(d));
+}
+
+/**
+ * Gợi ý quyết toán: cấn trừ cọc giữ xe (`advance`, mặc định cả cọc), giữ một phần cọc chờ phạt nguội, hoàn phần còn lại.
+ * Cọc phạt nguội không cấn trừ vào tiền thuê.
+ */
+export function planSettlement(s: MoneySummary, fineHoldAmount: number, advance = s.depositHeld): SettlementPlan {
   const due = Math.max(0, s.due);
-  const offset = Math.min(due, Math.max(0, s.depositHeld));
+  const offset = dueAfterDeposit(s, advance).credit;
   const collect = due - offset;
   const remaining = Math.max(0, s.depositHeld - offset);
   const keepHold = Math.min(Math.max(0, fineHoldAmount), remaining);

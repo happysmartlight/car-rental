@@ -120,7 +120,18 @@ export function computeAlerts(now = Date.now()): Alert[] {
       const m = doneMoney.get(r.id)!;
       const link = `/rentals/${r.id}`;
       if (m.due > 0 && r.status !== 'cancelled') {
-        alerts.push({ kind: 'customer_debt', severity: 'warn', title: `Khách còn nợ ${fmtVnd(m.due)}`, detail: `${r.code} · ${v.plate} · ${c.fullName}${c.phone ? ` · ${c.phone}` : ''}`, link });
+        // Ghi nợ lúc quyết toán: kèm ngày hẹn trả, quá hẹn thì báo đỏ.
+        const dueAt = r.settlement?.debtDueAt ?? null;
+        const late = dueAt != null && dueAt < now;
+        const promise = dueAt != null ? ` · ${late ? 'quá hẹn trả' : 'hẹn trả'} ${fmtDate(dueAt)}` : '';
+        alerts.push({
+          kind: 'customer_debt',
+          severity: late ? 'danger' : 'warn',
+          title: `Khách còn nợ ${fmtVnd(m.due)}`,
+          detail: `${r.code} · ${v.plate} · ${c.fullName}${c.phone ? ` · ${c.phone}` : ''}${promise}${r.settlement?.debtNote ? ` · ${r.settlement.debtNote}` : ''}`,
+          link,
+          ...(dueAt != null ? { at: dueAt } : {}),
+        });
       }
       // Lượt đang giữ cọc chờ phạt nguội thì cọc là đúng — chỉ nhắc lượt đã xong / đã hủy.
       const owe = Math.max(0, -m.due) + (r.status === 'settled' ? 0 : Math.max(0, m.depositHeld));

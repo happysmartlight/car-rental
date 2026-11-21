@@ -11,14 +11,17 @@ import {
   createRecurring,
   listRecurring,
   materializeRecurring,
+  revenueDeclared,
+  revenueReport,
   updateEntry,
   updateRecurring,
   voidEntry,
   type CashflowReport,
+  type RevenueReport,
   type VehicleFilter,
 } from '../services/cashflow.js';
-import { CASH_CATEGORIES, CASH_CATEGORY, CASH_GROUP_LABEL, CASH_METHODS, RECUR_INTERVALS, currentPeriodKey, fmtMonthKey, parsePeriod, staffCanRecord } from '../shared/cashflow.js';
-import { PAYMENT_METHOD_LABEL, RENTAL_STATUS } from '../shared/constants.js';
+import { CASH_CATEGORIES, CASH_CATEGORY, CASH_GROUP_LABEL, CASH_METHODS, RECUR_INTERVALS, currentPeriodKey, fmtMonthKey, parsePeriod, parseQuarter, quarterKeyOf, staffCanRecord } from '../shared/cashflow.js';
+import { PAYMENT_METHOD_LABEL, RENTAL_CHANNEL_LABEL, RENTAL_STATUS } from '../shared/constants.js';
 import { plateKey } from '../shared/text.js';
 import { fmtDate, fmtDateTime } from '../shared/time.js';
 
@@ -120,6 +123,30 @@ export async function cashflowRoutes(app: FastifyInstance) {
     return reply.send(buf);
   });
 
+  // ── Doanh thu theo quý (kê khai thuế) ─────────────────────────────────────
+
+  const revenue = (query: unknown) => {
+    const q = parse(z.object({ q: z.string().optional(), app: z.enum(['0', '1']).default('0') }), query);
+    const quarter = parseQuarter(q.q || quarterKeyOf(Date.now()));
+    if (!quarter) throw badRequest('Quý không hợp lệ (dạng 2026-Q4)');
+    return revenueReport(quarter, q.app === '1');
+  };
+
+  app.get('/api/cashflow/revenue', async (req) => {
+    requireRole(req, 'admin');
+    return revenue(req.query);
+  });
+
+  app.get('/api/cashflow/revenue/export', async (req, reply) => {
+    requireRole(req, 'admin');
+    const r = revenue(req.query);
+    const buf = buildXlsx(revenueWorkbook(r));
+    audit(req, 'cashflow.revenue_export', 'cashflow', null, { quarter: r.quarter.key, includeAppDirect: r.includeAppDirect });
+    reply.header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    reply.header('content-disposition', `attachment; filename="doanh-thu-${r.quarter.key.toLowerCase()}.xlsx"`);
+    return reply.send(buf);
+  });
+
   // ── Ghi sổ ───────────────────────────────────────────────────────────────
 
   app.post('/api/cash-entries', async (req) => {
@@ -179,6 +206,70 @@ export async function cashflowRoutes(app: FastifyInstance) {
 }
 
 // ── File Excel ───────────────────────────────────────────────────────────────
+
+const revenueLabel = (d: string) => (d === 'out' ? 'Hoàn tiền thuê' : d === 'offset' ? 'Cấn trừ cọc sang tiền thuê' : 'Tiền thuê, phụ phí');
+
+/** Excel doanh thu quý: tổng hợp theo tháng, sổ doanh thu tự kê khai (từng khoản theo ngày nhận tiền), phần qua app để đối chiếu. */
+function revenueWorkbook(r: RevenueReport): Sheet[] {
+  const declared = r.lines.filter((l) => revenueDeclared(r, l));
+  const viaApp = r.lines.filter((l) => l.group !== 'direct');
+  const sheets: Sheet[] = [
+    {
+      name: 'Tổng hợp',
+      intro: [
+        `Doanh thu cho thuê xe — ${r.quarter.label}`,
+        'Tính theo ngày nhận tiền (giống trang Thu chi): tiền thuê và phụ phí khách trả, phần cọc cấn trừ sang tiền thuê, trừ tiền hoàn lại. Không gồm tiền cọc đang giữ.',
+        r.includeAppDirect
+          ? 'Doanh thu tự kê khai = thuê trực tiếp + tiền khách đặt qua app trả thẳng cho cửa hàng.'
+          : 'Doanh thu tự kê khai = thuê trực tiếp. Lượt đặt qua app (Mioto) tách riêng để đối chiếu với chứng từ khấu trừ thuế của app.',
+      ],
+      columns: [
+        { header: 'Tháng', width: 16 },
+        { header: 'Thuê trực tiếp', width: 17, money: true },
+        { header: 'Qua app: khách trả qua app', width: 22, money: true },
+        { header: 'Qua app: khách trả thẳng', width: 22, money: true },
+        { header: 'Doanh thu tự kê khai', width: 20, money: true },
+      ],
+      rows: r.months.map((m) => [m.label, m.direct, m.app, m.appDirect, m.declared]),
+      total: [r.quarter.label, r.totals.direct, r.totals.app, r.totals.appDirect, r.totals.declared],
+    },
+    {
+      name: 'Sổ doanh thu',
+      intro: [`Sổ doanh thu tự kê khai — ${r.quarter.label}`],
+      columns: [
+        { header: 'Ngày', width: 11 },
+        { header: 'Chứng từ (mã HĐ)', width: 16 },
+        { header: 'Diễn giải', width: 34 },
+        { header: 'Khách', width: 22 },
+        { header: 'Xe', width: 13 },
+        { header: 'Kênh', width: 10 },
+        { header: 'Hình thức', width: 14 },
+        { header: 'Số tiền', width: 15, money: true },
+      ],
+      rows: declared.map((l) => [fmtDate(l.at), l.code, [revenueLabel(l.direction), l.note].filter(Boolean).join(' · '), l.customerName, l.plate, RENTAL_CHANNEL_LABEL[l.channel], PAYMENT_METHOD_LABEL[l.method], l.amount]),
+      total: ['', '', 'Cộng', '', '', '', '', declared.reduce((s, l) => s + l.amount, 0)],
+    },
+  ];
+  if (viaApp.length) {
+    sheets.push({
+      name: 'Qua app (đối chiếu)',
+      intro: [`Lượt đặt qua app — ${r.quarter.label}`, 'Khách trả qua app: app khai/khấu trừ thuế thay. Khách trả thẳng: tiền mặt / chuyển khoản / cọc cấn trừ nhận trực tiếp — kiểm tra chứng từ của app xem đã gồm phần này chưa.'],
+      columns: [
+        { header: 'Ngày', width: 11 },
+        { header: 'Mã HĐ', width: 16 },
+        { header: 'Khách', width: 22 },
+        { header: 'Xe', width: 13 },
+        { header: 'App', width: 10 },
+        { header: 'Khách trả', width: 16 },
+        { header: 'Hình thức', width: 14 },
+        { header: 'Số tiền', width: 15, money: true },
+      ],
+      rows: viaApp.map((l) => [fmtDate(l.at), l.code, l.customerName, l.plate, RENTAL_CHANNEL_LABEL[l.channel], l.group === 'app' ? 'Qua app' : 'Trả thẳng', PAYMENT_METHOD_LABEL[l.method], l.amount]),
+      total: ['', '', '', '', '', 'Cộng', '', viaApp.reduce((s, l) => s + l.amount, 0)],
+    });
+  }
+  return sheets;
+}
 
 function workbook(r: CashflowReport): Sheet[] {
   const t = r.totals;

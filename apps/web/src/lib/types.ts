@@ -22,7 +22,7 @@ import type {
   VehicleAccessory,
   VehicleBlock,
 } from '@api/db/schema';
-import type { CashCategory, Period } from '@shared/cashflow';
+import type { CashCategory, Period, Quarter } from '@shared/cashflow';
 import type { ChannelMoney, MonthPeriod, MoneySummary, PaymentDirection } from '@shared/money';
 import type { Quote } from '@shared/pricing';
 import type { MaintenancePreset, MaintenanceStatus } from '@shared/maintenance';
@@ -432,3 +432,22 @@ export interface CashflowReport {
 }
 
 export type RecurringRow = RecurringCost & { plate: string | null };
+
+/** Doanh thu theo quý (kê khai thuế): theo tiền thật nhận được, tách thuê trực tiếp / qua app. */
+export interface RevenueMonthRow {
+  key: string;
+  label: string;
+  direct: number;
+  /** Khách trả qua app (app khai/khấu trừ thay). */
+  app: number;
+  /** Khách đặt qua app nhưng trả thẳng cho cửa hàng. */
+  appDirect: number;
+  declared: number;
+}
+export interface RevenueReport {
+  quarter: Quarter;
+  includeAppDirect: boolean;
+  months: RevenueMonthRow[];
+  totals: Omit<RevenueMonthRow, 'key' | 'label'>;
+  lines: { paymentId: number; at: number; amount: number; code: string; rentalId: number; group: 'direct' | 'app' | 'app_direct' }[];
+}

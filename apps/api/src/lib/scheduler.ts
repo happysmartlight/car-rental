@@ -9,6 +9,7 @@ import { materializeRecurring } from '../services/cashflow.js';
 import { checkRentalFines, runFleetFineCheck } from '../services/fineCheck.js';
 import { getRental, rentalMoney } from '../services/rentals.js';
 import { startUpdate } from '../services/updateFlow.js';
+import { dueAfterDeposit } from '../shared/money.js';
 import { fmtVnd } from '../shared/text.js';
 import { DAY_MS, HOUR_MS, fmtDate, fmtDateTime, vnDateKey, vnParts, vnStartOfDay } from '../shared/time.js';
 import { purgeExpiredSessions } from './auth.js';
@@ -70,7 +71,10 @@ async function upcomingPickups(now: number) {
     // Đặt sát giờ thì tin "Đặt xe mới" vừa báo rồi, không nhắc nữa.
     if (r.scheduledStart > now + lead || r.createdAt > r.scheduledStart - lead) continue;
     const m = rentalMoney(r.id);
-    const collect = [m.due > 0 && `tiền thuê ${fmtVnd(m.due)}`, r.depositRequired > m.depositHeld && `cọc ${fmtVnd(r.depositRequired - m.depositHeld)}`].filter(Boolean);
+    // Chưa giao xe: cọc đang giữ là cọc giữ xe, trừ vào tiền thuê; cọc thu lúc giao là cọc phạt nguội, không trừ — khớp form giao xe.
+    const depositIn = Math.max(0, r.depositRequired - m.depositHeld);
+    const rent = dueAfterDeposit(m, m.depositHeld).net;
+    const collect = [rent > 0 && `tiền thuê ${fmtVnd(rent)}`, depositIn > 0 && `cọc ${fmtVnd(depositIn)}`].filter(Boolean);
     const html = [
       `🔑 <b>Sắp giao xe</b> ${escapeHtml(v.plate)} lúc ${fmtDateTime(r.scheduledStart)}`,
       `${escapeHtml(r.code)} · ${escapeHtml(c.fullName)}${c.phone ? ` · ${escapeHtml(c.phone)}` : ''}`,

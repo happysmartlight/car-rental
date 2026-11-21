@@ -6,6 +6,8 @@ import path from 'node:path';
 import PizZip from 'pizzip';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { planSettlement, rentalAdvanceDeposit, rentalOwed } from './shared/money.js';
+import { fmtNumber } from './shared/text.js';
 import { fmtDateTime, vnDateKey, vnLocalInputToMs } from './shared/time.js';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'car-rental-test-'));
@@ -535,6 +537,47 @@ describe('khách hủy đặt xe', () => {
     expect((await call('PUT', '/api/settings/rules', { ...rules, defaultPickupTime: '07:45' })).status).toBe(200);
     expect((await call('GET', '/api/settings')).json.rules.defaultPickupTime).toBe('07:45');
     expect((await call('PUT', '/api/settings/rules', { ...rules, defaultPickupTime: '8h30' })).status).toBe(400);
+  });
+
+  it('cọc gửi trước = cọc giữ xe, trừ vào còn phải trả; cọc thu lúc giao xe = cọc phạt nguội, không trừ', async () => {
+    const id = await book(300, [{ purpose: 'deposit', method: 'transfer', amount: 300000 }]);
+    const before = await detail(id);
+    expect(rentalOwed(before)).toEqual({ credit: 300000, net: before.money.due - 300000 });
+    await new Promise((r) => setTimeout(r, 5)); // lúc ghi sổ phải sau khoản cọc gửi trước
+    const p = await call('POST', `/api/rentals/${id}/pickup`, { at: Date.now(), odo: 1000, fuelLevel: 100, payments: [{ purpose: 'deposit', method: 'cash', amount: 2000000 }] });
+    expect(p.status, JSON.stringify(p.json)).toBe(200);
+    const d = await detail(id);
+    expect(d.money.depositHeld).toBe(2300000);
+    expect(rentalAdvanceDeposit(d)).toBe(300000);
+    expect(rentalOwed(d)).toEqual({ credit: 300000, net: d.money.due - 300000 });
+    // Quyết toán gợi ý chỉ cấn trừ cọc giữ xe; cọc phạt nguội giữ chờ phạt nguội, phần dư hoàn lại.
+    expect(planSettlement(d.money, 2000000, rentalAdvanceDeposit(d))).toMatchObject({ offset: 300000, collect: d.money.due - 300000, keepHold: 2000000, refundDeposit: 0 });
+
+    // Quyết toán khi khách chưa trả đủ: trả một phần, phần còn lại ghi nợ kèm ngày hẹn trả.
+    expect((await call('POST', `/api/rentals/${id}/return`, { at: Date.now(), odo: 1100, fuelLevel: 100 })).status).toBe(200);
+    const due = (await detail(id)).money.due as number;
+    const over = await call('POST', `/api/rentals/${id}/settle`, { offset: 300000, collect: { amount: due, method: 'cash' }, fineHoldDays: 15 });
+    expect(over.status).toBe(400); // thu vượt số còn phải trả sau cấn trừ
+    const promise = Date.now() + 3 * 86_400_000;
+    const s = await call('POST', `/api/rentals/${id}/settle`, { offset: 300000, collect: { amount: 400000, method: 'cash' }, fineHoldDays: 15, debtDueAt: promise, debtNote: 'hẹn cuối tuần' });
+    expect(s.status, JSON.stringify(s.json)).toBe(200);
+    expect(s.json.status).toBe('settled');
+    expect(s.json.settlement).toMatchObject({ offset: 300000, collect: 400000, keepHold: 2000000, debt: due - 700000, debtDueAt: promise, debtNote: 'hẹn cuối tuần' });
+    const after = await detail(id);
+    expect(after.money).toMatchObject({ due: due - 700000, depositHeld: 2000000 });
+    const debtAlert = (await call('GET', '/api/dashboard')).json.alerts.find((x: any) => x.kind === 'customer_debt' && x.link === `/rentals/${id}`);
+    expect(debtAlert?.detail).toContain('hẹn trả');
+    expect(debtAlert?.detail).toContain('hẹn cuối tuần');
+    // Biên bản nhận xe in đúng số đã chốt, có dòng còn nợ.
+    const doc = await call('POST', `/api/rentals/${id}/documents`, { kind: 'return' });
+    expect(doc.status, JSON.stringify(doc.json)).toBe(200);
+    const file = await app.inject({ method: 'GET', url: `/api/files/${doc.json.document.docxFileId}`, headers: { cookie: adminCookie } });
+    const xml = new PizZip(file.rawPayload).file('word/document.xml')!.asText().replace(/<[^>]+>/g, '');
+    expect(xml).toContain(`Bên B trả thêm: 400.000 đồng`);
+    expect(xml).toContain(`Bên B còn nợ: ${fmtNumber(due - 700000)} đồng, hẹn thanh toán trước ngày`);
+    // Thu nợ sau → hết nhắc.
+    expect((await call('POST', `/api/rentals/${id}/payments`, { direction: 'in', purpose: 'rent', method: 'transfer', amount: due - 700000 })).status).toBe(200);
+    expect((await call('GET', '/api/dashboard')).json.alerts.some((x: any) => x.kind === 'customer_debt' && x.link === `/rentals/${id}`)).toBe(false);
   });
 });
 
@@ -1483,6 +1526,30 @@ describe('lượt thuê qua Mioto', () => {
     ]);
     expect(d.channelMoney).toMatchObject({ prepaid: 0, fee: 0, owed: 0 });
     expect(await feeEntries()).toEqual([520_000]);
+  });
+
+  it('doanh thu theo quý: thuê trực tiếp tự kê khai, lượt Mioto tách phần qua app / khách trả thẳng', async () => {
+    const direct = (await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, scheduledStart: at('2029-08-01T09:00'), scheduledEnd: at('2029-08-02T09:00') })).json.id;
+    const viaApp = (await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, scheduledStart: at('2029-09-05T09:00'), scheduledEnd: at('2029-09-06T09:00'), channel: 'mioto', channelPrice: 1_000_000 })).json.id;
+    const pay = (id: number, method: string, amount: number, when: string) => call('POST', `/api/rentals/${id}/payments`, { direction: 'in', purpose: 'rent', method, amount, at: at(when) });
+    expect((await pay(direct, 'transfer', 700_000, '2029-07-30T10:00')).status).toBe(200);
+    expect((await pay(direct, 'cash', 100_000, '2029-10-01T10:00')).status).toBe(200); // sang quý 4
+    expect((await pay(viaApp, 'mioto', 400_000, '2029-08-20T10:00')).status).toBe(200);
+    expect((await pay(viaApp, 'cash', 600_000, '2029-09-05T09:30')).status).toBe(200);
+    const r = (await call('GET', '/api/cashflow/revenue?q=2029-Q3')).json;
+    expect(r.quarter.label).toBe('Quý 3/2029');
+    expect(r.totals).toEqual({ direct: 700_000, app: 400_000, appDirect: 600_000, declared: 700_000 });
+    expect(r.months.map((m: any) => [m.key, m.direct, m.app, m.appDirect])).toEqual([
+      ['2029-07', 700_000, 0, 0],
+      ['2029-08', 0, 400_000, 0],
+      ['2029-09', 0, 0, 600_000],
+    ]);
+    // Mioto chỉ khai phần qua app → cộng phần khách trả thẳng vào doanh thu tự kê khai.
+    expect((await call('GET', '/api/cashflow/revenue?q=2029-Q3&app=1')).json.totals.declared).toBe(1_300_000);
+    const file = await app.inject({ method: 'GET', url: '/api/cashflow/revenue/export?q=2029-Q3', headers: { cookie: adminCookie } });
+    expect(file.statusCode).toBe(200);
+    expect(file.headers['content-disposition']).toContain('doanh-thu-2029-q3.xlsx');
+    expect((await call('GET', '/api/cashflow/revenue?q=2029-Q5')).status).toBe(400);
   });
   it('giá thỏa thuận theo ngày (khách trả giá): báo giá, đặt xe, gia hạn vẫn giữ giá, sửa giá được', async () => {
     const times = { scheduledStart: at('2027-03-01T09:00'), scheduledEnd: at('2027-03-03T09:00') };

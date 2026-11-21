@@ -8,7 +8,7 @@ import { DEFAULT_RENTAL_CARD_OPTIONS, renderRentalCard, type RentalCardOptions }
 import { requirements } from '@/lib/shareCard';
 import type { RentalDetail } from '@/lib/types';
 import { RENTAL_SHARE_STAGE_LABEL, buildRentalShare, rentalShareStages, rentalShareText, type RentalShareStage } from '@shared/rentalShare';
-import { cancelPolicyText, rentalFineHold } from '@shared/money';
+import { cancelPolicyText, rentalAdvanceDeposit, rentalFineHold } from '@shared/money';
 import { plateKey } from '@shared/text';
 
 const FILE_PREFIX: Record<RentalShareStage, string> = { book: 'dat-xe', pickup: 'giao-xe', extend: 'gia-han', return: 'nhan-xe', settle: 'quyet-toan' };
@@ -51,6 +51,7 @@ export function RentalShareDialog({ d, open, onOpenChange, initialStage }: { d: 
       extension: d.extensions.at(-1) ?? null,
       cancelPolicy: cancelPolicyText(settings.rules, d.rental.depositRequired > 0),
       fineHold: d.rental.depositRequired > 0 ? rentalFineHold(d.rental, settings.rules) : null,
+      advanceDeposit: rentalAdvanceDeposit(d),
       requirements: requirements(settings.rules),
       graceMinutes: settings.rules.graceMinutes,
       shopName: settings.business.name,

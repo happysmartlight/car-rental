@@ -25,7 +25,7 @@ import {
   type RentalChannel,
   type TemplateKind,
 } from '../shared/constants.js';
-import { cancelPolicyText, channelMoney, planSettlement, rentalFineHold } from '../shared/money.js';
+import { cancelPolicyText, channelMoney, planSettlement, rentalAdvanceDeposit, rentalFineHold } from '../shared/money.js';
 import { chargeDays, freeChargesFor, monthKmLimit, quoteRental, rentalChargingPolicy, tripChargingText } from '../shared/pricing.js';
 import { fmtNumber, vndInWords } from '../shared/text.js';
 import { DAY_MS, fmtDate, fmtDateKey, fmtDateTime, fmtDuration, vnDateLong, vnParts } from '../shared/time.js';
@@ -205,6 +205,8 @@ export const TEMPLATE_FIELDS: { group: string; fields: FieldDoc[] }[] = [
       { key: 'qt.hoan_coc', label: 'Hoàn cọc ngay' },
       { key: 'qt.giu_coc', label: 'Giữ lại chờ phạt nguội (điều kiện {#co_qt_giu_coc}…{/co_qt_giu_coc})' },
       { key: 'qt.giu_coc_ngay', label: 'Số ngày giữ lại' },
+      { key: 'qt.con_no', label: 'Khách còn nợ sau quyết toán (điều kiện {#co_qt_no}…{/co_qt_no})' },
+      { key: 'qt.han_tra_no', label: 'Ngày hẹn trả nợ (", hẹn thanh toán trước ngày …" hoặc trống)' },
     ],
   },
   {
@@ -359,7 +361,15 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
   const pickupHo = d.handovers.find((h) => h.kind === 'pickup');
   const returnHo = [...d.handovers].reverse().find((h) => h.kind === 'return');
   const hold = rentalFineHold(r, rules);
-  const plan = planSettlement(d.money, hold.amount);
+  const plan = planSettlement(d.money, hold.amount, rentalAdvanceDeposit(d));
+  const qt = r.settlement ?? {
+    ...plan,
+    totalCharges: d.money.totalCharges,
+    rentPaid: d.money.rentPaid,
+    depositHeld: d.money.depositHeld,
+    debt: 0,
+    debtDueAt: null as number | null,
+  };
   // Đã quyết toán thì lấy đúng số ngày đã giữ, chưa thì theo thỏa thuận.
   const holdDays = r.fineHoldUntil && r.actualEnd ? Math.round((r.fineHoldUntil - r.actualEnd) / DAY_MS) : hold.days;
   // Phụ kiện: theo biên bản giao xe nếu đã giao, chưa giao thì theo danh sách thỏa thuận lúc đặt xe (bỏ món không kèm).
@@ -539,17 +549,21 @@ export function buildTemplateData(rentalId: number): Record<string, unknown> {
       km_da_di: pickupHo && returnHo ? fmtNumber(returnHo.odo - pickupHo.odo) : '',
       hu_hong: returnHo ? returnHo.damages.filter((x) => x.isNew).map((x) => ({ vi_tri: x.zone, mo_ta: x.note })) : [],
     },
+    // Đã quyết toán: in đúng số đã chốt (kể cả phần khách còn nợ); chưa thì in gợi ý.
     qt: {
-      phai_tra: money(d.money.totalCharges),
-      da_tra: money(d.money.rentPaid),
-      coc_dang_giu: money(d.money.depositHeld),
-      can_tru: money(plan.offset),
-      thu_them: money(plan.collect),
-      hoan_coc: money(plan.refundDeposit),
-      giu_coc: money(plan.keepHold),
+      phai_tra: money(qt.totalCharges),
+      da_tra: money(qt.rentPaid),
+      coc_dang_giu: money(qt.depositHeld),
+      can_tru: money(qt.offset),
+      thu_them: money(qt.collect),
+      hoan_coc: money(qt.refundDeposit),
+      giu_coc: money(qt.keepHold),
       giu_coc_ngay: holdDays,
+      con_no: money(qt.debt),
+      han_tra_no: qt.debtDueAt ? `, hẹn thanh toán trước ngày ${fmtDate(qt.debtDueAt)}` : '',
     },
-    co_qt_giu_coc: plan.keepHold > 0,
+    co_qt_giu_coc: qt.keepHold > 0,
+    co_qt_no: qt.debt > 0,
     gia_han: ext
       ? {
           so: `${r.code}-PL${String(ext.seq).padStart(2, '0')}`,
@@ -704,7 +718,7 @@ export async function retryPdf(documentId: number, userId: number) {
 const BUILTINS: { key: string; rev: number; file: string; name: string; kind: TemplateKind; channel?: RentalChannel }[] = [
   { key: 'contract', rev: 6, file: 'hop-dong-thue-xe.docx', name: 'Hợp đồng thuê xe tự lái', kind: 'contract' },
   { key: 'pickup', rev: 3, file: 'bien-ban-giao-xe.docx', name: 'Biên bản giao xe', kind: 'pickup' },
-  { key: 'return', rev: 4, file: 'bien-ban-nhan-xe.docx', name: 'Biên bản nhận xe & quyết toán', kind: 'return' },
+  { key: 'return', rev: 5, file: 'bien-ban-nhan-xe.docx', name: 'Biên bản nhận xe & quyết toán', kind: 'return' },
   { key: 'extension', rev: 1, file: 'phu-luc-gia-han.docx', name: 'Phụ lục gia hạn hợp đồng', kind: 'extension' },
   // Mẫu của Mioto (sinh từ file gốc: npm run templates -w apps/api). Biên bản Mioto gộp giao + nhận xe:
   // in lúc giao thì phần hoàn trả để trống viết tay, in lúc nhận xe thì điền đủ cả hai phần.

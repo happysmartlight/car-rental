@@ -3,6 +3,24 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.6.0] - 2026-11-21
+
+### Mới
+- **Xem lại trước khi xác nhận giao/nhận xe**: giờ, ODO, quãng đường, nhiên liệu hoặc pin, ảnh, chữ ký và số tiền thu ngay.
+- **Pin xe điện nhập chính xác từng %** bằng thanh kéo hoặc gõ số.
+- **Quyết toán khi khách chưa trả đủ**: ghi phần còn nợ kèm ngày hẹn trả. Việc cần làm nhắc đến khi thu đủ, quá hẹn thì báo đỏ. Biên bản nhận xe có dòng "Bên B còn nợ".
+- **Doanh thu theo quý** trong Thu chi (quản trị): tách thuê trực tiếp và Mioto, xuất Excel để kê khai.
+- **Nhắc tra phí ETC** (VETC/ePass) của biển số trong thời gian thuê, ở bước nhận xe.
+
+### Thay đổi
+- **Cọc khách gửi trước khi nhận xe được trừ vào số còn phải trả**, vì đó là cọc giữ xe. Cọc thu lúc giao xe là cọc phạt nguội, không trừ.
+
+### Sửa lỗi
+- Biên bản nhận xe in sau khi quyết toán có thể ra sai số tiền. Giờ biên bản in đúng số đã chốt lúc quyết toán.
+
+### Lưu ý
+- Tiền khách Mioto trả thẳng cho cửa hàng được tách riêng và mặc định không cộng vào doanh thu tự kê khai. Hãy đối chiếu với chứng từ Mioto gửi.
+
 ## [0.5.3] - 2026-11-04
 
 ### Thay đổi

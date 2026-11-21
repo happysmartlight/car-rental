@@ -9,7 +9,7 @@ import { MultiPhotoInput } from '@/components/images';
 import { RentalAccessoriesEditor, useRentalAccessories } from '@/components/RentalAccessories';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
-import { Checkbox, DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select, Textarea } from '@/components/ui/form';
+import { Checkbox, DateInput, DateTimeInput, Field, Input, MoneyInput, NumberInput, Segmented, Select, Textarea } from '@/components/ui/form';
 import { Badge, Notice } from '@/components/ui/misc';
 import { api } from '@/lib/api';
 import { shareText } from '@/lib/shareCard';
@@ -31,9 +31,9 @@ import {
   type RentalChannel,
   type RentalSource,
 } from '@shared/constants';
-import { cancelForfeit, cancelMessage, cancelPolicyText, monthsNote, planCancellation, planSettlement, rentalFineHold } from '@shared/money';
+import { cancelForfeit, cancelMessage, cancelPolicyText, monthsNote, planCancellation, planSettlement, rentalAdvanceDeposit, rentalFineHold, rentalOwed } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
-import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime, fmtDuration, fmtTime } from '@shared/time';
+import { DAY_MS, addMonthsVn, fmtDate, fmtDateTime, fmtDuration, fmtTime, vnLocalInputToMs } from '@shared/time';
 
 type DialogProps = { d: RentalDetail; open: boolean; onOpenChange: (o: boolean) => void };
 const inv = (id: number) => ({ invalidate: [['rental', String(id)], ['rentals'], ['dashboard'], ['calendar']] });
@@ -71,7 +71,8 @@ export function PaymentDialog({ d, open, onOpenChange, preset = 'rent_in' }: Dia
   };
   const suggested = useMemo(() => {
     const m = d.money;
-    return { rent_in: Math.max(0, m.due), deposit_in: Math.max(0, d.rental.depositRequired - m.depositHeld), deposit_out: Math.max(0, m.depositHeld), rent_out: Math.max(0, -m.due) }[kind];
+    // Tiền thuê gợi ý đã trừ cọc giữ xe (cọc phạt nguội không trừ).
+    return { rent_in: Math.max(0, rentalOwed(d).net), deposit_in: Math.max(0, d.rental.depositRequired - m.depositHeld), deposit_out: Math.max(0, m.depositHeld), rent_out: Math.max(0, -m.due) }[kind];
   }, [d, kind]);
   useEffect(() => {
     if (open) {
@@ -234,38 +235,49 @@ export function SettleDialog({ d, open, onOpenChange }: DialogProps) {
   const m = d.money;
   // Mức giữ + số ngày theo thỏa thuận khi đặt xe (in trong hợp đồng).
   const agreed = rules ? rentalFineHold(d.rental, rules) : { amount: 0, days: 15 };
-  const plan = planSettlement(m, agreed.amount);
+  const plan = planSettlement(m, agreed.amount, rentalAdvanceDeposit(d));
   const [offset, setOffset] = useState<number | null>(plan.offset);
   const [keep, setKeep] = useState<number | null>(plan.keepHold);
   const [days, setDays] = useState<number | null>(agreed.days);
   const [collectMethod, setCollectMethod] = useState<'cash' | 'transfer'>('transfer');
   const [refundMethod, setRefundMethod] = useState<'cash' | 'transfer'>('transfer');
+  // Khách trả ngay (null = trả đủ); trả thiếu thì phần còn lại ghi nợ, kèm ngày hẹn trả.
+  const [paidNow, setPaidNow] = useState<number | null>(null);
+  const [debtDate, setDebtDate] = useState<string | null>(null);
+  const [debtNote, setDebtNote] = useState('');
   useEffect(() => {
     if (!open) return;
     const a = rules ? rentalFineHold(d.rental, rules) : { amount: 0, days: 15 };
-    const p = planSettlement(d.money, a.amount);
+    const p = planSettlement(d.money, a.amount, rentalAdvanceDeposit(d));
     setOffset(p.offset);
     setKeep(p.keepHold);
     setDays(a.days);
-  }, [open, d.money, d.rental, rules]);
+    setPaidNow(null);
+    setDebtDate(null);
+    setDebtNote('');
+  }, [open, d, rules]);
 
   const off = Math.min(offset ?? 0, Math.max(0, m.depositHeld), Math.max(0, m.due));
   const collect = Math.max(0, m.due - off);
   const refundRent = m.due < 0 ? -m.due : 0;
   const keepHold = Math.min(keep ?? 0, Math.max(0, m.depositHeld - off));
   const refundDeposit = Math.max(0, m.depositHeld - off - keepHold);
+  const paid = Math.min(collect, paidNow ?? collect);
+  const debt = collect - paid;
 
   const save = useAction(
     () =>
       api.post(`/api/rentals/${d.rental.id}/settle`, {
         offset: off,
-        collect: collect > 0 ? { amount: collect, method: collectMethod } : null,
+        collect: paid > 0 ? { amount: paid, method: collectMethod } : null,
         refundRent: refundRent > 0 ? { amount: refundRent, method: refundMethod } : null,
         refundDeposit: refundDeposit > 0 ? { amount: refundDeposit, method: refundMethod } : null,
         fineHoldDays: days ?? 0,
         returnCollaterals: true,
+        debtDueAt: debt > 0 && debtDate ? vnLocalInputToMs(`${debtDate}T23:59`) : null,
+        debtNote: debt > 0 ? debtNote.trim() || null : null,
       }),
-    { ...inv(d.rental.id), success: 'Đã quyết toán', onSuccess: () => onOpenChange(false) },
+    { ...inv(d.rental.id), success: debt > 0 ? `Đã quyết toán — ghi nợ ${fmtVnd(debt)}` : 'Đã quyết toán', onSuccess: () => onOpenChange(false) },
   );
 
   const Row = ({ label, value, strong, tone }: { label: string; value: number; strong?: boolean; tone?: string }) => (
@@ -276,7 +288,7 @@ export function SettleDialog({ d, open, onOpenChange }: DialogProps) {
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Quyết toán" description={`${d.rental.code} · ${d.customer.fullName}`} size="lg" footer={<Button onClick={() => save.mutate()} loading={save.isPending}>Xác nhận quyết toán</Button>}>
+    <Dialog open={open} onOpenChange={onOpenChange} title="Quyết toán" description={`${d.rental.code} · ${d.customer.fullName}`} size="lg" footer={<Button onClick={() => save.mutate()} loading={save.isPending}>{debt > 0 ? `Quyết toán · ghi nợ ${fmtVnd(debt)}` : 'Xác nhận quyết toán'}</Button>}>
       <div className="grid gap-5 md:grid-cols-2">
         <div>
           <div className="divide-y divide-border rounded-2xl border border-border px-4 py-2">
@@ -302,12 +314,49 @@ export function SettleDialog({ d, open, onOpenChange }: DialogProps) {
         <div className="space-y-4">
           <div className="divide-y divide-border rounded-2xl bg-surface-2 px-4 py-2">
             <Row label="Khách trả thêm" value={collect} strong tone={collect ? 'text-red-600' : ''} />
+            {debt > 0 && (
+              <>
+                <Row label="Trả ngay" value={paid} />
+                <Row label="Ghi nợ" value={debt} strong tone="text-red-600" />
+              </>
+            )}
             {refundRent > 0 && <Row label="Hoàn tiền thuê thừa" value={refundRent} strong />}
             <Row label="Hoàn cọc ngay" value={refundDeposit} strong tone={refundDeposit ? 'text-emerald-700' : ''} />
             <Row label="Giữ lại chờ phạt nguội" value={keepHold} />
           </div>
+          {debt > 0 && refundDeposit > 0 && (
+            <Notice tone="amber">
+              Đang hoàn cọc {fmtVnd(refundDeposit)} trong khi khách còn nợ {fmtVnd(debt)}.
+              <Button size="sm" variant="secondary" className="mt-2 flex" onClick={() => setOffset(off + Math.min(debt, refundDeposit))}>
+                Lấy cọc trừ nợ
+              </Button>
+            </Notice>
+          )}
           {keepHold > 0 && days ? <p className="text-sm text-muted">Hạn hoàn phần giữ lại: {fmtDate((d.rental.actualEnd ?? Date.now()) + days * DAY_MS)}. App sẽ nhắc.</p> : null}
           {collect > 0 && (
+            <Field label="Khách trả ngay" hint={debt > 0 ? `Còn nợ ${fmtVnd(debt)} — Việc cần làm nhắc đến khi thu đủ` : 'Khách chưa trả đủ thì sửa số, phần còn lại ghi nợ'}>
+              <MoneyInput value={paidNow ?? collect} onChange={(v) => setPaidNow(v ?? 0)} />
+              <div className="mt-2 flex gap-2">
+                <Button size="sm" variant={debt === 0 ? 'secondary' : 'ghost'} onClick={() => setPaidNow(null)}>
+                  Trả đủ
+                </Button>
+                <Button size="sm" variant={paid === 0 ? 'secondary' : 'ghost'} onClick={() => setPaidNow(0)}>
+                  Ghi nợ hết
+                </Button>
+              </div>
+            </Field>
+          )}
+          {debt > 0 && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Hẹn trả trước ngày">
+                <DateInput value={debtDate} onChange={setDebtDate} />
+              </Field>
+              <Field label="Ghi chú nợ">
+                <Input value={debtNote} onChange={(e) => setDebtNote(e.target.value)} placeholder="Khách hẹn chuyển khoản…" />
+              </Field>
+            </div>
+          )}
+          {paid > 0 && (
             <Field label="Khách trả bằng">
               <Segmented value={collectMethod} onChange={setCollectMethod} className="flex w-full" options={[{ value: 'transfer', label: 'Chuyển khoản' }, { value: 'cash', label: 'Tiền mặt' }]} />
             </Field>
@@ -317,7 +366,7 @@ export function SettleDialog({ d, open, onOpenChange }: DialogProps) {
               <Segmented value={refundMethod} onChange={setRefundMethod} className="flex w-full" options={[{ value: 'transfer', label: 'Chuyển khoản' }, { value: 'cash', label: 'Tiền mặt' }]} />
             </Field>
           )}
-          {collect > 0 && collectMethod === 'transfer' && <VietQr amount={collect} note={d.rental.code} />}
+          {paid > 0 && collectMethod === 'transfer' && <VietQr amount={paid} note={d.rental.code} />}
           {d.collaterals.some((c) => !c.returnedAt) && <Notice tone="blue">Tài sản thế chấp sẽ được đánh dấu đã trả lại cho khách.</Notice>}
         </div>
       </div>

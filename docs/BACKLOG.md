@@ -1,6 +1,6 @@
 # Việc còn treo
 
-Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 2026-11-02.
+Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 2026-11-21.
 
 ## Câu hỏi chưa trả lời (từ PLAN mục 10)
 
@@ -29,8 +29,10 @@ Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 
 - [x] Lịch bảo dưỡng theo hạng mục (v0.4.1, bảng `maintenance_items` + `maintenance_records`). Mốc bảo dưỡng chung cũ trong Sửa xe vẫn giữ, nhắc gộp chung một dòng mỗi xe.
 - [ ] Bảo dưỡng: dự đoán ngày đến hạn theo số km trung bình mỗi ngày của xe; nhắc Telegram riêng khi một mục vừa chuyển sang quá hạn (hiện chỉ có trong bản tin sáng + Việc cần làm).
 - [ ] Nhập Excel dữ liệu khách/xe cũ. Báo cáo top khách.
+- [x] Doanh thu theo quý để kê khai thuế (trang Thu chi): thuê trực tiếp tự kê khai; lượt Mioto tách phần khách trả qua app / trả thẳng, xuất Excel sổ doanh thu.
+- [ ] Công nợ gộp theo khách trên trang khách (hiện xem từng lượt + Việc cần làm).
 - [ ] Ghi chi phí từ Telegram (gửi ảnh hóa đơn + số tiền).
-- [ ] Biên bản nhận xe in SAU khi quyết toán: số liệu quyết toán đang là gợi ý tính lại, nên lấy từ các phiếu đã ghi.
+- [x] Biên bản nhận xe in SAU khi quyết toán: lấy đúng số đã chốt (cột `rentals.settlement`), có dòng khách còn nợ.
 
 ### Ý tưởng thêm
 - [x] Báo giá cho khách trước khi chốt — trang **Xe trống & báo giá** (v0.4.1): chọn ngày giờ → xe trống + giá từng xe → gửi Zalo.
@@ -43,7 +45,7 @@ Ghi lại những gì chưa làm / chưa quyết, xử lý dần. Cập nhật: 
 - [ ] Kiểm tra bản PDF mẫu Mioto in qua Gotenberg (LibreOffice) trên Pi — biên bản Mioto trang 3 vừa khít, LibreOffice dàn trang lệch một dòng là sang trang 4 (đã thử bằng Word: đủ 3 trang).
 - [ ] Nhắc khóa lịch xe trên app Mioto khi có lượt trực tiếp (tránh hai khách trùng xe) — Mioto không có API, chỉ nhắc được.
 - [ ] Nút "Đặt lại như lần trước" và công nợ trên trang khách.
-- [ ] Quyết toán khi khách chưa trả đủ: ghi nợ ngay trong hộp Quyết toán (hiện hộp luôn ghi khách trả đủ; tạm thời để lượt ở "Chờ quyết toán" — Việc cần làm sẽ nhắc).
+- [x] Quyết toán khi khách chưa trả đủ: hộp Quyết toán ghi trả một phần / ghi nợ, hẹn ngày trả + ghi chú; Việc cần làm nhắc (quá hẹn báo đỏ), nút Thu nợ ở trang lượt thuê.
 - [ ] Lưu nháp form Thêm khách (quét CCCD, chụp giấy tờ) — hiện chỉ biên bản giao/nhận và Đặt xe mới có nháp.
 - [ ] Ảnh riêng cho từng phụ kiện (đã có cột `photo_file_id`, chưa có giao diện).
 

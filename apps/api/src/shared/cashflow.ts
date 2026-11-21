@@ -217,6 +217,51 @@ export function switchPeriodKind(key: string, kind: PeriodKind, now = Date.now()
   return cur.startsWith(key) ? cur : `${key}-12`;
 }
 
+// ── Quý (kê khai thuế hộ kinh doanh) ───────────────────────────────────────
+
+export interface Quarter {
+  /** "2026-Q4" */
+  key: string;
+  year: number;
+  q: number;
+  start: number;
+  end: number;
+  /** "Quý 4/2026" */
+  label: string;
+  /** 3 tháng của quý ("YYYY-MM"). */
+  months: string[];
+}
+
+export function parseQuarter(key: string): Quarter | null {
+  const m = /^(\d{4})-Q([1-4])$/.exec(key);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const q = Number(m[2]);
+  if (year < 2000 || year > 2100) return null;
+  const first = (q - 1) * 3 + 1;
+  return { key, year, q, start: vnMonthStart(year, first), end: vnMonthStart(year, first + 3), label: `Quý ${q}/${year}`, months: [0, 1, 2].map((i) => `${year}-${p2(first + i)}`) };
+}
+
+/** Quý chứa thời điểm `ms` (giờ VN). */
+export function quarterKeyOf(ms: number): string {
+  const p = vnParts(ms);
+  return `${p.year}-Q${Math.ceil(p.month / 3)}`;
+}
+
+/** Quý của kỳ đang xem ở trang Thu chi: tháng → quý chứa tháng đó; năm → quý hiện tại nếu là năm nay, không thì quý 4. */
+export function quarterOfPeriod(periodKey: string, now = Date.now()): string {
+  const month = parseMonthKey(periodKey);
+  if (month) return `${month.year}-Q${Math.ceil(month.month / 3)}`;
+  const cur = quarterKeyOf(now);
+  return cur.startsWith(`${periodKey}-`) ? cur : `${periodKey}-Q4`;
+}
+
+export function shiftQuarter(key: string, delta: number): string {
+  const q = parseQuarter(key)!;
+  const idx = q.year * 4 + (q.q - 1) + delta;
+  return `${Math.floor(idx / 4)}-Q${(idx % 4) + 1}`;
+}
+
 // ── Khoản định kỳ ──────────────────────────────────────────────────────────
 
 export const RECUR_INTERVALS = [1, 3, 6, 12] as const;

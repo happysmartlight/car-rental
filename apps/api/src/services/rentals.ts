@@ -20,6 +20,7 @@ import {
   type MonthPeriod,
   type MoneySummary,
   type PaymentPurpose,
+  type SettlementRecord,
 } from '../shared/money.js';
 import { quoteRental, vehicleChargingPolicy, type PriceLine, type Quote, type VehiclePricing } from '../shared/pricing.js';
 import { maintenanceWarnings } from './maintenance.js';
@@ -673,12 +674,21 @@ export interface SettleInput {
   fineHoldDays: number;
   returnCollaterals: boolean;
   note: string | null;
+  /** Khách chưa trả đủ: hẹn trả trước lúc này + ghi chú (bỏ qua nếu trả đủ). */
+  debtDueAt?: number | null;
+  debtNote?: string | null;
 }
 
+/** Quyết toán. Khách trả thiếu (collect < phần còn lại sau cấn trừ) → phần thiếu thành công nợ, Việc cần làm nhắc đến khi thu đủ. */
 export function settle(id: number, input: SettleInput, userId: number): Rental {
   const r = getRental(id);
   if (r.status !== 'returned') throw badRequest('Chỉ quyết toán lượt đã trả xe');
   return db.transaction(() => {
+    const before = rentalMoney(r.id);
+    const owedAfterOffset = Math.max(0, before.due - input.offset);
+    if (input.collect && input.collect.amount > owedAfterOffset) {
+      throw badRequest(`Khách trả ${fmtNumber(input.collect.amount)}đ nhiều hơn số còn phải trả (${fmtNumber(owedAfterOffset)}đ)`);
+    }
     const note = input.note ?? 'Quyết toán khi trả xe';
     if (input.offset > 0) addPayment(r.id, { direction: 'offset', purpose: 'deposit', method: 'offset', amount: input.offset, note: 'Cấn trừ cọc vào tiền thuê' }, userId);
     if (input.collect && input.collect.amount > 0) addPayment(r.id, { direction: 'in', purpose: 'rent', ...input.collect, note }, userId);
@@ -695,12 +705,28 @@ export function settle(id: number, input: SettleInput, userId: number): Rental {
         .run();
     }
     const holding = money.depositHeld > 0;
+    const debt = Math.max(0, money.due);
+    const settlement: SettlementRecord = {
+      at: now,
+      totalCharges: before.totalCharges,
+      rentPaid: before.rentPaid,
+      depositHeld: before.depositHeld,
+      offset: input.offset,
+      collect: input.collect?.amount ?? 0,
+      refundRent: input.refundRent?.amount ?? 0,
+      refundDeposit: input.refundDeposit?.amount ?? 0,
+      keepHold: Math.max(0, money.depositHeld),
+      debt,
+      debtDueAt: debt > 0 ? (input.debtDueAt ?? null) : null,
+      debtNote: debt > 0 ? (input.debtNote ?? null) : null,
+    };
     return db
       .update(schema.rentals)
       .set({
         status: holding ? 'settled' : 'closed',
         fineHoldAmount: holding ? money.depositHeld : 0,
         fineHoldUntil: holding ? (r.actualEnd ?? now) + input.fineHoldDays * DAY_MS : null,
+        settlement,
         updatedAt: now,
       })
       .where(eq(schema.rentals.id, r.id))

@@ -51,7 +51,7 @@ import {
   TEMPLATE_KIND_LABEL,
   type TemplateKind,
 } from '@shared/constants';
-import { channelMoney, rentalFineHold } from '@shared/money';
+import { channelMoney, rentalFineHold, rentalOwed } from '@shared/money';
 import { fmtNumber, fmtVnd } from '@shared/text';
 import { DAY_MS, fmtDate, fmtDateRange, fmtDateTime, fmtDuration } from '@shared/time';
 import type { MonthPeriod } from '@shared/money';
@@ -221,6 +221,11 @@ export default function RentalDetail() {
   const returnHo = [...d.handovers].reverse().find((h) => h.kind === 'return');
   const userName = (uid: number | null) => d.users.find((u) => u.id === uid)?.displayName ?? '—';
   const agreedHold = settings ? rentalFineHold(r, settings.rules) : null;
+  // Còn phải trả = tổng − đã trả − cọc giữ xe (cọc gửi trước lúc giao xe); cọc phạt nguội không trừ.
+  const owed = rentalOwed(d);
+  // Quyết toán xong mà khách chưa trả đủ → công nợ (kèm ngày hẹn trả nếu có).
+  const debtAfterSettle = r.settlement && ['settled', 'closed'].includes(r.status) ? Math.max(0, m.due) : 0;
+  const debtLate = debtAfterSettle > 0 && !!r.settlement?.debtDueAt && r.settlement.debtDueAt < now;
   // Phụ kiện đã chỉnh riêng cho lượt (chỉ hiện trước khi giao xe — sau đó xem biên bản giao xe).
   const accNotIncluded = r.status === 'booked' ? (r.accessories ?? []).filter((a) => !a.present).map((a) => a.name) : [];
   const accExtra = r.status === 'booked' ? (r.accessories ?? []).filter((a) => a.id == null && a.present).map((a) => a.name) : [];
@@ -469,9 +474,15 @@ export default function RentalDetail() {
                   <span className="text-muted">Đã trả</span>
                   <span className="tabular">{fmtVnd(m.rentPaid)}</span>
                 </div>
-                <div className={cn('flex justify-between text-sm font-semibold', m.due > 0 ? 'text-red-700' : m.due < 0 ? 'text-emerald-700' : '')}>
-                  <span>{m.due >= 0 ? 'Còn phải trả' : 'Thu thừa'}</span>
-                  <span className="tabular">{fmtVnd(Math.abs(m.due))}</span>
+                {owed.credit > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted">Trừ cọc giữ xe</span>
+                    <span className="tabular">−{fmtVnd(owed.credit)}</span>
+                  </div>
+                )}
+                <div className={cn('flex justify-between text-sm font-semibold', owed.net > 0 ? 'text-red-700' : owed.net < 0 ? 'text-emerald-700' : '')}>
+                  <span>{owed.net >= 0 ? 'Còn phải trả' : 'Thu thừa'}</span>
+                  <span className="tabular">{fmtVnd(Math.abs(owed.net))}</span>
                 </div>
                 <div className="mt-1 flex justify-between border-t border-border pt-1 text-sm">
                   <span className="text-muted">Cọc đang giữ</span>
@@ -488,6 +499,13 @@ export default function RentalDetail() {
                   </div>
                 )}
               </div>
+              {debtAfterSettle > 0 && (
+                <Notice tone={debtLate ? 'red' : 'amber'} className="mt-3">
+                  Ghi nợ lúc quyết toán {fmtDate(r.settlement!.at)}
+                  {r.settlement?.debtDueAt ? ` · ${debtLate ? 'quá hẹn trả' : 'hẹn trả trước'} ${fmtDate(r.settlement.debtDueAt)}` : ''}
+                  {r.settlement?.debtNote ? ` · ${r.settlement.debtNote}` : ''}
+                </Notice>
+              )}
               {viaApp && (
                 <div className="mt-3 space-y-1 rounded-2xl border border-border p-3 text-sm">
                   <div className="flex justify-between gap-3">
@@ -529,9 +547,9 @@ export default function RentalDetail() {
                 </div>
               )}
               <div className="mt-3 grid grid-cols-2 gap-2">
-                {(m.due > 0 || (nextMonth && canCollect)) && (
+                {(owed.net > 0 || (nextMonth && canCollect)) && (
                   <Button size="sm" variant="secondary" onClick={() => openPay('rent_in')}>
-                    {nextMonth && canCollect ? `Thu tiền tháng ${nextMonth.n}` : 'Thu tiền thuê'}
+                    {nextMonth && canCollect ? `Thu tiền tháng ${nextMonth.n}` : debtAfterSettle > 0 ? 'Thu nợ' : 'Thu tiền thuê'}
                   </Button>
                 )}
                 {r.depositRequired > m.depositHeld && ['booked', 'active'].includes(r.status) && (
@@ -791,8 +809,8 @@ export default function RentalDetail() {
       <CollateralDialog d={d} open={dialog === 'collateral'} onOpenChange={(o) => setDialog(o ? 'collateral' : null)} />
       <DriverDialog d={d} open={dialog === 'driver'} onOpenChange={(o) => setDialog(o ? 'driver' : null)} />
       <ScanDialog d={d} documentId={scanDoc} open={dialog === 'scan'} onOpenChange={(o) => setDialog(o ? 'scan' : null)} />
-      <Dialog open={dialog === 'qr'} onOpenChange={(o) => setDialog(o ? 'qr' : null)} title="Chuyển khoản" description={m.due > 0 ? 'Số tiền còn phải trả' : 'Tiền cọc'} size="sm">
-        <VietQr amount={m.due > 0 ? m.due : Math.max(0, r.depositRequired - m.depositHeld)} note={r.code} />
+      <Dialog open={dialog === 'qr'} onOpenChange={(o) => setDialog(o ? 'qr' : null)} title="Chuyển khoản" description={owed.net > 0 ? 'Số tiền còn phải trả' : 'Tiền cọc'} size="sm">
+        <VietQr amount={owed.net > 0 ? owed.net : Math.max(0, r.depositRequired - m.depositHeld)} note={r.code} />
       </Dialog>
       <Dialog open={dialog === 'audit'} onOpenChange={(o) => setDialog(o ? 'audit' : null)} title="Nhật ký thay đổi" size="lg">
         <ul className="space-y-2 text-sm">

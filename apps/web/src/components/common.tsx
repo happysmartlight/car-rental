@@ -1,12 +1,13 @@
 import { Download, Eraser } from 'lucide-react';
 import QRCode from 'qrcode';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { BLOCK_KIND_LABEL, FINE_STATUS, RENTAL_STATUS, type BlockKind, type FineStatus, type RentalStatus } from '@shared/constants';
 import { fmtVnd } from '@shared/text';
 import { buildVietQrPayload } from '@shared/vietqr';
 import { useSettings } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
+import { Input } from './ui/form';
 import { Badge, Notice } from './ui/misc';
 
 export function RentalStatusBadge({ status, overdue }: { status: RentalStatus; overdue?: boolean }) {
@@ -166,6 +167,54 @@ export function FuelGauge({ value, onChange, readOnly }: { value: number; onChan
         ))}
       </div>
       <span className="tabular w-12 text-right text-sm font-semibold">{value}%</span>
+    </div>
+  );
+}
+
+const levelColor = (pct: number) => (pct <= 25 ? 'var(--color-red-500)' : pct <= 50 ? 'var(--color-amber-500)' : 'var(--color-emerald-500)');
+
+/** Mức pin xe điện: kéo thanh trượt hoặc gõ đúng số % trên màn hình xe (vạch như xăng thì không đủ chính xác để tính tiền điện). */
+export function BatteryInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => {
+    if (text !== '' && Number(text) !== value) setText(String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        aria-label="Mức pin (%)"
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          setText(String(n));
+          onChange(n);
+        }}
+        className="range-level min-w-0 flex-1"
+        style={{ '--pct': `${value}%`, '--level': levelColor(value) } as CSSProperties}
+      />
+      <div className="relative w-20 shrink-0">
+        <Input
+          inputMode="numeric"
+          aria-label="Nhập % pin"
+          className="tabular pr-7 text-right font-semibold"
+          value={text}
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => {
+            const digits = e.target.value.replace(/\D/g, '').slice(0, 3);
+            if (!digits) return setText('');
+            const n = Math.min(100, Number.parseInt(digits, 10));
+            setText(String(n));
+            onChange(n);
+          }}
+          onBlur={() => text === '' && setText(String(value))}
+        />
+        <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-subtle">%</span>
+      </div>
     </div>
   );
 }

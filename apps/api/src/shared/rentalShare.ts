@@ -3,7 +3,7 @@
 // Phiếu báo phạt nguội (fineShare.ts) và báo giá nhanh (quoteShare.ts) dùng chung khuôn này.
 
 import type { ChargeKind, FuelType, RentalStatus } from './constants.js';
-import type { MoneySummary } from './money.js';
+import { rentalDue, type MoneySummary } from './money.js';
 import { chargeDays, rentalChargingPolicy, tripChargingText, type VehiclePricing } from './pricing.js';
 import { fmtNumber } from './text.js';
 import { fmtDate, fmtDateTime, fmtDuration } from './time.js';
@@ -43,6 +43,8 @@ export interface RentalShareInput {
     returnLocation: string | null;
     depositRequired: number;
     fineHoldUntil: number | null;
+    /** Số liệu chốt lúc quyết toán (hẹn trả nợ nếu khách chưa trả đủ). */
+    settlement?: { debtDueAt: number | null } | null;
     /** Bảng giá đã chốt (JSON). */
     pricing: string;
   };
@@ -57,6 +59,8 @@ export interface RentalShareInput {
   /** Phiếu đặt xe: chính sách hủy, mức giữ cọc chờ phạt nguội, giấy tờ cần mang. */
   cancelPolicy?: string | null;
   fineHold?: { amount: number; days: number } | null;
+  /** Cọc giữ xe (gửi trước lúc giao xe) — trừ vào tiền thuê. Bỏ trống = tính cả cọc đang giữ. */
+  advanceDeposit?: number;
   requirements?: string[];
   graceMinutes: number;
   shopName: string;
@@ -127,6 +131,11 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
   const pricing = JSON.parse(r.pricing) as VehiclePricing;
   const base = { code: r.code, plate: v.plate, lead: [`Chào anh/chị ${i.customerName},`] };
   const thanks = 'Cảm ơn anh/chị đã tin tưởng, rất mong được phục vụ anh/chị lần sau!';
+  // Còn phải trả = tổng − đã thanh toán − cọc giữ xe (cọc gửi trước lúc giao xe); cọc phạt nguội (thu từ lúc giao xe) không trừ.
+  const { credit, net } = rentalDue(r.status, m, i.advanceDeposit ?? m.depositHeld);
+  const creditRows = credit > 0 ? [row('Trừ tiền cọc giữ xe', vnd(-credit))] : [];
+  const fineDeposit = Math.max(0, m.depositHeld - (i.advanceDeposit ?? m.depositHeld));
+  const holdNote = fineDeposit > 0 ? `Tiền cọc ${vnd(fineDeposit)} nhận lúc giao xe là cọc phạt nguội, không trừ vào tiền thuê — cửa hàng hoàn lại theo hợp đồng.` : null;
 
   if (i.stage === 'book') {
     const delivery = r.pickupMethod ? r.pickupMethod === 'delivery' : !!r.pickupLocation;
@@ -144,7 +153,6 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
     trip.push(row('Giới hạn quãng đường', r.kmLimit ? `${fmtNumber(r.kmLimit)} km` : 'Không giới hạn'));
     const pay: ShareRow[] = [];
     if (m.rentPaid > 0) pay.push(row('Đã thanh toán', vnd(m.rentPaid)));
-    pay.push(m.due > 0 ? row('Tiền thuê còn lại', vnd(m.due), { strong: true }) : row('Tiền thuê', 'Đã thanh toán đủ', { tone: 'green' }));
     if (r.depositRequired > 0) {
       pay.push(
         depositShort > 0
@@ -152,11 +160,12 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
           : row('Tiền cọc', `Đã nhận ${vnd(m.depositHeld)}`, { tone: 'green' }),
       );
     } else {
-      pay.push(row('Tiền cọc', 'Không cần đặt cọc'));
+      pay.push(row('Tiền cọc', m.depositHeld > 0 ? `Đã nhận ${vnd(m.depositHeld)}` : 'Không cần đặt cọc'));
     }
+    pay.push(...creditRows, net > 0 ? row('Tiền thuê còn lại', vnd(net), { strong: true }) : row('Tiền thuê', 'Đã thanh toán đủ', { tone: 'green' }));
     const notes: string[] = [];
     if (i.requirements?.length) notes.push(`Khi nhận xe, anh/chị mang theo: ${i.requirements.join('; ')}.`);
-    if (m.due > 0) notes.push(`Tiền thuê còn lại ${vnd(m.due)} thanh toán khi nhận xe.`);
+    if (net > 0) notes.push(`Tiền thuê còn lại ${vnd(net)} thanh toán khi nhận xe.`);
     if (i.fineHold && i.fineHold.amount > 0 && i.fineHold.days > 0) {
       notes.push(`Sau khi trả xe, cửa hàng giữ lại ${vnd(i.fineHold.amount)} tiền cọc trong ${i.fineHold.days} ngày để đối soát phạt nguội, sau đó hoàn lại.`);
     }
@@ -171,7 +180,7 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
       blocks: [{ heading: 'Thông tin đặt xe', icon: '📅', rows: trip }, chargesBlock(i), { heading: 'Thanh toán', icon: '💰', rows: pay }],
       notes,
       photos: [],
-      pay: depositShort > 0 ? { label: 'Tiền cọc giữ chỗ', amount: depositShort, note: r.code } : m.due > 0 ? { label: 'Tiền thuê còn lại', amount: m.due, note: r.code } : null,
+      pay: depositShort > 0 ? { label: 'Tiền cọc giữ chỗ', amount: depositShort, note: r.code } : net > 0 ? { label: 'Tiền thuê còn lại', amount: net, note: r.code } : null,
     };
   }
 
@@ -193,6 +202,7 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
     if (r.kmLimit && pricing.overKmFee) notes.push(`Đi quá ${fmtNumber(r.kmLimit)} km tính ${vnd(pricing.overKmFee)}/km.`);
     const charging = rentalChargingPolicy(pricing, v);
     if (charging) notes.push(`Sạc pin: ${tripChargingText(charging, chargeDays(r.scheduledStart, r.scheduledEnd, i.graceMinutes))}.`);
+    if (holdNote) notes.push(holdNote);
     notes.push('Cần gia hạn hoặc gặp sự cố trên đường, anh/chị vui lòng báo ngay cho cửa hàng.');
     return {
       ...base,
@@ -213,14 +223,15 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
           icon: '💰',
           rows: [
             row('Đã thanh toán', vnd(m.rentPaid)),
-            m.due > 0 ? row('Còn phải trả', vnd(m.due), { strong: true, tone: 'red' }) : row('Còn phải trả', 'Đã thanh toán đủ', { tone: 'green' }),
             row('Tiền cọc đã nhận', depositShort > 0 ? `${vnd(m.depositHeld)} / ${vnd(r.depositRequired)}` : vnd(m.depositHeld)),
+            ...creditRows,
+            net > 0 ? row('Còn phải trả', vnd(net), { strong: true, tone: 'red' }) : row('Còn phải trả', 'Đã thanh toán đủ', { tone: 'green' }),
           ],
         },
       ],
       notes,
       photos: p?.photos.map((x) => x.fileId) ?? [],
-      pay: m.due > 0 ? { label: 'Còn phải trả', amount: m.due, note: r.code } : depositShort > 0 ? { label: 'Tiền cọc còn thiếu', amount: depositShort, note: r.code } : null,
+      pay: net > 0 ? { label: 'Còn phải trả', amount: net, note: r.code } : depositShort > 0 ? { label: 'Tiền cọc còn thiếu', amount: depositShort, note: r.code } : null,
     };
   }
 
@@ -254,7 +265,8 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
             row('Tổng tiền trước khi gia hạn', vnd(x.oldTotal)),
             row(diff >= 0 ? 'Tăng thêm' : 'Giảm', vnd(Math.abs(diff))),
             row('Đã thanh toán', vnd(m.rentPaid)),
-            m.due > 0 ? row('Còn phải trả', vnd(m.due), { strong: true, tone: 'red' }) : row('Còn phải trả', 'Đã thanh toán đủ', { tone: 'green' }),
+            ...creditRows,
+            net > 0 ? row('Còn phải trả', vnd(net), { strong: true, tone: 'red' }) : row('Còn phải trả', 'Đã thanh toán đủ', { tone: 'green' }),
           ],
         },
       ],
@@ -263,7 +275,7 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
         'Các điều khoản khác của hợp đồng giữ nguyên.',
       ],
       photos: [],
-      pay: m.due > 0 ? { label: 'Còn phải trả', amount: m.due, note: r.code } : null,
+      pay: net > 0 ? { label: 'Còn phải trả', amount: net, note: r.code } : null,
     };
   }
 
@@ -281,11 +293,11 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
     if (missing.length) trip.push(row('Phụ kiện thiếu', missing.map((a) => (a.note ? `${a.name} (${a.note})` : a.name)).join(', '), { tone: 'red' }));
     const damages = ret?.damages.filter((d) => d.isNew) ?? [];
     if (damages.length) trip.push(row('Hư hỏng mới', damages.map((d) => (d.note ? `${d.zone}: ${d.note}` : d.zone)).join('; '), { tone: 'red' }));
-    const fromDeposit = Math.min(Math.max(0, m.due), Math.max(0, m.depositHeld));
-    const extra = Math.max(0, m.due) - fromDeposit;
+    const extra = Math.max(0, net);
     const notes: string[] = [];
-    if (fromDeposit > 0) notes.push(`Khoản ${vnd(fromDeposit)} còn phải trả sẽ được trừ vào tiền cọc khi quyết toán${extra > 0 ? `; anh/chị vui lòng thanh toán thêm ${vnd(extra)}` : ''}.`);
+    if (credit > 0) notes.push(`Khoản ${vnd(credit)} được trừ vào tiền cọc giữ xe khi quyết toán${extra > 0 ? `; anh/chị vui lòng thanh toán thêm ${vnd(extra)}` : ''}.`);
     else if (extra > 0) notes.push(`Anh/chị vui lòng thanh toán ${vnd(extra)} còn lại.`);
+    if (holdNote) notes.push(holdNote);
     notes.push('Cửa hàng sẽ gửi quyết toán và hoàn cọc theo hợp đồng.');
     return {
       ...base,
@@ -301,8 +313,9 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
           icon: '💰',
           rows: [
             row('Đã thanh toán', vnd(m.rentPaid)),
-            m.due >= 0 ? row('Còn phải trả', vnd(m.due), { strong: true, tone: m.due > 0 ? 'red' : undefined }) : row('Thu thừa (sẽ hoàn lại)', vnd(-m.due), { strong: true, tone: 'green' }),
             row('Tiền cọc đang giữ', vnd(m.depositHeld)),
+            ...creditRows,
+            net >= 0 ? row('Còn phải trả', vnd(net), { strong: true, tone: net > 0 ? 'red' : undefined }) : row('Thu thừa (sẽ hoàn lại)', vnd(-net), { strong: true, tone: 'green' }),
           ],
         },
       ],
@@ -328,7 +341,7 @@ export function buildRentalShare(i: RentalShareInput): RentalShareDoc {
       `Cửa hàng giữ lại ${vnd(m.depositHeld)} tiền cọc để đối soát phạt nguội (camera giao thông)${r.fineHoldUntil ? ` đến ${fmtDate(r.fineHoldUntil)}` : ''}. Không có vi phạm, cửa hàng sẽ hoàn lại đủ cho anh/chị.`,
     );
   }
-  if (m.due > 0) notes.push(`Anh/chị vui lòng thanh toán ${vnd(m.due)} còn lại.`);
+  if (m.due > 0) notes.push(`Anh/chị vui lòng thanh toán ${vnd(m.due)} còn lại${r.settlement?.debtDueAt ? ` trước ngày ${fmtDate(r.settlement.debtDueAt)}` : ''}.`);
   if (r.status === 'closed' && m.due === 0 && m.depositHeld <= 0) notes.push('Mọi khoản đã hoàn tất.');
   notes.push(thanks);
   return {
