@@ -96,8 +96,7 @@ export function rentalFineHold(
 }
 
 /**
- * Cọc giữ xe: tiền cọc ghi nhận TRƯỚC lúc bấm giao xe (chưa giao thì tính hết) — được trừ vào tiền thuê.
- * Cọc thu từ lúc giao xe trở đi (trong form giao xe, hay ghi sau đó) là cọc phạt nguội: không trừ, giữ đối soát rồi hoàn.
+ * Cọc gửi trước: tiền cọc ghi nhận TRƯỚC lúc bấm giao xe (chưa giao thì tính hết, `pickupRecordedAt` null = mọi khoản cọc).
  * So theo lúc ghi sổ (`createdAt`) chứ không theo giờ giao xe người dùng chọn, để chọn giờ lùi/tới không làm lệch.
  */
 export function advanceDeposit(payments: (MoneyPayment & { createdAt: number })[], pickupRecordedAt: number | null): number {
@@ -120,16 +119,32 @@ export function rentalDue(status: string, s: Pick<MoneySummary, 'due' | 'deposit
   return status === 'booked' || status === 'active' || status === 'returned' ? dueAfterDeposit(s, advance) : { credit: 0, net: s.due };
 }
 
+/**
+ * Cọc giữ xe — phần cọc được trừ vào tiền thuê:
+ *  - cọc gửi trước (`advance`) trừ hết;
+ *  - cọc thu từ lúc giao xe trở đi (`later`) là cọc phạt nguội tới mức giữ chờ phạt nguội của lượt, phần vượt cũng trừ.
+ * Lượt không giữ chờ phạt nguội (mức 0) thì cọc nào cũng trừ.
+ */
+export function creditableDeposit(advance: number, later: number, fineHold: number): number {
+  return advance + Math.max(0, later - Math.max(0, fineHold));
+}
+
 interface RentalLedger {
-  rental: { status: string };
+  rental: { status: string; depositRequired: number; fineHoldRequired: number | null };
   money: MoneySummary;
   payments: (MoneyPayment & { createdAt: number })[];
   handovers: { kind: string; createdAt: number }[];
 }
 
-/** Cọc giữ xe của một lượt, từ sổ tiền + lúc ghi biên bản giao xe. */
-export function rentalAdvanceDeposit(d: RentalLedger): number {
-  return advanceDeposit(d.payments, d.handovers.find((h) => h.kind === 'pickup')?.createdAt ?? null);
+/**
+ * Cọc giữ xe của một lượt, từ sổ tiền + lúc ghi biên bản giao xe.
+ * `pending`: cọc sắp thu trong form giao xe (hộp xem lại trước khi bấm xác nhận).
+ */
+export function rentalAdvanceDeposit(d: RentalLedger, pending = 0): number {
+  const advance = advanceDeposit(d.payments, d.handovers.find((h) => h.kind === 'pickup')?.createdAt ?? null);
+  const later = advanceDeposit(d.payments, null) - advance + pending;
+  // Lượt tạo trước khi có mức giữ riêng: coi cả cọc là cọc phạt nguội như cũ.
+  return creditableDeposit(advance, later, d.rental.fineHoldRequired ?? d.rental.depositRequired);
 }
 
 /** Còn phải trả của một lượt (trang chi tiết, phiếu gửi khách, gợi ý thu tiền). */

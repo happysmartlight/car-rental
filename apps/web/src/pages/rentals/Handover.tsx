@@ -225,7 +225,7 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
     if (isPickup) {
       setOdo(d.vehicle.odo);
       setChecklist(Object.fromEntries(settings.rules.checklist.map((c) => [c, true])));
-      // Tiền thuê cần thu đã trừ cọc giữ xe (cọc khách gửi trước); cọc thu lúc giao là cọc phạt nguội, không trừ.
+      // Tiền thuê cần thu đã trừ cọc giữ xe (cọc khách gửi trước); cọc thu lúc giao lấp mức giữ chờ phạt nguội trước.
       setCollect({ amount: Math.max(0, dueAfterDeposit(d.money, d.money.depositHeld).net) || null, method: 'transfer' });
       setCollectDeposit({ amount: Math.max(0, d.rental.depositRequired - d.money.depositHeld) || null, method: 'transfer' });
     } else {
@@ -305,8 +305,9 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
   const isEv = d.vehicle.fuel === 'electric';
   const missingPhotos = PHOTO_SLOTS.filter((s) => !photos[s.key]).length;
   const extraTotal = charges.reduce((s, c) => s + (c.amount ?? 0), 0);
-  // Còn phải trả = tổng − đã trả − cọc giữ xe (cọc gửi trước lúc giao xe); cọc phạt nguội thu lúc giao không trừ.
+  // Còn phải trả = tổng − đã trả − cọc giữ xe (cọc gửi trước lúc giao xe, và phần cọc thu lúc giao vượt mức giữ chờ phạt nguội).
   const advance = rentalAdvanceDeposit(d);
+  const pickupHold = r.fineHoldRequired ?? r.depositRequired;
   const owed = dueAfterDeposit(d.money, advance);
   const due = Math.max(0, owed.net);
   // Trả một phần thì làm tròn nghìn đồng; 100% giữ đúng số còn phải trả.
@@ -544,6 +545,11 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
                     <option value="transfer">Chuyển khoản</option>
                     <option value="cash">Tiền mặt</option>
                   </Select>
+                  <p className="mt-1.5 text-xs text-muted">
+                    {pickupHold > 0
+                      ? `Tới ${fmtVnd(pickupHold)} là cọc phạt nguội, không trừ vào tiền thuê; phần vượt được trừ.`
+                      : 'Lượt này không giữ cọc phạt nguội: cọc thu lúc này được trừ vào tiền thuê.'}
+                  </p>
                 </Field>
               </div>
               <p className="mt-2 text-xs text-muted">Để trống nếu chưa thu. Có thể ghi nhận sau ở trang lượt thuê. Tài sản thế chấp thêm ở trang lượt thuê.</p>
@@ -657,7 +663,7 @@ function HandoverForm({ kind, onReset }: { kind: 'pickup' | 'return'; onReset: (
               saving={saving}
               kind={kind}
               d={d}
-              advance={advance}
+              advance={isPickup ? rentalAdvanceDeposit(d, collectDeposit.amount ?? 0) : advance}
               fineHold={settings ? rentalFineHold(r, settings.rules).amount : null}
               v={{
                 at,

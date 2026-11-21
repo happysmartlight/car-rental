@@ -3,6 +3,11 @@
 Ghi theo phiên bản, mới nhất ở trên. Nội dung mục của từng phiên bản được dùng làm ghi chú
 hiển thị trong trang **Cài đặt → Phiên bản & cập nhật**.
 
+## [0.6.1] - 2026-11-21
+
+### Sửa lỗi
+- **Cọc thu lúc giao xe không được trừ vào số còn phải trả** dù lượt không giữ cọc phạt nguội. Giờ cọc thu lúc giao chỉ là cọc phạt nguội tới mức "Giữ lại chờ phạt nguội" của lượt, phần vượt được trừ.
+
 ## [0.6.0] - 2026-11-21
 
 ### Mới

@@ -19,7 +19,7 @@ import {
   vehicleChargingPolicy,
   type VehiclePricing,
 } from './pricing.js';
-import { advanceDeposit, cancelForfeit, cancelMessage, cancelPolicyText, defaultFineHold, dueAfterDeposit, monthPeriods, monthsNote, planCancellation, planSettlement, rentalFineHold, summarizeMoney } from './money.js';
+import { advanceDeposit, cancelForfeit, creditableDeposit, cancelMessage, cancelPolicyText, defaultFineHold, dueAfterDeposit, monthPeriods, monthsNote, planCancellation, planSettlement, rentalFineHold, summarizeMoney } from './money.js';
 import { mergeAccessoryPlan } from './accessories.js';
 import { CAR_MAKES, findCarMake, findCarModel } from './carModels.js';
 import { suggestBookingSlot } from './booking.js';
@@ -709,6 +709,11 @@ describe('phiếu gửi khách (giao xe / nhận xe / quyết toán)', () => {
     ];
     expect(advanceDeposit(pays, 200)).toBe(300000);
     expect(advanceDeposit(pays, null)).toBe(2300000);
+    // Cọc thu lúc giao xe chỉ là cọc phạt nguội tới mức giữ của lượt; phần vượt (hay lượt không giữ) được trừ.
+    expect(creditableDeposit(300000, 2000000, 2000000)).toBe(300000);
+    expect(creditableDeposit(0, 200000, 0)).toBe(200000);
+    expect(creditableDeposit(0, 5000000, 2000000)).toBe(3000000);
+    expect(creditableDeposit(300000, 1000000, 2000000)).toBe(300000);
   });
 
   it('nhận xe: trễ giờ, km đã đi, thiếu phụ kiện, hư hỏng mới, phần trừ vào cọc', () => {

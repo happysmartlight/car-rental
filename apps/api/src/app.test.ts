@@ -579,6 +579,18 @@ describe('khách hủy đặt xe', () => {
     expect((await call('POST', `/api/rentals/${id}/payments`, { direction: 'in', purpose: 'rent', method: 'transfer', amount: due - 700000 })).status).toBe(200);
     expect((await call('GET', '/api/dashboard')).json.alerts.some((x: any) => x.kind === 'customer_debt' && x.link === `/rentals/${id}`)).toBe(false);
   });
+
+  it('lượt không giữ chờ phạt nguội: cọc thu lúc giao xe vẫn trừ vào còn phải trả', async () => {
+    const start = Date.now() + 500 * H;
+    const b = await call('POST', '/api/rentals', { vehicleId: vid, customerId: cust, scheduledStart: start, scheduledEnd: start + 48 * H, depositRequired: 200000, fineHoldRequired: 0 });
+    expect(b.status, JSON.stringify(b.json)).toBe(200);
+    const id = b.json.id as number;
+    const p = await call('POST', `/api/rentals/${id}/pickup`, { at: Date.now(), odo: 1200, fuelLevel: 100, payments: [{ purpose: 'deposit', method: 'transfer', amount: 200000 }] });
+    expect(p.status, JSON.stringify(p.json)).toBe(200);
+    const d = await detail(id);
+    expect(rentalAdvanceDeposit(d)).toBe(200000);
+    expect(rentalOwed(d)).toEqual({ credit: 200000, net: d.money.due - 200000 });
+  });
 });
 
 describe('cọc chờ phạt nguội & phụ kiện theo từng lượt', () => {
